@@ -120,18 +120,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           set-safe-directory: true
-
-      # - name: Activate Python environment
-      #   run: |
-      #     if [[ "$PLATFORM" == "cuda" ]] && [ -f /opt/miniconda3/etc/profile.d/conda.sh ]; then
-      #       source /opt/miniconda3/etc/profile.d/conda.sh
-      #       conda activate flagscale-train
-      #     elif [ -f /opt/conda/etc/profile.d/conda.sh ]; then
-      #       source /opt/conda/etc/profile.d/conda.sh
-      #       conda activate base
-      #     fi
-      #     echo "PATH=$PATH" >> $GITHUB_ENV
-      #     echo "Python: $(which python3) ($(python3 --version 2>&1))"
+          fetch-depth: 0
       
       - name: Environment Setup on Cuda
         if: steps.should_run.outputs.should_run == 'true' && inputs.platform == 'cuda'
@@ -257,11 +246,12 @@ jobs:
           # Ensure log directory exists regardless of volume mount state
           mkdir -p /logs
 
-          # Enable coverage collection for all pytest invocations in test.sh
-          # PYTEST_ADDOPTS is automatically appended to every pytest call
-          if [ "${{ inputs.upload_coverage }}" = "true" ]; then
-            pip3 install pytest-cov 2>/dev/null || true
+          # Coverage setup: install once + configure collection via PYTEST_ADDOPTS
+          COVERAGE_ENABLED=false
+          if [ "${{ inputs.upload_coverage }}" = "true" ] && [ "${{ matrix.test_group.test_type }}" = "unittest" ]; then
+            pip3 install coverage pytest-cov --quiet 2>/dev/null || true
             export PYTEST_ADDOPTS="--cov=transformer_engine --cov-append --cov-report="
+            COVERAGE_ENABLED=true
           fi
 
           if [[ "${{ matrix.test_group.name }}" == *"lint"* ]]; then
@@ -274,24 +264,19 @@ jobs:
           fi
 
           bash ${{ matrix.test_group.path }}
+          exit_code=$?
+
+          # Combine coverage fragments and generate JSON report
+          if [ "$COVERAGE_ENABLED" = "true" ]; then
+            python3 -m coverage combine --keep 2>/dev/null || true
+            python3 -m coverage json \
+              -o "coverage-${{ inputs.platform }}-${{ inputs.device }}.json" \
+              --include="transformer_engine/*" 2>/dev/null \
+              || echo "WARNING: No coverage data found"
+          fi
+
+          exit $exit_code
         timeout-minutes: 60
-
-      - name: Generate Coverage Report
-        if: inputs.upload_coverage && matrix.test_group.test_type == 'unittest'
-        working-directory: ${{ github.workspace }}
-        env:
-          PLATFORM: ${{ inputs.platform }}
-          DEVICE: ${{ inputs.device }}
-        run: |
-          # Install coverage (may already be present)
-          pip3 install coverage pytest-cov 2>/dev/null || true
-
-          # Merge all .coverage* files produced by sub-processes (torchrun spawns workers)
-          python3 -m coverage combine --keep 2>/dev/null || true
-          # Generate JSON coverage report (requires .coverage data from pytest --cov)
-          python3 -m coverage json -o "coverage-${PLATFORM}-${DEVICE}.json" \
-            --include="transformer_engine/*" 2>/dev/null || echo "WARNING: No coverage data found, skipping coverage-${PLATFORM}-${DEVICE}.json"
-        continue-on-error: true
 
       - name: Upload Coverage Report
         if: inputs.upload_coverage && matrix.test_group.test_type == 'unittest'
