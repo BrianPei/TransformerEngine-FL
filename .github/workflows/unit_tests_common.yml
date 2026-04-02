@@ -263,7 +263,7 @@ jobs:
           if [ "$COVERAGE_ENABLED" = "true" ]; then
             python3 -m coverage combine --keep 2>/dev/null || true
             python3 -m coverage json \
-              -o "coverage-${{ inputs.platform }}-${{ inputs.device }}.json" \
+              -o "coverage-${{ inputs.platform }}-${{ inputs.device }}-${{ matrix.test_group.name }}.json" \
               --include="transformer_engine/*" 2>/dev/null \
               || echo "WARNING: No coverage data found"
           fi
@@ -276,31 +276,20 @@ jobs:
         uses: actions/upload-artifact@v4
         continue-on-error: true
         with:
-          name: coverage-${{ inputs.platform }}-${{ inputs.device }}
+          name: coverage-${{ inputs.platform }}-${{ inputs.device }}-${{ matrix.test_group.name }}
           path: |
-            coverage-${{ inputs.platform }}-${{ inputs.device }}.json
-
-      - name: Check FlagCICD Reachability
-        if: inputs.upload_coverage && matrix.test_group.test_type == 'unittest'
-        id: check_flagcicd
-        continue-on-error: true
-        run: |
-          if curl -sf --max-time 3 --connect-timeout 2 \
-               "http://flagcicd-inner.flagos.net:8000/" -o /dev/null 2>/dev/null; then
-            echo "reachable=true" >> $GITHUB_OUTPUT
-          else
-            echo "reachable=false" >> $GITHUB_OUTPUT
-            echo "INFO: flagcicd-inner.flagos.net unreachable from this runner, skipping report upload"
-          fi
+            coverage-${{ inputs.platform }}-${{ inputs.device }}-${{ matrix.test_group.name }}.json
 
       - name: Upload Coverage Report to FlagCICD
-        if: inputs.upload_coverage && matrix.test_group.test_type == 'unittest' && steps.check_flagcicd.outputs.reachable == 'true'
+        if: inputs.upload_coverage && matrix.test_group.test_type == 'unittest'
         uses: flagos-ai/FlagOps/actions/post-pytest-report@v2
         continue-on-error: true
+        env:
+          NO_PROXY: "flagcicd-inner.flagos.net"
         with:
           backend_url: 'http://flagcicd-inner.flagos.net:8000/metrics/'
           user_id: '000000000000000000'
-          report_path: 'coverage-${{ inputs.platform }}-${{ inputs.device }}.json'
+          report_path: 'coverage-${{ inputs.platform }}-${{ inputs.device }}-${{ matrix.test_group.name }}.json'
           fail_on_error: 'false'
 
       # - name: Debug - keep container alive on failure
