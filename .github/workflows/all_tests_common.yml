@@ -7,6 +7,10 @@ on:
         required: true
         type: string
         description: Platform name (e.g., cuda, default)
+      setup_commands:
+        required: false
+        type: string
+        default: ''
 
 jobs:
   checkout_and_config:
@@ -94,6 +98,7 @@ jobs:
       runs_on: ${{ needs.checkout_and_config.outputs.runs_on }}
       container_volumes: ${{ needs.checkout_and_config.outputs.container_volumes }}
       container_options: ${{ needs.checkout_and_config.outputs.container_options }}
+      setup_commands: ${{ inputs.setup_commands }}
       ignored_tests: ${{ needs.checkout_and_config.outputs.ignored_tests }}
       build_env: ${{ needs.checkout_and_config.outputs.build_env }}
 

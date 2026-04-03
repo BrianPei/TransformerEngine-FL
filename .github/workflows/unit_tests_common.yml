@@ -26,6 +26,11 @@ on:
         required: false
         type: string
         default: ''
+      # New input for hardware-specific initialization (e.g., conda activate)
+      setup_commands:
+        required: false
+        type: string
+        default: ''
       # Platform-specific build environment variables (JSON object from config)
       build_env:
         required: false
