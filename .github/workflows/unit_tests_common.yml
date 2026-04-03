@@ -138,6 +138,7 @@ jobs:
           echo "===== Step 2: Build & Install TransformerEngine ====="
           cd $GITHUB_WORKSPACE
           pip install nvdlfw-inspect --no-deps
+          pip install expecttest --quiet
           pip install --no-build-isolation . -v --no-deps
 
           echo "===== Step 3: Verify Installation ====="
@@ -175,6 +176,7 @@ jobs:
           # Prevent conflicts with preinstalled or incompatible versions
           python3 -m pip uninstall transformer_engine -y || true
           python3 -m pip install nvdlfw-inspect --no-deps || true
+          python3 -m pip install expecttest --quiet || true
 
           # echo "===== Step 5: Install Metax Binary Backend ====="
           # # Install prebuilt Metax backend (required for MACA operators)
