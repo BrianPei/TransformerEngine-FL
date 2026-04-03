@@ -13,6 +13,10 @@ runner_labels:
   - X64
   - metax
   - dev
+  # - self-hosted
+  # - Linux
+  # - X64
+  # - mx-4g-cicd-test
 
 container_volumes:
   - /nfs/metax_fs:/nfs/metax_fs
