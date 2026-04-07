@@ -5,17 +5,17 @@
 hardware_name: metax
 display_name: 'Metax Tests'
 
-# ci_image: localhost:5000/megatron-lm-with-te:v1
-ci_image: harbor.baai.ac.cn/flagscale/megatron-lm-with-te:202603231839
+ci_image: localhost:5000/megatron-lm-with-te:v1
+# ci_image: harbor.baai.ac.cn/flagscale/megatron-lm-with-te:202603231839
 
-# runner_labels:
-#   - self-hosted
-#   - Linux
-#   - X64
-#   - metax
-#   - dev
 runner_labels:
-  - mx-4g-cicd-te
+  - self-hosted
+  - Linux
+  - X64
+  - metax
+  - dev
+# runner_labels:
+#   - mx-4g-cicd-te
 
 container_volumes:
   - /nfs/metax_fs:/nfs/metax_fs
