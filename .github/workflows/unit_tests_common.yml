@@ -122,6 +122,7 @@ jobs:
         continue-on-error: true
         with:
           fetch-depth: 0
+          submodules: recursive
           set-safe-directory: true
 
       - name: Checkout Source Code (attempt 2)
@@ -131,6 +132,7 @@ jobs:
         continue-on-error: true
         with:
           fetch-depth: 0
+          submodules: recursive
           set-safe-directory: true
 
       - name: Checkout Source Code (attempt 3)
@@ -140,6 +142,7 @@ jobs:
         continue-on-error: true
         with:
           fetch-depth: 0
+          submodules: recursive
           set-safe-directory: true
       
       - name: Environment Setup on Cuda
@@ -158,6 +161,8 @@ jobs:
 
           echo "===== Step 2: Build & Install TransformerEngine ====="
           cd $GITHUB_WORKSPACE
+          # git submodule update --init --recursive
+
           pip install nvdlfw-inspect --no-deps
           pip install expecttest --quiet
           pip install --no-build-isolation . -v --no-deps
