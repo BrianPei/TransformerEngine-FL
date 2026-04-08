@@ -275,9 +275,12 @@ jobs:
           # Coverage setup: install once + configure collection via PYTEST_ADDOPTS
           COVERAGE_ENABLED=false
           if [ "${{ inputs.upload_coverage }}" = "true" ] && [ "${{ matrix.test_group.test_type }}" = "unittest" ]; then
-            pip3 install coverage pytest-cov --quiet 2>/dev/null || true
-            export PYTEST_ADDOPTS="--cov=transformer_engine --cov-append --cov-report="
-            COVERAGE_ENABLED=true
+            if pip3 install coverage pytest-cov --quiet 2>/dev/null; then
+              export PYTEST_ADDOPTS="--cov=transformer_engine --cov-append --cov-report="
+              COVERAGE_ENABLED=true
+            else
+              echo "WARNING: Failed to install coverage/pytest-cov, coverage collection disabled"
+            fi
           fi
 
           if [[ "${{ matrix.test_group.name }}" == *"lint"* ]]; then
