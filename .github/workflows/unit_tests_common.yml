@@ -115,6 +115,10 @@ jobs:
           # For debugging, you can force this to true
           echo "should_run=true" >> $GITHUB_OUTPUT
 
+      - name: Configure Git Safe Directory
+        if: steps.should_run.outputs.should_run == 'true'
+        run: git config --global safe.directory '*'
+
       - name: Checkout Source Code (attempt 1)
         id: checkout1
         if: steps.should_run.outputs.should_run == 'true'
@@ -139,7 +143,6 @@ jobs:
         id: checkout3
         if: steps.should_run.outputs.should_run == 'true' && steps.checkout2.outcome == 'failure'
         uses: actions/checkout@v4
-        continue-on-error: true
         with:
           fetch-depth: 0
           submodules: recursive
