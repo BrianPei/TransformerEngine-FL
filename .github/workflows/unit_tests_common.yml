@@ -117,7 +117,7 @@ jobs:
 
       - name: Configure Git Safe Directory
         if: steps.should_run.outputs.should_run == 'true'
-        run: git config --global safe.directory '*'
+        run: /usr/bin/git config --global safe.directory '*'
 
       - name: Checkout Source Code (attempt 1)
         id: checkout1
