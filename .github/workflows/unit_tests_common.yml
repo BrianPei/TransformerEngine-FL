@@ -166,9 +166,9 @@ jobs:
           cd $GITHUB_WORKSPACE
           # git submodule update --init --recursive
 
-          pip install nvdlfw-inspect --no-deps
+          pip install nvdlfw-inspect --quiet
           pip install expecttest --quiet
-          pip install --no-build-isolation . -v --no-deps
+          pip install . -v --no-deps --no-build-isolation
 
           echo "===== Step 3: Verify Installation ====="
           python3 tests/pytorch/test_sanity_import.py
@@ -204,8 +204,8 @@ jobs:
           echo "===== Step 4: Remove Existing TransformerEngine ====="
           # Prevent conflicts with preinstalled or incompatible versions
           python3 -m pip uninstall transformer_engine -y || true
-          python3 -m pip install nvdlfw-inspect --no-deps || true
-          python3 -m pip install expecttest --quiet || true
+          python3 -m pip install nvdlfw-inspect --quiet
+          python3 -m pip install expecttest --quiet
 
           # echo "===== Step 5: Install Metax Binary Backend ====="
           # # Install prebuilt Metax backend (required for MACA operators)
