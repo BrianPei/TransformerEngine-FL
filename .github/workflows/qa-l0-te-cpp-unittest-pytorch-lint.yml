@@ -72,7 +72,7 @@ jobs:
 
           # Install Python dependencies with version pinning
           echo "=== Installing Python Dependencies ==="
-          pip install transformers expecttest
+          pip install transformers expecttest nvdlfw-inspect --quiet
 
           # Build and install transformer_engine with verbose output
           echo "=== Building & Installing Transformer Engine ==="

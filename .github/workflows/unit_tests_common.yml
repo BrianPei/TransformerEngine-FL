@@ -164,9 +164,8 @@ jobs:
 
           echo "===== Step 2: Build & Install TransformerEngine ====="
           cd $GITHUB_WORKSPACE
-          
-          pip uninstall -y nvdlfw-inspect
-          pip install git+https://github.com/NVIDIA/nvidia-dlfw-inspect.git
+
+          pip install nvdlfw-inspect --quiet
           pip install expecttest --quiet
           pip install . -v --no-deps --no-build-isolation
 
