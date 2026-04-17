@@ -2,20 +2,11 @@ name: QA L0 - Core Unit & Lint Tests
 
 on:
   push:
-    branches: main
-    paths:
-      - '.github/workflows/qa-l0-te-cpp-unittest-pytorch-lint.yml'
-      - 'qa/L0_pytorch_lint/**'
-      - 'transformer_engine/**'
-      - 'tests/pytorch/**'
+    branches:
+      - __disabled_do_not_remove__
   pull_request:
-    branches: main
-    paths:
-      - '.github/workflows/qa-l0-te-cpp-unittest-pytorch-lint.yml'
-      - 'qa/L0_pytorch_lint/**'
-      - 'transformer_engine/**'
-      - 'tests/pytorch/**'
-
+    branches:
+      - __disabled_do_not_remove__
   workflow_dispatch:
 
 concurrency:

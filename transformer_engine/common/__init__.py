@@ -368,6 +368,38 @@ def _load_nvrtc():
 
 
 @functools.lru_cache(maxsize=None)
+def _load_cudart():
+    """Load CUDA runtime shared library."""
+    # Attempt to locate CUDA runtime in CUDA_HOME, CUDA_PATH or /usr/local/cuda
+    cuda_home = os.environ.get("CUDA_HOME") or os.environ.get("CUDA_PATH") or "/usr/local/cuda"
+    libs = glob.glob(f"{cuda_home}/**/libcudart{_get_sys_extension()}*", recursive=True)
+    libs = list(filter(lambda x: not ("stub" in x), libs))
+    libs.sort(reverse=True, key=os.path.basename)
+    if libs:
+        return ctypes.CDLL(libs[0], mode=ctypes.RTLD_GLOBAL)
+
+    # Attempt to locate CUDA runtime in Python dist-packages
+    found, handle = _load_nvidia_cuda_library("cuda_runtime")
+    if found:
+        return handle
+
+    # Attempt to locate CUDA runtime via ldconfig
+    libs = subprocess.check_output(
+        f"ldconfig -p | grep 'libcudart{_get_sys_extension()}'", shell=True
+    )
+    libs = libs.decode("utf-8").split("\n")
+    sos = []
+    for lib in libs:
+        if "libcudart" in lib and "=>" in lib:
+            sos.append(lib.split(">")[1].strip())
+    if sos:
+        return ctypes.CDLL(sos[0], mode=ctypes.RTLD_GLOBAL)
+
+    # If all else fails, assume that it is in LD_LIBRARY_PATH and error out otherwise
+    return ctypes.CDLL(f"libcudart{_get_sys_extension()}", mode=ctypes.RTLD_GLOBAL)
+
+
+@functools.lru_cache(maxsize=None)
 def _load_curand():
     """Load cuRAND shared library."""
     # Attempt to locate cuRAND in CUDA_HOME, CUDA_PATH or /usr/local/cuda
@@ -412,9 +444,9 @@ if "NVTE_PROJECT_BUILDING" not in os.environ or bool(int(os.getenv("NVTE_RELEASE
     if not skip_cuda_build():
         _CUDNN_LIB_CTYPES = _load_cudnn()
         _NVRTC_LIB_CTYPES = _load_nvrtc()
+        _CUDART_LIB_CTYPES = _load_cudart()
         _CURAND_LIB_CTYPES = _load_curand()
         _CUBLAS_LIB_CTYPES = _load_nvidia_cuda_library("cublas")
-        _CUDART_LIB_CTYPES = _load_nvidia_cuda_library("cuda_runtime")
         _TE_LIB_CTYPES = _load_core_library()
 
         # Needed to find the correct headers for NVRTC kernels.

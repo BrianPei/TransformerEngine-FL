@@ -5,22 +5,24 @@
 hardware_name: cuda
 display_name: 'NVIDIA CUDA (A100)'
 
+# CI image for BAAI env
 ci_image: harbor.baai.ac.cn/flagscale/cuda12.8.1-torch2.7.1-python3.10-te2.9:20260209
 
 # Runner labels for self-hosted A100 node
 # runner_labels:
-# - self-hosted
-# - Linux
-# - X64
-# - nvidia
-# - gpu-8
+#   - self-hosted
+#   - Linux
+#   - X64
+#   - nvidia
+#   - gpu-8
+
+# Runner labels for BAAI env
 runner_labels:
   - nv-8g-cicd-te
 
 # Container volumes
 container_volumes:
   - /home/flagscale_cicd/flask/static:/workspace/report
-  # - /home/flagscale_cicd/data:/opt/data
 
 # Container options
 container_options: >-
@@ -32,9 +34,8 @@ container_options: >-
   --ulimit stack=67108864 
   --user root
 
-# Device types
-device_types:
-  - a100
+# Platform-specific environment setup script
+setup_script: .github/scripts/setup_cuda.sh
 
 # Build environment variables (platform-specific)
 build_env:
@@ -46,6 +47,10 @@ build_env:
   NVTE_FRAMEWORK: pytorch
   CUDA_HOME: /usr/local/cuda-12.8
   NVCC: /usr/local/cuda-12.8/bin/nvcc
+
+# Device types to run tests on
+device_types:
+  - a100
 
 # Test matrix configuration
 test_matrix:

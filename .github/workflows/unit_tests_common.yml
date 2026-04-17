@@ -1,6 +1,5 @@
 name: Common Unit Tests
 
-
 on:
   workflow_call:
     inputs:
@@ -22,12 +21,8 @@ on:
       container_options:
         required: true
         type: string
-      ignored_tests:
-        required: false
-        type: string
-        default: ''
-      # New input for hardware-specific initialization (e.g., conda activate)
-      setup_commands:
+      # Platform-specific environment setup script path (from platform config)
+      setup_script:
         required: false
         type: string
         default: ''
@@ -36,41 +31,9 @@ on:
         required: false
         type: string
         default: '{}'
-      # Whether to upload coverage report
-      upload_coverage:
-        description: "Whether to upload coverage report"
-        required: false
-        type: boolean
-        default: true
 
 jobs:
-  # 1. Change Detection
-  detect_changes:
-    runs-on: ubuntu-latest
-    outputs:
-      core: ${{ steps.filter.outputs.core }}
-      qa_l0: ${{ steps.filter.outputs.qa_l0 }}
-    steps:
-      - name: Checkout source code
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Detect changed paths
-        id: filter
-        run: |
-          set -euo pipefail
-          BASE_REF="${{ github.event_name == 'pull_request' && format('origin/{0}', github.base_ref) || 'HEAD~1' }}"
-          [ "${{ github.event_name }}" == "pull_request" ] && git fetch origin ${{ github.base_ref }} --depth=1
-          
-          CHANGED_FILES=$(git diff --name-only $BASE_REF...HEAD 2>/dev/null || git diff --name-only $BASE_REF HEAD)
-
-          echo "core=$(echo "$CHANGED_FILES" | grep -qE "^tests/unit_tests/|^megatron/core/|^.github/" && echo "true" || echo "false")" >> $GITHUB_OUTPUT
-          echo "qa_l0=$(echo "$CHANGED_FILES" | grep -qE "^qa/L0_|^transformer_engine/|^tests/pytorch/|^.github/" && echo "true" || echo "false")" >> $GITHUB_OUTPUT
-  
-  # 2. Unified Test Execution
   unit_test:
-    needs: detect_changes
     defaults:
       run:
         shell: bash
@@ -79,16 +42,15 @@ jobs:
       fail-fast: false
       matrix:
         test_group:
-          - name: pytorch_lint
-            path: "qa/L0_pytorch_lint/test.sh"
-            test_type: "lint"
           - name: pytorch_debug
             path: "qa/L0_pytorch_debug_unittest/test.sh"
             test_type: "debug"
           - name: pytorch_unittest
             path: "qa/L0_pytorch_unittest/test.sh"
             test_type: "unittest"
-
+          - name: pytorch_distributed_unittest
+            path: "qa/L1_pytorch_distributed_unittest/test.sh"
+            test_type: "unittest"
     name: unit-${{ inputs.device }}-${{ matrix.test_group.name }}
     container:
       image: ${{ inputs.image }}
@@ -96,33 +58,14 @@ jobs:
       options: --pull never ${{ inputs.container_options }}
 
     steps:
-      - name: Check if tests should run
-        id: should_run
-        run: |
-          echo "should_run=true" >> $GITHUB_OUTPUT
-          GROUP='${{ matrix.test_group.name }}'
-          # Force run if 'full ci' label exists
-          if [ "${{ contains(github.event.pull_request.labels.*.name, 'full ci') }}" == "true" ]; then 
-            echo "should_run=true" >> $GITHUB_OUTPUT; exit 0
-          fi
-
-          if [[ "$GROUP" == "pytorch_"* ]]; then
-            CHANGED='${{ needs.detect_changes.outputs.qa_l0 }}'
-          else
-            CHANGED='${{ needs.detect_changes.outputs.core }}'
-          fi
-          
-          # For debugging, you can force this to true
-          echo "should_run=true" >> $GITHUB_OUTPUT
-
       # Cuda requires git safe.directory configuration and 3 checkout attempts to handle submodule-heavy repos
       - name: Configure Git Safe Directory on Cuda
-        if: steps.should_run.outputs.should_run == 'true' && inputs.platform == 'cuda'
+        if: inputs.platform == 'cuda'
         run: /usr/bin/git config --global safe.directory '*'
 
       - name: Checkout Source Code on Cuda (attempt 1)
         id: checkout1
-        if: steps.should_run.outputs.should_run == 'true' && inputs.platform == 'cuda'
+        if: inputs.platform == 'cuda'
         uses: actions/checkout@v4
         continue-on-error: true
         with:
@@ -132,7 +75,7 @@ jobs:
 
       - name: Checkout Source Code on Cuda (attempt 2)
         id: checkout2
-        if: steps.should_run.outputs.should_run == 'true' && inputs.platform == 'cuda' && steps.checkout1.outcome == 'failure'
+        if: inputs.platform == 'cuda' && steps.checkout1.outcome == 'failure'
         uses: actions/checkout@v4
         continue-on-error: true
         with:
@@ -142,7 +85,7 @@ jobs:
 
       - name: Checkout Source Code on Cuda (attempt 3)
         id: checkout3
-        if: steps.should_run.outputs.should_run == 'true' && inputs.platform == 'cuda' && steps.checkout2.outcome == 'failure'
+        if: inputs.platform == 'cuda' && steps.checkout2.outcome == 'failure'
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
@@ -151,107 +94,18 @@ jobs:
 
       # Metax no need submodules
       - name: Checkout Source Code on Metax
-        if: steps.should_run.outputs.should_run == 'true' && inputs.platform == 'metax'
+        if: inputs.platform == 'metax'
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
       
-      - name: Environment Setup on Cuda
-        if: steps.should_run.outputs.should_run == 'true' && inputs.platform == 'cuda'
+      - name: Environment Setup
+        if: inputs.setup_script != ''
         run: |
-          set -euo pipefail
-
-          echo "===== Step 0: Activate Python environment ====="
-          source /opt/miniconda3/etc/profile.d/conda.sh
-          conda activate flagscale-train
-          echo "PATH=$PATH" >> $GITHUB_ENV
-          echo "Python: $(which python3) ($(python3 --version 2>&1))"
-
-          echo "===== Step 1: Remove Existing TransformerEngine ====="
-          pip uninstall transformer_engine transformer_engine_torch -y || true
-
-          echo "===== Step 2: Build & Install TransformerEngine ====="
-          cd $GITHUB_WORKSPACE
-
-          pip install nvdlfw-inspect --quiet
-          pip install expecttest --quiet
-          pip install . -v --no-deps --no-build-isolation
-
-          echo "===== Step 3: Verify Installation ====="
-          python3 tests/pytorch/test_sanity_import.py
-
-          echo "===== Environment Setup Complete ===== "
-
-      - name: Environment Setup on Metax
-        if: steps.should_run.outputs.should_run == 'true' && inputs.platform == 'metax'
-        run: |
-          set -euo pipefail
-
-          echo "===== Step 0: Activate Python environment ====="
-          source /opt/conda/etc/profile.d/conda.sh
-          conda activate base
-          echo "PATH=$PATH" >> $GITHUB_ENV
-          echo "Python: $(which python3) ($(python3 --version 2>&1))"
-
-          echo "===== Step 1: Base Environment Setup ====="
-          # Configure MACA toolchain paths
-          export PATH=/opt/maca/bin:$PATH
-          export LD_LIBRARY_PATH=/opt/maca/lib:$LD_LIBRARY_PATH
-          service ssh restart
-
-          echo "===== Step 2: Create nvcc Symlink (cucc -> nvcc) ====="
-          # TransformerEngine expects nvcc, but MACA provides cucc
-          ln -sf /opt/maca/tools/cu-bridge/bin/cucc /opt/maca/tools/cu-bridge/bin/nvcc
-          which nvcc || true
-
-          echo "===== Step 3: Install Required System Tools ====="
-          # Install essential build tools (avoid modifying Python dependencies)
-          apt-get update -qq && apt-get install -y -qq git cmake ninja-build curl
-
-          echo "===== Step 4: Remove Existing TransformerEngine ====="
-          # Prevent conflicts with preinstalled or incompatible versions
-          python3 -m pip uninstall transformer_engine -y || true
-          python3 -m pip install nvdlfw-inspect --quiet
-          python3 -m pip install expecttest --quiet
-
-          # echo "===== Step 5: Install Metax Binary Backend ====="
-          # # Install prebuilt Metax backend (required for MACA operators)
-          # WHL_PATH="/home/muxiuser/transformer_engine_metax-2.9.0-cp312-cp312-linux_x86_64.whl"
-          # if [ ! -f "$WHL_PATH" ]; then
-          #   echo "ERROR: Wheel file not found at $WHL_PATH"
-          #   echo "Please verify volume mount: -v /home/muxiuser:/home/muxiuser"
-          #   exit 1
-          # fi
-
-          # # Use --no-deps to avoid overwriting Metax-optimized PyTorch
-          # python3 -m pip install "$WHL_PATH" --no-deps --force-reinstall
-
-          # echo "===== Step 6: Verify Metax Backend ====="
-          # # Ensure transformer_engine_torch is correctly loaded
-          # python3 - <<'EOF'
-          # import transformer_engine_torch as te
-          # print("Backend loaded successfully:", te)
-          # EOF
-
-          echo "===== Step 7: Install TE-FL Plugin Layer ====="
-          # Install TransformerEngine-FL Python layer (plugin logic)
-          # cd /workspace/TransformerEngine-FL
-          cd $GITHUB_WORKSPACE
-          TE_FL_SKIP_CUDA=1 python3 setup.py install
-
-          echo "===== Step 8: Final Verification ====="
-          # Verify both TE Python API and backend are functional
-          python3 - <<'EOF'
-          import transformer_engine
-          import transformer_engine_torch as te
-          print("transformer_engine:", transformer_engine)
-          print("transformer_engine_torch:", te)
-          EOF
-
-          echo "===== Environment Setup Complete ===== "
+          bash $GITHUB_WORKSPACE/${{ inputs.setup_script }}
       
       - name: Execute Tests
-        if: steps.should_run.outputs.should_run == 'true'
+        if: inputs.setup_script != ''
         working-directory: ${{ github.workspace }}
         run: |
           set -euo pipefail
@@ -284,19 +138,14 @@ jobs:
 
           # Coverage setup: install once + configure collection via PYTEST_ADDOPTS
           COVERAGE_ENABLED=false
-          if [ "${{ inputs.upload_coverage }}" = "true" ] && [ "${{ matrix.test_group.test_type }}" = "unittest" ]; then
-            if pip3 install coverage pytest-cov --quiet 2>/dev/null; then
-              export PYTEST_ADDOPTS="--cov=transformer_engine --cov-append --cov-report="
-              COVERAGE_ENABLED=true
-            else
-              echo "WARNING: Failed to install coverage/pytest-cov, coverage collection disabled"
-            fi
+          if pip3 install coverage pytest-cov --quiet 2>/dev/null; then
+            export PYTEST_ADDOPTS="--cov=transformer_engine --cov-append --cov-report="
+            COVERAGE_ENABLED=true
+          else
+            echo "WARNING: Failed to install coverage/pytest-cov, coverage collection disabled"
           fi
 
-          if [[ "${{ matrix.test_group.name }}" == *"lint"* ]]; then
-            export CPP_ONLY=0
-            export PYTHON_ONLY=0
-          elif [[ "${{ matrix.test_group.name }}" != *"debug"* ]]; then
+          if [[ "${{ matrix.test_group.name }}" != *"debug"* ]]; then
             # Fail fast on backend/API mismatch before running the full test group.
             # Skip for debug group (does not use FP8/optimizer symbols).
             python3 -c "import sys, importlib; import transformer_engine.common as _te_common; tex = importlib.import_module('transformer_engine_torch'); required=['multi_tensor_scale','multi_tensor_compute_scale_and_scale_inv']; missing=[n for n in required if not hasattr(tex, n)]; print('[TE check] module:', tex); print('[TE check] file:', getattr(tex, '__file__', 'N/A')); print('[TE check] missing:', ', '.join(missing) if missing else 'none'); sys.exit(1 if missing else 0)"
@@ -313,12 +162,10 @@ jobs:
               --include="transformer_engine/*" 2>/dev/null \
               || echo "WARNING: No coverage data found"
           fi
-
           exit $exit_code
         timeout-minutes: 60
 
       - name: Upload Coverage Report
-        if: inputs.upload_coverage && matrix.test_group.test_type == 'unittest'
         uses: actions/upload-artifact@v4
         continue-on-error: true
         with:
@@ -327,7 +174,6 @@ jobs:
             coverage-${{ inputs.platform }}-${{ inputs.device }}-${{ matrix.test_group.name }}.json
 
       - name: Upload Coverage Report to FlagCICD
-        if: inputs.upload_coverage && matrix.test_group.test_type == 'unittest'
         uses: flagos-ai/FlagOps/actions/post-pytest-report@v2
         continue-on-error: true
         env:
@@ -337,11 +183,3 @@ jobs:
           user_id: '000000000000000000'
           report_path: 'coverage-${{ inputs.platform }}-${{ inputs.device }}-${{ matrix.test_group.name }}.json'
           fail_on_error: 'false'
-
-      # - name: Debug - keep container alive on failure
-      #   if: failure()
-      #   run: |
-      #     echo "Container sleeping for 200 minutes for debugging..."
-      #     echo "On host, run: docker ps  then  docker exec -it <container_id> bash"
-      #     sleep 60000
-      #   timeout-minutes: 200

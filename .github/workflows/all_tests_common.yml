@@ -7,13 +7,20 @@ on:
         required: true
         type: string
         description: Platform name (e.g., cuda, default)
-      setup_commands:
+      run_unit_tests:
         required: false
-        type: string
-        default: ''
+        type: boolean
+        default: true
+        description: Whether to run unit tests in this workflow
+      run_integration_tests:
+        required: false
+        type: boolean
+        default: true
+        description: Whether to run integration tests in this workflow
 
 jobs:
   checkout_and_config:
+    name: checkout_and_config
     defaults:
       run:
         shell: bash
@@ -24,18 +31,11 @@ jobs:
       container_volumes: ${{ steps.config.outputs.container_volumes }}
       container_options: ${{ steps.config.outputs.container_options }}
       device_types: ${{ steps.config.outputs.device_types }}
-      train_test_matrix: ${{ steps.config.outputs.train_test_matrix }}
-      ignored_tests: ${{ steps.config.outputs.ignored_tests }}
+      setup_script: ${{ steps.config.outputs.setup_script }}
       build_env: ${{ steps.config.outputs.build_env }}
     steps:
       - name: Checkout source code
         uses: actions/checkout@v4
-
-      - name: Check if tests should run
-        id: should_run
-        run: |
-         
-          echo "should_run=true" >> $GITHUB_OUTPUT
 
       - name: Load platform configuration
         id: config
@@ -71,26 +71,29 @@ jobs:
           DEVICE_TYPES=$(yq '.device_types | tojson(0)' "$CONFIG_FILE")
           echo "device_types=$DEVICE_TYPES" >> $GITHUB_OUTPUT
 
-          # Read test matrix for training
-          TRAIN_MATRIX=$(yq '.test_matrix.functional.train | tojson(0)' "$CONFIG_FILE")
-          echo "train_test_matrix=$TRAIN_MATRIX" >> $GITHUB_OUTPUT
-
-          # Read ignored tests list from test_matrix.unit (default to empty array if not defined)
-          IGNORED_TESTS=$(yq '.test_matrix.unit.ignored_tests // [] | tojson(0)' "$CONFIG_FILE")
-          echo "ignored_tests=$IGNORED_TESTS" >> $GITHUB_OUTPUT
+          # Read setup script path
+          SETUP_SCRIPT=$(yq '.setup_script // ""' "$CONFIG_FILE")
+          echo "setup_script=$SETUP_SCRIPT" >> $GITHUB_OUTPUT
 
           # Read build environment variables (default to empty object if not defined)
           BUILD_ENV=$(yq '.build_env // {} | tojson(0)' "$CONFIG_FILE")
           echo "build_env=$BUILD_ENV" >> $GITHUB_OUTPUT
 
+  lint:
+    name: lint
+    uses: ./.github/workflows/lint_common.yml
+
   unit_tests:
-    needs: checkout_and_config
+    name: unit_tests
+    if: inputs.run_unit_tests
+    needs: 
+      - checkout_and_config
+      - lint
     strategy:
       fail-fast: false
       matrix:
         device: ${{ fromJson(needs.checkout_and_config.outputs.device_types) }}
     uses: ./.github/workflows/unit_tests_common.yml
-    name: unit_tests
     with:
       platform: ${{ inputs.platform }}
       device: ${{ matrix.device }}
@@ -98,24 +101,57 @@ jobs:
       runs_on: ${{ needs.checkout_and_config.outputs.runs_on }}
       container_volumes: ${{ needs.checkout_and_config.outputs.container_volumes }}
       container_options: ${{ needs.checkout_and_config.outputs.container_options }}
-      setup_commands: ${{ inputs.setup_commands }}
-      ignored_tests: ${{ needs.checkout_and_config.outputs.ignored_tests }}
+      setup_script: ${{ needs.checkout_and_config.outputs.setup_script }}
       build_env: ${{ needs.checkout_and_config.outputs.build_env }}
 
-  # arguments.py not compatible with megatron-core-fl
-  # functional_tests:
-  #   needs:
-  #     - checkout_and_config
-  #   if: fromJson(needs.checkout_and_config.outputs.train_test_matrix)[0] != null
-  #   uses: ./.github/workflows/functional_tests_common.yml
-  #   with:
-  #     platform: ${{ inputs.platform }}
-  #     test_matrix: ${{ needs.checkout_and_config.outputs.train_test_matrix }}
-  #     image: ${{ needs.checkout_and_config.outputs.ci_image }}
-  #     runs_on: ${{ needs.checkout_and_config.outputs.runs_on }}
-  #     container_volumes: ${{ needs.checkout_and_config.outputs.container_volumes }}
-  #     container_options: ${{ needs.checkout_and_config.outputs.container_options }}
+  unit_tests_complete:
+    name: unit_tests_complete
+    needs: 
+      - unit_tests
+    runs-on: ubuntu-latest
+    if: always() && inputs.run_unit_tests
+    steps:
+      - name: Check unit tests result
+        run: |
+          if [ "${{ needs.unit_tests.result }}" != "success" ] && \
+             [ "${{ needs.unit_tests.result }}" != "skipped" ]; then
+            echo "❌ Unit tests failed: ${{ needs.unit_tests.result }}"
+            exit 1
+          fi
+          echo "✅ Unit tests passed"
 
+  integration_tests:
+    name: integration_tests
+    if: inputs.run_integration_tests
+    needs:
+      - checkout_and_config
+      - lint
+    uses: ./.github/workflows/integration_tests_common.yml
+    with:
+      platform: ${{ inputs.platform }}
+      device: ${{ matrix.device }}
+      image: ${{ needs.checkout_and_config.outputs.ci_image }}
+      runs_on: ${{ needs.checkout_and_config.outputs.runs_on }}
+      container_volumes: ${{ needs.checkout_and_config.outputs.container_volumes }}
+      container_options: ${{ needs.checkout_and_config.outputs.container_options }}
+      setup_script: ${{ needs.checkout_and_config.outputs.setup_script }}
+      build_env: ${{ needs.checkout_and_config.outputs.build_env }}
+
+  integration_tests_complete:
+    name: integration_tests_complete
+    if: always() && inputs.run_integration_tests
+    needs: 
+      - integration_tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check integration tests result
+        run: |
+          if [ "${{ needs.integration_tests.result }}" != "success" ] && \
+             [ "${{ needs.integration_tests.result }}" != "skipped" ]; then
+            echo "❌ Integration tests failed: ${{ needs.integration_tests.result }}"
+            exit 1
+          fi
+          echo "✅ Integration tests passed"
 
   all_tests_complete:
     defaults:
@@ -123,8 +159,9 @@ jobs:
         shell: bash
     needs:
       - checkout_and_config
-      - unit_tests
-      # - functional_tests
+      - lint
+      - unit_tests_complete
+      - integration_tests_complete
     runs-on: ubuntu-latest
     if: always()
     steps:
@@ -133,15 +170,23 @@ jobs:
           # Check all test jobs (skip if not run)
           failed=false
 
-          if [ "${{ needs.unit_tests.result }}" != "success" ]; then
-            echo "❌ Unit tests failed"
+          if [ "${{ needs.lint.result }}" != "success" ] && \
+            [ "${{ needs.lint.result }}" != "skipped" ]; then
+            echo "❌ Lint failed"
             failed=true
           fi
 
-          # if [ "${{ needs.functional_tests.result }}" != "success" ]; then
-          #   echo "❌ Training functional tests failed"
-          #   failed=true
-          # fi
+          if [ "${{ needs.unit_tests_complete.result }}" != "success" ] && \
+            [ "${{ needs.unit_tests_complete.result }}" != "skipped" ]; then
+            echo "❌ Unit tests failed or cancelled: ${{ needs.unit_tests_complete.result }}"
+            failed=true
+          fi
+
+          if [ "${{ needs.integration_tests_complete.result }}" != "success" ] && \
+            [ "${{ needs.integration_tests_complete.result }}" != "skipped" ]; then
+            echo "❌ Integration tests failed or cancelled: ${{ needs.integration_tests_complete.result }}"
+            failed=true
+          fi
 
           if [ "$failed" = "true" ]; then
             exit 1

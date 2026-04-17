@@ -22,13 +22,11 @@ run_test_step() {
     local cmd=$3
     local label=$4
 
-
     if [ "$PLATFORM" = "metax" ]; then
         case "$test_path" in
             *"test_numerics.py" | \
             *"test_sanity.py" | \
             *"test_parallel_cross_entropy.py" | \
-            *"test_cuda_graphs.py" | \
             *"test_fused_rope.py" | \
             *"test_gqa.py" | \
             *"test_fused_optimizer.py" | \

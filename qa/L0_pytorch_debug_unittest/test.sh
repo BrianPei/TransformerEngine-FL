@@ -7,6 +7,11 @@
 : ${TE_PATH:=/opt/transformerengine}
 : ${NVTE_TEST_NVINSPECT_FEATURE_DIRS:=$TE_PATH/transformer_engine/debug/features}
 : ${NVTE_TEST_NVINSPECT_CONFIGS_DIR:=$TE_PATH/tests/pytorch/debug/test_configs/}
+# export PLATFORM="metax"
+# export TE_PATH=/workspace/TransformerEngine-FL
+# export NVTE_TEST_NVINSPECT_FEATURE_DIRS=$TE_PATH/transformer_engine/debug/features
+# export NVTE_TEST_NVINSPECT_CONFIGS_DIR=$TE_PATH/tests/pytorch/debug/test_configs/
+# export PYTHONPATH=$TE_PATH/tests/pytorch:$TE_PATH:$PYTHONPATH
 : ${XML_LOG_DIR:=/logs}
 mkdir -p "$XML_LOG_DIR"
 
@@ -28,7 +33,7 @@ run_test_step() {
 
     if [ "$PLATFORM" = "metax" ]; then
         case "$test_path" in
-            *"test_numerics.py" | *"test_api_features.py" | *"test_sanity.py")
+            *tests/pytorch/test_numerics.py | *tests/pytorch/test_sanity.py)
                 echo "-------------------------------------------------------"
                 echo "[SKIP] Platform MetaX: Ignoring $test_path"
                 echo "-------------------------------------------------------"
@@ -68,8 +73,6 @@ run_test_step "test_api_features.xml" "$TE_PATH/tests/pytorch/debug/test_api_fea
 # Step 6: Performance
 run_test_step "test_perf.xml" "$TE_PATH/tests/pytorch/debug/test_perf.py" \
 "pytest -v -s --junitxml=$XML_LOG_DIR/test_perf.xml $TE_PATH/tests/pytorch/debug/test_perf.py --feature_dirs=$NVTE_TEST_NVINSPECT_FEATURE_DIRS --configs_dir=$NVTE_TEST_NVINSPECT_CONFIGS_DIR"
-
-
 
 
 # Step 7: Sanity 2

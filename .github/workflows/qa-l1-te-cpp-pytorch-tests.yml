@@ -57,8 +57,8 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v6.0.1
         with:
-          repository: ${{ github.event.pull_request.head.repo.full_name }}
-          ref: ${{ github.event.pull_request.head.ref }}
+          repository: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name || github.repository }}
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.ref || github.ref_name }}
           ssh-strict: true
           ssh-user: git
           persist-credentials: true
@@ -166,3 +166,21 @@ jobs:
           echo "=== Running L1 PyTorch ONNX Unit Tests ==="
           bash ./qa/L1_pytorch_onnx_unittest/test.sh
         # timeout-minutes: 30
+
+            
+      - name: Run L1 PyTorch Megatron-FL MCore Integration Test
+        env:
+          TE_PATH: .
+          TE_FL_PREFER: vendor
+          MCORE_REPO_URL: https://github.com/BrianPei/Megatron-LM-FL.git
+          MCORE_REF: dev
+        run: |
+          # Activate conda environment
+          source /opt/miniconda3/etc/profile.d/conda.sh
+          conda activate flagscale-train
+
+          export TE_LIB_PATH=$(python -c "import site; print(site.getsitepackages()[0])")/transformer_engine
+
+          echo "=== Running L1 PyTorch Megatron-FL MCore Integration Test ==="
+          bash ./qa/L1_pytorch_mcore_integration/test.sh
+        timeout-minutes: 30
