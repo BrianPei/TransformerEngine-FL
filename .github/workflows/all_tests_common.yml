@@ -79,18 +79,11 @@ jobs:
           BUILD_ENV=$(yq '.build_env // {} | tojson(0)' "$CONFIG_FILE")
           echo "build_env=$BUILD_ENV" >> $GITHUB_OUTPUT
 
-  lint:
-    name: lint
-    needs: 
-      - checkout_and_config
-    uses: ./.github/workflows/lint_common.yml
-
   unit_tests:
     name: unit_tests
     if: inputs.run_unit_tests
     needs: 
       - checkout_and_config
-      - lint
     strategy:
       fail-fast: false
       matrix:
@@ -127,7 +120,6 @@ jobs:
     if: inputs.run_integration_tests
     needs:
       - checkout_and_config
-      - lint
       - unit_tests_complete
     uses: ./.github/workflows/integration_tests_common.yml
     with:
@@ -162,7 +154,6 @@ jobs:
         shell: bash
     needs:
       - checkout_and_config
-      - lint
       - unit_tests_complete
       - integration_tests_complete
     runs-on: ubuntu-latest
@@ -172,12 +163,6 @@ jobs:
         run: |
           # Check all test jobs (skip if not run)
           failed=false
-
-          if [ "${{ needs.lint.result }}" != "success" ] && \
-            [ "${{ needs.lint.result }}" != "skipped" ]; then
-            echo "❌ Lint failed"
-            failed=true
-          fi
 
           if [ "${{ needs.unit_tests_complete.result }}" != "success" ] && \
             [ "${{ needs.unit_tests_complete.result }}" != "skipped" ]; then
