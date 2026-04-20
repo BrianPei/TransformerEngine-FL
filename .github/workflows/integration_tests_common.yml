@@ -99,7 +99,6 @@ jobs:
           bash $GITHUB_WORKSPACE/${{ inputs.setup_script }}
 
       - name: Execute Tests
-        if: inputs.setup_script != ''
         env:
           TE_PATH: ${{ github.workspace }}
           TE_FL_PREFER: vendor

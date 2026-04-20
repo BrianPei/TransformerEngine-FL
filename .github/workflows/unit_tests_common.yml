@@ -105,7 +105,6 @@ jobs:
           bash $GITHUB_WORKSPACE/${{ inputs.setup_script }}
       
       - name: Execute Tests
-        if: inputs.setup_script != ''
         working-directory: ${{ github.workspace }}
         run: |
           set -euo pipefail
