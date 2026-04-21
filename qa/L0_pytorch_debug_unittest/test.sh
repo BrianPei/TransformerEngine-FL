@@ -7,11 +7,7 @@
 : ${TE_PATH:=/opt/transformerengine}
 : ${NVTE_TEST_NVINSPECT_FEATURE_DIRS:=$TE_PATH/transformer_engine/debug/features}
 : ${NVTE_TEST_NVINSPECT_CONFIGS_DIR:=$TE_PATH/tests/pytorch/debug/test_configs/}
-# export PLATFORM="metax"
-# export TE_PATH=/workspace/TransformerEngine-FL
-# export NVTE_TEST_NVINSPECT_FEATURE_DIRS=$TE_PATH/transformer_engine/debug/features
-# export NVTE_TEST_NVINSPECT_CONFIGS_DIR=$TE_PATH/tests/pytorch/debug/test_configs/
-# export PYTHONPATH=$TE_PATH/tests/pytorch:$TE_PATH:$PYTHONPATH
+
 : ${XML_LOG_DIR:=/logs}
 mkdir -p "$XML_LOG_DIR"
 
@@ -25,23 +21,36 @@ FAIL=0
 # because it is not available on PyPI.
 pip install pytest==8.2.1
 
+METAX_IGNORED_TESTS=(
+    "$TE_PATH/tests/pytorch/test_numerics.py"
+    "$TE_PATH/tests/pytorch/test_sanity.py"
+)
+
+should_skip_on_metax() {
+    local test_path=$1
+
+    [ "$PLATFORM" = "metax" ] || return 1
+
+    local ignored_test
+    for ignored_test in "${METAX_IGNORED_TESTS[@]}"; do
+        if [ "$test_path" = "$ignored_test" ]; then
+            echo "[SKIP] Platform MetaX: Ignoring $test_path"
+            return 0
+        fi
+    done
+
+    return 1
+}
+
+
 run_test_step() {
     local xml_file=$1
     local test_path=$2
     local cmd=$3
 
-
-    if [ "$PLATFORM" = "metax" ]; then
-        case "$test_path" in
-            *tests/pytorch/test_numerics.py | *tests/pytorch/test_sanity.py)
-                echo "-------------------------------------------------------"
-                echo "[SKIP] Platform MetaX: Ignoring $test_path"
-                echo "-------------------------------------------------------"
-                return 0
-                ;;
-        esac
+    if should_skip_on_metax "$test_path"; then
+        return 0
     fi
-
 
     echo "-------------------------------------------------------"
     echo "[RUN] Executing: $test_path"
