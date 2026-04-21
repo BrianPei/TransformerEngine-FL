@@ -108,14 +108,14 @@ jobs:
           set -euo pipefail
 
           # Activate conda environment
-          source /opt/miniconda3/etc/profile.d/conda.sh
-          conda activate flagscale-train
+          # source /opt/miniconda3/etc/profile.d/conda.sh
+          # conda activate flagscale-train
           export TE_LIB_PATH=$(python -c "import site; print(site.getsitepackages()[0])")/transformer_engine
 
           echo "=== Running L1 PyTorch Megatron-FL MCore Integration Test ==="
-          python3 --version
-          pip list | grep -E "regex|six|torch" || true
-          
+          # python3 --version
+          # pip list | grep -E "regex|six|torch" || true
+
           bash ${{ matrix.test_group.path }}
         timeout-minutes: 30
         
