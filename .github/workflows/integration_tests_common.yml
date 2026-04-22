@@ -103,6 +103,7 @@ jobs:
           TE_PATH: ${{ github.workspace }}
           TE_FL_PREFER: vendor
           MCORE_REPO_URL: https://github.com/BrianPei/Megatron-LM-FL.git
+          # network set
           MCORE_REF: dev
           MASTER_ADDR: "127.0.0.1"
           MASTER_PORT: "39821"
