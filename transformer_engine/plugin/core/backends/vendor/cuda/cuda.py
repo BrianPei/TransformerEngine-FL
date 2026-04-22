@@ -7,7 +7,6 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 import torch
 from ....ops import *
 
-_cuda_lib_handles: List[Any] = []
 
 
 def _load_cuda_libs():
@@ -16,7 +15,6 @@ def _load_cuda_libs():
     import subprocess
     from pathlib import Path
     import importlib.util
-    import sysconfig
     import platform
     import glob as glob_module
 
@@ -25,13 +23,6 @@ def _load_cuda_libs():
         return ".so" if system == "Linux" else ".dylib" if system == "Darwin" else ".dll"
 
     ext = get_ext()
-
-    python_nvidia_pkg = {
-        "cudnn": "cudnn",
-        "cudart": "cuda_runtime",
-        "nvrtc": "cuda_nvrtc",
-        "curand": "curand",
-    }
 
     def try_load_lib(name, search_patterns):
         for env_var in [f"{name.upper()}_HOME", f"{name.upper()}_PATH"]:
@@ -44,20 +35,6 @@ def _load_cuda_libs():
                         return ctypes.CDLL(libs[0], mode=ctypes.RTLD_GLOBAL)
                     except:
                         pass
-
-        pkg_name = python_nvidia_pkg.get(name)
-        if pkg_name:
-            purelib = Path(sysconfig.get_path("purelib"))
-            libs = glob_module.glob(
-                str(purelib / "nvidia" / pkg_name / "**" / f"lib{name}{ext}*"),
-                recursive=True,
-            )
-            if libs:
-                libs.sort(reverse=True, key=os.path.basename)
-                try:
-                    return ctypes.CDLL(libs[0], mode=ctypes.RTLD_GLOBAL)
-                except:
-                    pass
 
         cuda_home = os.environ.get("CUDA_HOME") or os.environ.get("CUDA_PATH") or "/usr/local/cuda"
         for pattern in search_patterns:
@@ -84,19 +61,10 @@ def _load_cuda_libs():
         except:
             return None
 
-    global _cuda_lib_handles
-
     try:
-        handles = []
-        for name, patterns in [
-            ("cudnn", [f"libcudnn{ext}*"]),
-            ("cudart", [f"libcudart{ext}*"]),
-            ("nvrtc", [f"libnvrtc{ext}*"]),
-            ("curand", [f"libcurand{ext}*"]),
-        ]:
-            handle = try_load_lib(name, patterns)
-            if handle is not None:
-                handles.append(handle)
+        try_load_lib("cudnn", [f"libcudnn{ext}*"])
+        try_load_lib("nvrtc", [f"libnvrtc{ext}*"])
+        try_load_lib("curand", [f"libcurand{ext}*"])
 
         te_path_override = os.environ.get("TE_LIB_PATH")
         if te_path_override:
@@ -107,8 +75,7 @@ def _load_cuda_libs():
             if search_dir.exists():
                 matches = list(search_dir.glob(f"libtransformer_engine{ext}*"))
                 if matches:
-                    handles.append(ctypes.CDLL(str(matches[0]), mode=ctypes.RTLD_GLOBAL))
-                    _cuda_lib_handles = handles
+                    ctypes.CDLL(str(matches[0]), mode=ctypes.RTLD_GLOBAL)
                     return True
         return False
     except Exception as e:
