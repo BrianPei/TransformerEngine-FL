@@ -412,9 +412,9 @@ if "NVTE_PROJECT_BUILDING" not in os.environ or bool(int(os.getenv("NVTE_RELEASE
     if not skip_cuda_build():
         _CUDNN_LIB_CTYPES = _load_cudnn()
         _NVRTC_LIB_CTYPES = _load_nvrtc()
-        _CUDART_LIB_CTYPES = _load_nvidia_cuda_library("cuda_runtime")
         _CURAND_LIB_CTYPES = _load_curand()
         _CUBLAS_LIB_CTYPES = _load_nvidia_cuda_library("cublas")
+        _CUDART_LIB_CTYPES = _load_nvidia_cuda_library("cuda_runtime")
         _TE_LIB_CTYPES = _load_core_library()
 
         # Needed to find the correct headers for NVRTC kernels.
