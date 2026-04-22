@@ -7,7 +7,6 @@ on:
   pull_request:
     branches:
       - __disabled_do_not_remove__
-  workflow_dispatch:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}-${{ github.actor }}

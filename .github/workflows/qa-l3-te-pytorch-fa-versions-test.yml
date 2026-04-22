@@ -3,16 +3,11 @@ name: QA L3 - Attention Tests
 
 on:
   push:
-    branches: __disable__
-    paths:
-      - '.github/workflows/qa-l3-te-pytorch-fa-versions-test.yml'
-      - 'tests/pytorch/attention/test_attention.py'
-
+    branches: 
+      - __disabled_do_not_remove__
   pull_request:
-    branches: __disable__
-    paths:
-      - '.github/workflows/qa-l3-te-pytorch-fa-versions-test.yml'
-      - 'tests/pytorch/attention/test_attention.py'
+    branches:
+      - __disabled_do_not_remove__
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}-${{ github.actor }}

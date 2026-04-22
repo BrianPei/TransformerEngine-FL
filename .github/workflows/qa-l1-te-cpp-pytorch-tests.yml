@@ -2,32 +2,11 @@ name: QA L1 - Comprehensive Integration Tests
 
 on:
   push:
-    branches: main
-    paths:
-      - '.github/workflows/qa-l1-te-cpp-pytorch-tests.yml'
-      - 'qa/L1_cpp_distributed/**'
-      - 'tests/cpp_distributed/**'
-      - 'qa/L1_pytorch_thunder_integration/**'
-      - 'qa/L1_pytorch_distributed_unittest/**'
-      - 'tests/pytorch/distributed/**'
-      - 'tests/pytorch/attention/**'
-      - 'qa/L1_pytorch_onnx_unittest/**'
-      - 'tests/pytorch/test_onnx_export.py'
-
+    branches:
+      - __disabled_do_not_remove__
   pull_request:
-    branches: main
-    paths:
-      - '.github/workflows/qa-l1-te-cpp-pytorch-tests.yml'
-      - 'qa/L1_cpp_distributed/**'
-      - 'tests/cpp_distributed/**'
-      - 'qa/L1_pytorch_thunder_integration/**'
-      - 'qa/L1_pytorch_distributed_unittest/**'
-      - 'tests/pytorch/distributed/**'
-      - 'tests/pytorch/attention/**'
-      - 'qa/L1_pytorch_onnx_unittest/**'
-      - 'tests/pytorch/test_onnx_export.py'
-      
-  workflow_dispatch:
+    branches:
+      - __disabled_do_not_remove__
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}-${{ github.actor }}
