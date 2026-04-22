@@ -19,9 +19,7 @@ def _load_cuda_libs():
 
     def get_ext():
         system = platform.system()
-        return (
-            ".so" if system == "Linux" else ".dylib" if system == "Darwin" else ".dll"
-        )
+        return ".so" if system == "Linux" else ".dylib" if system == "Darwin" else ".dll"
 
     ext = get_ext()
 
@@ -37,11 +35,7 @@ def _load_cuda_libs():
                     except:
                         pass
 
-        cuda_home = (
-            os.environ.get("CUDA_HOME")
-            or os.environ.get("CUDA_PATH")
-            or "/usr/local/cuda"
-        )
+        cuda_home = os.environ.get("CUDA_HOME") or os.environ.get("CUDA_PATH") or "/usr/local/cuda"
         for pattern in search_patterns:
             libs = glob_module.glob(f"{cuda_home}/**/{pattern}", recursive=True)
             if libs:
@@ -52,9 +46,7 @@ def _load_cuda_libs():
                     pass
 
         try:
-            result = subprocess.check_output(
-                f"ldconfig -p | grep 'lib{name}{ext}'", shell=True
-            )
+            result = subprocess.check_output(f"ldconfig -p | grep 'lib{name}{ext}'", shell=True)
             for line in result.decode().split("\n"):
                 if f"lib{name}" in line and "=>" in line:
                     so_path = line.split(">")[1].strip()
@@ -77,9 +69,7 @@ def _load_cuda_libs():
         if te_path_override:
             te_path = Path(te_path_override)
         else:
-            te_path = Path(
-                importlib.util.find_spec("transformer_engine").origin
-            ).parent.parent
+            te_path = Path(importlib.util.find_spec("transformer_engine").origin).parent.parent
         for search_dir in [te_path, te_path / "transformer_engine"]:
             if search_dir.exists():
                 matches = list(search_dir.glob(f"libtransformer_engine{ext}*"))
@@ -180,11 +170,7 @@ class CUDABackend(TEFLBackendBase):
         tex = self._get_tex()
         # Normalize quantizer.dtype to this backend's `tex.DType`.
         try:
-            if (
-                quantizer is not None
-                and hasattr(quantizer, "dtype")
-                and hasattr(tex, "DType")
-            ):
+            if quantizer is not None and hasattr(quantizer, "dtype") and hasattr(tex, "DType"):
                 qdtype = quantizer.dtype
                 if qdtype is not None:
                     quantizer.dtype = tex.DType(int(qdtype))
@@ -211,11 +197,7 @@ class CUDABackend(TEFLBackendBase):
 
         # Normalize quantizer.dtype to this backend's `tex.DType`.
         try:
-            if (
-                quantizer is not None
-                and hasattr(quantizer, "dtype")
-                and hasattr(tex, "DType")
-            ):
+            if quantizer is not None and hasattr(quantizer, "dtype") and hasattr(tex, "DType"):
                 qdtype = quantizer.dtype
                 if qdtype is not None:
                     quantizer.dtype = tex.DType(int(qdtype))
@@ -252,12 +234,8 @@ class CUDABackend(TEFLBackendBase):
         tex = self._get_tex()
 
         bias_type = tex.DType(int(bias_type)) if bias_type is not None else None
-        comm_type = (
-            tex.CommOverlapType(int(comm_type)) if comm_type is not None else None
-        )
-        output_dtype = (
-            tex.DType(int(output_dtype)) if output_dtype is not None else None
-        )
+        comm_type = tex.CommOverlapType(int(comm_type)) if comm_type is not None else None
+        output_dtype = tex.DType(int(output_dtype)) if output_dtype is not None else None
         return tex.generic_gemm(
             A,
             transA,
@@ -341,21 +319,15 @@ class CUDABackend(TEFLBackendBase):
         tex = self._get_tex()
         return tex.dgelu(grad, fwd_input, quantizer)
 
-    def dgeglu(
-        self, grad: torch.Tensor, fwd_input: torch.Tensor, quantizer: Any
-    ) -> Any:
+    def dgeglu(self, grad: torch.Tensor, fwd_input: torch.Tensor, quantizer: Any) -> Any:
         tex = self._get_tex()
         return tex.dgeglu(grad, fwd_input, quantizer)
 
-    def dqgelu(
-        self, grad: torch.Tensor, fwd_input: torch.Tensor, quantizer: Any
-    ) -> Any:
+    def dqgelu(self, grad: torch.Tensor, fwd_input: torch.Tensor, quantizer: Any) -> Any:
         tex = self._get_tex()
         return tex.dqgelu(grad, fwd_input, quantizer)
 
-    def dqgeglu(
-        self, grad: torch.Tensor, fwd_input: torch.Tensor, quantizer: Any
-    ) -> Any:
+    def dqgeglu(self, grad: torch.Tensor, fwd_input: torch.Tensor, quantizer: Any) -> Any:
         tex = self._get_tex()
         return tex.dqgeglu(grad, fwd_input, quantizer)
 
@@ -364,21 +336,15 @@ class CUDABackend(TEFLBackendBase):
         tex = self._get_tex()
         return tex.drelu(grad, fwd_input, quantizer)
 
-    def dreglu(
-        self, grad: torch.Tensor, fwd_input: torch.Tensor, quantizer: Any
-    ) -> Any:
+    def dreglu(self, grad: torch.Tensor, fwd_input: torch.Tensor, quantizer: Any) -> Any:
         tex = self._get_tex()
         return tex.dreglu(grad, fwd_input, quantizer)
 
-    def dsrelu(
-        self, grad: torch.Tensor, fwd_input: torch.Tensor, quantizer: Any
-    ) -> Any:
+    def dsrelu(self, grad: torch.Tensor, fwd_input: torch.Tensor, quantizer: Any) -> Any:
         tex = self._get_tex()
         return tex.dsrelu(grad, fwd_input, quantizer)
 
-    def dsreglu(
-        self, grad: torch.Tensor, fwd_input: torch.Tensor, quantizer: Any
-    ) -> Any:
+    def dsreglu(self, grad: torch.Tensor, fwd_input: torch.Tensor, quantizer: Any) -> Any:
         tex = self._get_tex()
         return tex.dsreglu(grad, fwd_input, quantizer)
 
@@ -387,9 +353,7 @@ class CUDABackend(TEFLBackendBase):
         tex = self._get_tex()
         return tex.dsilu(grad, fwd_input, quantizer)
 
-    def dswiglu(
-        self, grad: torch.Tensor, fwd_input: torch.Tensor, quantizer: Any
-    ) -> Any:
+    def dswiglu(self, grad: torch.Tensor, fwd_input: torch.Tensor, quantizer: Any) -> Any:
         tex = self._get_tex()
         return tex.dswiglu(grad, fwd_input, quantizer)
 
@@ -405,21 +369,15 @@ class CUDABackend(TEFLBackendBase):
         return tex.clamped_dswiglu(grad, fwd_input, quantizer, limit, alpha)
 
     # DBias + DAct fusions #
-    def dbias_dgelu(
-        self, grad: torch.Tensor, fwd_input: torch.Tensor, quantizer: Any
-    ) -> List[Any]:
+    def dbias_dgelu(self, grad: torch.Tensor, fwd_input: torch.Tensor, quantizer: Any) -> List[Any]:
         tex = self._get_tex()
         return tex.dbias_dgelu(grad, fwd_input, quantizer)
 
-    def dbias_dsilu(
-        self, grad: torch.Tensor, fwd_input: torch.Tensor, quantizer: Any
-    ) -> List[Any]:
+    def dbias_dsilu(self, grad: torch.Tensor, fwd_input: torch.Tensor, quantizer: Any) -> List[Any]:
         tex = self._get_tex()
         return tex.dbias_dsilu(grad, fwd_input, quantizer)
 
-    def dbias_drelu(
-        self, grad: torch.Tensor, fwd_input: torch.Tensor, quantizer: Any
-    ) -> List[Any]:
+    def dbias_drelu(self, grad: torch.Tensor, fwd_input: torch.Tensor, quantizer: Any) -> List[Any]:
         tex = self._get_tex()
         return tex.dbias_drelu(grad, fwd_input, quantizer)
 
@@ -523,9 +481,7 @@ class CUDABackend(TEFLBackendBase):
         scale_factor: float,
     ) -> torch.Tensor:
         tex = self._get_tex()
-        return tex.scaled_masked_softmax_backward(
-            output_grad_, softmax_results_, scale_factor
-        )
+        return tex.scaled_masked_softmax_backward(output_grad_, softmax_results_, scale_factor)
 
     def scaled_upper_triang_masked_softmax_forward(
         self,
@@ -603,9 +559,7 @@ class CUDABackend(TEFLBackendBase):
         zero_centered_gamma: bool,
     ) -> List[Any]:
         tex = self._get_tex()
-        return tex.layernorm_bwd(
-            dz, x, mu, rsigma, gamma, sm_margin, zero_centered_gamma
-        )
+        return tex.layernorm_bwd(dz, x, mu, rsigma, gamma, sm_margin, zero_centered_gamma)
 
     def rmsnorm_fwd(
         self,
@@ -647,9 +601,7 @@ class CUDABackend(TEFLBackendBase):
         zero_centered_gamma: bool,
     ) -> List[Any]:
         tex = self._get_tex()
-        return tex.rmsnorm_bwd_add(
-            dz, x, add, rsigma, gamma, sm_margin, zero_centered_gamma
-        )
+        return tex.rmsnorm_bwd_add(dz, x, add, rsigma, gamma, sm_margin, zero_centered_gamma)
 
     def multi_tensor_quantize(
         self,
@@ -753,21 +705,13 @@ class CUDABackend(TEFLBackendBase):
 
         q_dtype = tex.DType(int(q_dtype)) if q_dtype is not None else None
         kv_dtype = tex.DType(int(kv_dtype)) if kv_dtype is not None else None
-        qkv_layout = (
-            tex.NVTE_QKV_Layout(int(qkv_layout)) if qkv_layout is not None else None
-        )
-        bias_type = (
-            tex.NVTE_Bias_Type(int(bias_type)) if bias_type is not None else None
-        )
+        qkv_layout = tex.NVTE_QKV_Layout(int(qkv_layout)) if qkv_layout is not None else None
+        bias_type = tex.NVTE_Bias_Type(int(bias_type)) if bias_type is not None else None
         attn_mask_type = (
-            tex.NVTE_Mask_Type(int(attn_mask_type))
-            if attn_mask_type is not None
-            else None
+            tex.NVTE_Mask_Type(int(attn_mask_type)) if attn_mask_type is not None else None
         )
         softmax_type = (
-            tex.NVTE_Softmax_Type(int(softmax_type))
-            if softmax_type is not None
-            else None
+            tex.NVTE_Softmax_Type(int(softmax_type)) if softmax_type is not None else None
         )
 
         result = tex.get_fused_attn_backend(
@@ -858,9 +802,7 @@ class CUDABackend(TEFLBackendBase):
         padded_input_row_list: List[int],
     ) -> None:
         tex = self._get_tex()
-        return tex.fused_multi_row_padding(
-            input, output, input_row_list, padded_input_row_list
-        )
+        return tex.fused_multi_row_padding(input, output, input_row_list, padded_input_row_list)
 
     def fused_multi_row_unpadding(
         self,
@@ -870,9 +812,7 @@ class CUDABackend(TEFLBackendBase):
         unpadded_input_row_list: List[int],
     ) -> None:
         tex = self._get_tex()
-        return tex.fused_multi_row_unpadding(
-            input, output, input_row_list, unpadded_input_row_list
-        )
+        return tex.fused_multi_row_unpadding(input, output, input_row_list, unpadded_input_row_list)
 
     # attention kernels
     def fa_prepare_fwd(
@@ -924,21 +864,13 @@ class CUDABackend(TEFLBackendBase):
     ) -> List[Any]:
         tex = self._get_tex()
 
-        qkv_layout = (
-            tex.NVTE_QKV_Layout(int(qkv_layout)) if qkv_layout is not None else None
-        )
-        bias_type = (
-            tex.NVTE_Bias_Type(int(bias_type)) if bias_type is not None else None
-        )
+        qkv_layout = tex.NVTE_QKV_Layout(int(qkv_layout)) if qkv_layout is not None else None
+        bias_type = tex.NVTE_Bias_Type(int(bias_type)) if bias_type is not None else None
         attn_mask_type = (
-            tex.NVTE_Mask_Type(int(attn_mask_type))
-            if attn_mask_type is not None
-            else None
+            tex.NVTE_Mask_Type(int(attn_mask_type)) if attn_mask_type is not None else None
         )
         softmax_type = (
-            tex.NVTE_Softmax_Type(int(softmax_type))
-            if softmax_type is not None
-            else None
+            tex.NVTE_Softmax_Type(int(softmax_type)) if softmax_type is not None else None
         )
 
         return tex.fused_attn_fwd(
@@ -1003,21 +935,13 @@ class CUDABackend(TEFLBackendBase):
     ) -> List[Any]:
         tex = self._get_tex()
 
-        qkv_layout = (
-            tex.NVTE_QKV_Layout(int(qkv_layout)) if qkv_layout is not None else None
-        )
-        bias_type = (
-            tex.NVTE_Bias_Type(int(bias_type)) if bias_type is not None else None
-        )
+        qkv_layout = tex.NVTE_QKV_Layout(int(qkv_layout)) if qkv_layout is not None else None
+        bias_type = tex.NVTE_Bias_Type(int(bias_type)) if bias_type is not None else None
         attn_mask_type = (
-            tex.NVTE_Mask_Type(int(attn_mask_type))
-            if attn_mask_type is not None
-            else None
+            tex.NVTE_Mask_Type(int(attn_mask_type)) if attn_mask_type is not None else None
         )
         softmax_type = (
-            tex.NVTE_Softmax_Type(int(softmax_type))
-            if softmax_type is not None
-            else None
+            tex.NVTE_Softmax_Type(int(softmax_type)) if softmax_type is not None else None
         )
         dqkv_type = tex.DType(int(dqkv_type)) if dqkv_type is not None else None
 
@@ -1067,9 +991,7 @@ class CUDABackend(TEFLBackendBase):
         is_non_paged: bool,
     ) -> None:
         tex = self._get_tex()
-        qkv_format = (
-            tex.NVTE_QKV_Format(int(qkv_format)) if qkv_format is not None else None
-        )
+        qkv_format = tex.NVTE_QKV_Format(int(qkv_format)) if qkv_format is not None else None
         return tex.copy_to_kv_cache(
             new_k,
             new_v,
@@ -1118,9 +1040,7 @@ class CUDABackend(TEFLBackendBase):
         cp_rank: int,
     ) -> torch.Tensor:
         tex = self._get_tex()
-        qkv_format = (
-            tex.NVTE_QKV_Format(int(qkv_format)) if qkv_format is not None else None
-        )
+        qkv_format = tex.NVTE_QKV_Format(int(qkv_format)) if qkv_format is not None else None
         return tex.fused_rope_forward(
             input,
             freqs,
@@ -1143,9 +1063,7 @@ class CUDABackend(TEFLBackendBase):
         cp_rank: int,
     ) -> torch.Tensor:
         tex = self._get_tex()
-        qkv_format = (
-            tex.NVTE_QKV_Format(int(qkv_format)) if qkv_format is not None else None
-        )
+        qkv_format = tex.NVTE_QKV_Format(int(qkv_format)) if qkv_format is not None else None
         return tex.fused_rope_backward(
             output_grads, freqs, qkv_format, interleaved, cu_seqlens, cp_size, cp_rank
         )
@@ -1163,9 +1081,7 @@ class CUDABackend(TEFLBackendBase):
         cp_rank: int,
     ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         tex = self._get_tex()
-        qkv_format = (
-            tex.NVTE_QKV_Format(int(qkv_format)) if qkv_format is not None else None
-        )
+        qkv_format = tex.NVTE_QKV_Format(int(qkv_format)) if qkv_format is not None else None
         return tex.fused_qkv_rope_forward(
             qkv_input,
             q_freqs,
@@ -1192,9 +1108,7 @@ class CUDABackend(TEFLBackendBase):
         cp_rank: int,
     ) -> torch.Tensor:
         tex = self._get_tex()
-        qkv_format = (
-            tex.NVTE_QKV_Format(int(qkv_format)) if qkv_format is not None else None
-        )
+        qkv_format = tex.NVTE_QKV_Format(int(qkv_format)) if qkv_format is not None else None
         return tex.fused_qkv_rope_backward(
             q_grad_out,
             k_grad_out,
@@ -1376,9 +1290,7 @@ class CUDABackend(TEFLBackendBase):
         lse_packed: bool,
     ) -> None:
         tex = self._get_tex()
-        return tex.thd_second_half_lse_correction(
-            lse, lse_per_step, cu_seqlens, lse_packed
-        )
+        return tex.thd_second_half_lse_correction(lse, lse_per_step, cu_seqlens, lse_packed)
 
     def thd_read_second_half_lse(
         self,
@@ -1388,9 +1300,7 @@ class CUDABackend(TEFLBackendBase):
         second_half_lse_seqlen: int,
     ) -> torch.Tensor:
         tex = self._get_tex()
-        return tex.thd_read_second_half_lse(
-            lse, cu_seqlens, lse_packed, second_half_lse_seqlen
-        )
+        return tex.thd_read_second_half_lse(lse, cu_seqlens, lse_packed, second_half_lse_seqlen)
 
     def thd_out_correction(
         self,
@@ -1422,9 +1332,7 @@ class CUDABackend(TEFLBackendBase):
         second_half: str,
     ) -> None:
         tex = self._get_tex()
-        return tex.thd_grad_correction(
-            grad, grad_per_step, cu_seqlens, first_half, second_half
-        )
+        return tex.thd_grad_correction(grad, grad_per_step, cu_seqlens, first_half, second_half)
 
     def thd_get_partitioned_indices(
         self,
@@ -1434,9 +1342,7 @@ class CUDABackend(TEFLBackendBase):
         rank: int,
     ) -> torch.Tensor:
         tex = self._get_tex()
-        return tex.thd_get_partitioned_indices(
-            cu_seqlens, total_tokens, world_size, rank
-        )
+        return tex.thd_get_partitioned_indices(cu_seqlens, total_tokens, world_size, rank)
 
     # nvshmem functions
     def init_nvshmem_backend(
