@@ -121,6 +121,10 @@ jobs:
     needs:
       - checkout_and_config
       - unit_tests_complete
+    strategy:
+      fail-fast: false
+      matrix:
+        device: ${{ fromJson(needs.checkout_and_config.outputs.device_types) }}
     uses: ./.github/workflows/integration_tests_common.yml
     with:
       platform: ${{ inputs.platform }}
