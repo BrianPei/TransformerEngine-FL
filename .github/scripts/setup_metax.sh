@@ -21,8 +21,12 @@ ln -sf /opt/maca/tools/cu-bridge/bin/cucc /opt/maca/tools/cu-bridge/bin/nvcc
 which nvcc || true
 
 echo "===== Step 3: Install Required System Tools ====="
-# Install essential build tools (avoid modifying Python dependencies)
-apt-get update -qq && apt-get install -y -qq git cmake ninja-build curl
+# Use apt to install git, curl
+sed -i 's|http://mirrors.aliyun.com/ubuntu|http://archive.ubuntu.com/ubuntu|g' /etc/apt/sources.list
+apt-get update -qq || true
+apt-get install -y -qq git curl
+# Install cmake and ninja via pip (more reliable than apt in this env)
+python3 -m pip install cmake ninja torch --no-cache-dir
 
 echo "===== Step 4: Remove Existing TransformerEngine ====="
 # Prevent conflicts with preinstalled or incompatible versions
