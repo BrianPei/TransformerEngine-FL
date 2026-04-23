@@ -50,6 +50,8 @@ fi
 # Download or sync Megatron-LM-FL to the requested repo/ref.
 if [ ! -d "${MCORE_PATH}" ]; then
     pushd $(dirname ${MCORE_PATH})
+    git config --global --unset-all credential.helper 2>/dev/null || true
+    git config --system --unset-all credential.helper 2>/dev/null || true
     retry_command 3 5 git clone --depth 1 -b "${MCORE_REF}" "${MCORE_REPO_URL}" $(basename ${MCORE_PATH})
     popd
 fi
@@ -89,7 +91,6 @@ NCCL_ALGO=Ring
 CUBLAS_WORKSPACE_CONFIG=:4096:8
 
 torchrun
---standalone
 --nnodes=1
 --nproc_per_node=1
 
