@@ -10,7 +10,7 @@ on:
 jobs:
   pytorch:
     name: 'PyTorch'
-    runs-on: [ self-hosted, Linux, X64, nvidia, gpu-8 ]
+    runs-on: [ nv-8g-cicd-te ]
     defaults:
       run:
         shell: bash
