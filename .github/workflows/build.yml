@@ -44,11 +44,12 @@ jobs:
           echo "PATH=$PATH" >> $GITHUB_ENV
 
       - name: 'Build'
-        run:
+        run: |
           pip uninstall transformer_engine transformer_engine_torch -y || true
+          echo "GITHUB_WORKSPACE=$GITHUB_WORKSPACE"
           cd $GITHUB_WORKSPACE
-          pip install nvdlfw-inspect --quiet
-          pip install expecttest --quiet
+          pip install nvdlfw-inspect
+          pip install expecttest
           pip install . -v --no-deps --no-build-isolation
         env:
           NVTE_FRAMEWORK: pytorch

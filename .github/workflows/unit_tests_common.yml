@@ -92,6 +92,13 @@ jobs:
           submodules: recursive
           set-safe-directory: true
 
+      # Metax requires to clean vscode-remote-container
+      - name: Configure Clean Git Env on Metax
+        if: inputs.platform == 'metax'
+        run: |
+          git config --global --unset-all credential.helper 2>/dev/null || true
+          git config --system --unset-all credential.helper 2>/dev/null || true
+
       # Metax no need submodules
       - name: Checkout Source Code on Metax
         if: inputs.platform == 'metax'
