@@ -30,6 +30,9 @@ jobs:
         --user root
         --pull never
     steps:
+      - name: Configure Git Safe Directory on Cuda
+        run: /usr/bin/git config --global safe.directory '*'
+
       - name: 'Checkout'
         uses: actions/checkout@v4
         with:
