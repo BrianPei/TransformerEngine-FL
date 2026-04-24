@@ -125,6 +125,16 @@ jobs:
           for k, v in env.items():
               print(f'{k}={v}')
           ")
+          
+          # Activate conda environment
+          if ${{inputs.platform == 'metax'}}; then
+            source /opt/conda/etc/profile.d/conda.sh
+            conda activate base
+          else
+            source /opt/miniconda3/etc/profile.d/conda.sh
+            conda activate flagscale-train
+          fi
+          echo "PATH=$PATH" >> $GITHUB_ENV
 
           export TE_PATH=$GITHUB_WORKSPACE
           export TE_LIB_PATH=$(python3 -c "import site; print(site.getsitepackages()[0])")
