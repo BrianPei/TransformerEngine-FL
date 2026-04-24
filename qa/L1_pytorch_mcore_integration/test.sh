@@ -30,8 +30,8 @@ retry_command() {
 # Paths
 : "${TE_PATH:=$(cd -- "${SCRIPT_DIR}/../.." && pwd)}"
 : "${MCORE_PATH:=/workspace/Megatron-LM-FL}"
-: "${MCORE_REPO_URL:=https://github.com/BrianPei/Megatron-LM-FL.git}"
-: "${MCORE_REF:=dev}"
+: "${MCORE_REPO_URL:=https://github.com/flagos-ai/Megatron-LM-FL.git}"
+: "${MCORE_REF:=main}"
 : "${OUTPUT_DIR:=${TE_PATH}/qa/L1_pytorch_mcore_integration/output}"
 : "${DATA_CACHE_PATH:=/tmp/data_cache}"
 

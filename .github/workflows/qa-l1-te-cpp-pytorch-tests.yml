@@ -151,8 +151,8 @@ jobs:
         env:
           TE_PATH: .
           TE_FL_PREFER: vendor
-          MCORE_REPO_URL: https://github.com/BrianPei/Megatron-LM-FL.git
-          MCORE_REF: dev
+          MCORE_REPO_URL: https://github.com/flagos-ai/Megatron-LM-FL.git
+          MCORE_REF: main
         run: |
           # Activate conda environment
           source /opt/miniconda3/etc/profile.d/conda.sh

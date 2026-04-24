@@ -109,14 +109,8 @@ jobs:
         env:
           TE_PATH: ${{ github.workspace }}
           TE_FL_PREFER: vendor
-          MCORE_REPO_URL: https://github.com/BrianPei/Megatron-LM-FL.git
-          MCORE_REF: dev
-          # network set
-          # MASTER_ADDR: "127.0.0.1"
-          # MASTER_PORT: "39821"
-          # NCCL_SOCKET_IFNAME: "lo"
-          # GLOO_SOCKET_IFNAME: "lo"
-          # TP_SOCKET_IFNAME: "lo"
+          MCORE_REPO_URL: https://github.com/flagos-ai/Megatron-LM-FL.git
+          MCORE_REF: main
         run: |
           set -euo pipefail
 

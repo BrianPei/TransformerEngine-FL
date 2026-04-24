@@ -1,11 +1,11 @@
 # CUDA Hardware Configuration for TransformerEngine-FL
-# Refactored for BAAI DGX A100 Nodes
+# Refactored for A100 Nodes
 # This file defines environment variables, volumes, and test filters for TE tests.
 
 hardware_name: cuda
 display_name: 'NVIDIA CUDA (A100)'
 
-# CI image for BAAI env
+# CI image for online env
 ci_image: harbor.baai.ac.cn/flagscale/cuda12.8.1-torch2.7.1-python3.10-te2.9:20260209
 
 # Runner labels for self-hosted A100 node
@@ -16,7 +16,7 @@ ci_image: harbor.baai.ac.cn/flagscale/cuda12.8.1-torch2.7.1-python3.10-te2.9:202
 #   - nvidia
 #   - gpu-8
 
-# Runner labels for BAAI env
+# Runner labels for online env
 runner_labels:
   - nv-8g-cicd-te
 
