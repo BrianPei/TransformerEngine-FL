@@ -1,0 +1,56 @@
+# Moore Threads (MUSA) Hardware Configuration for TE-FL
+# This file defines CI/CD settings for Moore Threads MUSA-based testing
+# This file defines environment variables, volumes, and test filters for TE tests.
+
+hardware_name: musa
+display_name: 'Moore Threads MUSA Tests'
+
+# CI image for Moore Threads env (Updated to the 0206 verified image)
+ci_image: registry.mthreads.com/presale/devtech/flagsclae:0206
+
+# Target precise runner labels for the 140 Moore Threads node
+runner_labels:
+  - mt-8g-cicd-te
+
+# Container volumes
+container_volumes:
+  - /data:/data
+
+# Container options for MUSA execution
+container_options: >-
+  --uts=host
+  --ipc=host
+  --privileged=true
+  --shm-size=32gb
+  --user root
+  --ulimit nofile=65535:65535
+  --device=/dev/mtgpu
+  -e PLATFORM=musa
+  -e ACCELERATOR_BACKEND=musa
+  -e MUSA_VISIBLE_DEVICES=0
+  -e TE_FL_PREFER=reference
+  -e LD_LIBRARY_PATH=/usr/local/musa/lib:/usr/local/lib:$LD_LIBRARY_PATH
+  -e http_proxy="http://flagcicd-yzli:A7fK9mQ2Zx4P@10.1.12.38:3128"
+  -e https_proxy="http://flagcicd-yzli:A7fK9mQ2Zx4P@10.1.12.38:3128"
+
+# Platform-specific environment setup script
+setup_script: .github/scripts/setup_musa.sh
+
+# Build environment variables & Proxy Settings for CI Runner
+build_env:
+  TE_FL_SKIP_CUDA: '1'
+  MUSA_HOME: /usr/local/musa
+  http_proxy: "http://flagcicd-yzli:A7fK9mQ2Zx4P@10.1.12.38:3128"
+  https_proxy: "http://flagcicd-yzli:A7fK9mQ2Zx4P@10.1.12.38:3128"
+
+# Device types to run tests on
+device_types:
+  - mt-gpu
+
+# Test matrix configuration
+test_matrix:
+  unit:
+    devices:
+      - mt-gpu
+    ignored_tests:
+      # - tests/pytorch/test_numerics.py
