@@ -1140,3 +1140,5 @@ def test_inference_mode(
         with autocast(enabled=with_quantization, recipe=quantization_recipe):
             y = module(x, **kwargs)
     check_weights()
+
+
