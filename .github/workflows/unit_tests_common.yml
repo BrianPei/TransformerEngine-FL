@@ -154,7 +154,7 @@ jobs:
 
           # Coverage setup: install once + configure collection via PYTEST_ADDOPTS
           COVERAGE_ENABLED=false
-          iif pip3 install coverage pytest-cov --quiet 2>/dev/null; then
+          if pip3 install coverage pytest-cov --quiet 2>/dev/null; then
               export PYTEST_ADDOPTS="--cov=transformer_engine/plugin/core --cov-append --cov-report="
               COVERAGE_ENABLED=true
           else
