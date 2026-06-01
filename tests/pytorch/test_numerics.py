@@ -60,7 +60,11 @@ seed = 1234
 # Reset RNG states.
 reset_rng_states()
 
-torch._dynamo.config.recompile_limit = 16
+if hasattr(torch._dynamo.config, 'recompile_limit'):
+    torch._dynamo.config.recompile_limit = 16
+elif hasattr(torch._dynamo.config, 'cache_size_limit'):
+    # In newer PyTorch versions, recompile_limit was refactored into cache_size_limit
+    torch._dynamo.config.cache_size_limit = 16
 
 
 model_configs = {
