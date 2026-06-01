@@ -155,8 +155,8 @@ jobs:
           # Coverage setup: install once + configure collection via PYTEST_ADDOPTS
           COVERAGE_ENABLED=false
           if pip3 install coverage pytest-cov --quiet 2>/dev/null; then
-              export PYTEST_ADDOPTS="--cov=transformer_engine/plugin/core --cov-append --cov-report="
-              COVERAGE_ENABLED=true
+            export PYTEST_ADDOPTS="--cov --cov-append --cov-report="
+            COVERAGE_ENABLED=true
           else
             echo "WARNING: Failed to install coverage/pytest-cov, coverage collection disabled"
           fi
@@ -174,9 +174,7 @@ jobs:
           if [ "$COVERAGE_ENABLED" = "true" ]; then
             python3 -m coverage combine --keep 2>/dev/null || true
             python3 -m coverage json \
-              -o "coverage-${{ inputs.platform }}-${{ inputs.device }}-${{ matrix.test_group.name }}.json" \
-              --include="transformer_engine/plugin/core/*" \
-              --omit="*/setup.py,*/tests/*" 2>/dev/null \
+              -o "coverage-${{ inputs.platform }}-${{ inputs.device }}-${{ matrix.test_group.name }}.json" 2>/dev/null \
               || echo "WARNING: No coverage data found"
           fi
           

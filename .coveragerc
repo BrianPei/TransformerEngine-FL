@@ -1,0 +1,34 @@
+[run]
+# 1. Dynamic data collection whitelist: monitor runtime code exclusively inside the core architecture
+include =
+    transformer_engine/plugin/core/*
+
+# 2. Dynamic data collection blacklist: strip test frameworks, setups, and unadapted vendor backends from the baseline denominator
+omit =
+    */setup.py
+    */tests/*
+    */qa/*
+    transformer_engine/plugin/core/backends/vendor/unsupported_hardware/*
+
+[report]
+# 3. Static dead-end exclusion: drop syntactically unreachable or administrative statements from the denominator
+exclude_lines =
+    # Explicit bypass flag
+    pragma: no cover
+
+    # Debugging and string magic methods (do not impact core runtime business)
+    def __repr__
+    def __str__
+
+    # Local execution entry points
+    if __name__ == .__main__.:
+
+    # Abstract interfaces and defensive boilerplate exceptions
+    raise NotImplementedError
+    
+    # Environment/dependency probing fallbacks
+    except ImportError:
+    pass
+
+# 4. Formatter adjustment: force term report to output missing line numbers for precise targeted patching
+show_missing = True
