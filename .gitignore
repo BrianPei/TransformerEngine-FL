@@ -43,4 +43,4 @@ artifacts/
 # Auto-generated build configuration (specific to each environment)
 transformer_engine/plugin/core/_build_config.py
 # Mac OS
-.DS_Storeqa/L1_pytorch_mcore_integration/output/checkpoints/
+.DS_Store
