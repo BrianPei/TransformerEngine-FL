@@ -155,7 +155,7 @@ jobs:
           # Coverage setup: install once + configure collection via PYTEST_ADDOPTS
           COVERAGE_ENABLED=false
           if pip3 install coverage pytest-cov --quiet 2>/dev/null; then
-            export PYTEST_ADDOPTS="--cov=transformer_engine.pytorch --cov-append --cov-report="
+            export PYTEST_ADDOPTS="--cov=transformer_engine/pytorch --cov-append --cov-report="
             COVERAGE_ENABLED=true
           else
             echo "WARNING: Failed to install coverage/pytest-cov, coverage collection disabled"
