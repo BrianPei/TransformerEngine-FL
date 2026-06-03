@@ -51,6 +51,9 @@ jobs:
           - name: pytorch_distributed_unittest
             path: "qa/L1_pytorch_distributed_unittest/test.sh"
             test_type: "unittest"
+          - name: pytorch_onnx_unittest
+            path: "qa/L1_pytorch_onnx_unittest/test.sh"
+            test_type: "unittest"
     name: unit-${{ inputs.device }}-${{ matrix.test_group.name }}
     container:
       image: ${{ inputs.image }}
@@ -155,7 +158,7 @@ jobs:
           # Coverage setup: install once + configure collection via PYTEST_ADDOPTS
           COVERAGE_ENABLED=false
           if pip3 install coverage pytest-cov --quiet 2>/dev/null; then
-            export PYTEST_ADDOPTS="--cov=transformer_engine/pytorch --cov-append --cov-report="
+            export PYTEST_ADDOPTS="--cov=transformer_engine/pytorch --cov=transformer_engine/debug --cov=transformer_engine/plugin --cov-append --cov-report="
             COVERAGE_ENABLED=true
           else
             echo "WARNING: Failed to install coverage/pytest-cov, coverage collection disabled"
@@ -175,7 +178,7 @@ jobs:
             python3 -m coverage combine --keep 2>/dev/null || true
             python3 -m coverage json \
               -o "coverage-${{ inputs.platform }}-${{ inputs.device }}-${{ matrix.test_group.name }}.json" \
-              --include="transformer_engine/pytorch/*" \
+              --include="transformer_engine/pytorch/*,transformer_engine/debug/*,transformer_engine/plugin/*" \
               --omit="*/setup.py" 2>/dev/null \
               || echo "WARNING: No coverage data found"
 
@@ -255,7 +258,7 @@ jobs:
           python3 -m coverage combine coverage-raw
           python3 -m coverage json \
             -o "coverage-${{ inputs.platform }}-${{ inputs.device }}-pytorch-all.json" \
-            --include="transformer_engine/pytorch/*" \
+            --include="transformer_engine/pytorch/*,transformer_engine/debug/*,transformer_engine/plugin/*" \
             --omit="*/setup.py"
 
           echo "coverage_aggregated=true" >> "$GITHUB_OUTPUT"
