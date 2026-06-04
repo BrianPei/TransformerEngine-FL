@@ -42,15 +42,15 @@ jobs:
       fail-fast: false
       matrix:
         test_group:
-          # - name: pytorch_debug
-          #   path: "qa/L0_pytorch_debug_unittest/test.sh"
-          #   test_type: "debug"
-          # - name: pytorch_unittest
-          #   path: "qa/L0_pytorch_unittest/test.sh"
-          #   test_type: "unittest"
-          # - name: pytorch_distributed_unittest
-          #   path: "qa/L1_pytorch_distributed_unittest/test.sh"
-          #   test_type: "unittest"
+          - name: pytorch_debug
+            path: "qa/L0_pytorch_debug_unittest/test.sh"
+            test_type: "debug"
+          - name: pytorch_unittest
+            path: "qa/L0_pytorch_unittest/test.sh"
+            test_type: "unittest"
+          - name: pytorch_distributed_unittest
+            path: "qa/L1_pytorch_distributed_unittest/test.sh"
+            test_type: "unittest"
           - name: pytorch_onnx_unittest
             path: "qa/L1_pytorch_onnx_unittest/test.sh"
             test_type: "unittest"
@@ -179,7 +179,8 @@ jobs:
             python3 -m coverage json \
               -o "coverage-${{ inputs.platform }}-${{ inputs.device }}-${{ matrix.test_group.name }}.json" \
               --include="transformer_engine/pytorch/*,transformer_engine/debug/*,transformer_engine/plugin/*" \
-              --omit="*/setup.py" 2>/dev/null \
+              --omit="*/setup.py,*/transformer_engine/plugin/core/_build_config.py" \
+              -i 2>/dev/null \
               || echo "WARNING: No coverage data found"
 
             if [ -f .coverage ]; then
@@ -199,7 +200,7 @@ jobs:
             coverage-${{ inputs.platform }}-${{ inputs.device }}-${{ matrix.test_group.name }}.coverage
 
   aggregate_coverage:
-    name: unit-${{ inputs.device }}-pytorch-all-coverage
+    name: unit-${{ inputs.device }}-pytorch-unittest-coverage
     needs: unit_test
     if: always()
     defaults:
@@ -257,9 +258,10 @@ jobs:
 
           python3 -m coverage combine coverage-raw
           python3 -m coverage json \
-            -o "coverage-${{ inputs.platform }}-${{ inputs.device }}-pytorch-all.json" \
+            -o "coverage-${{ inputs.platform }}-${{ inputs.device }}-pytorch-unittest.json" \
             --include="transformer_engine/pytorch/*,transformer_engine/debug/*,transformer_engine/plugin/*" \
-            --omit="*/setup.py"
+            --omit="*/setup.py,*/transformer_engine/plugin/core/_build_config.py" \
+            -i
 
           echo "coverage_aggregated=true" >> "$GITHUB_OUTPUT"
 
@@ -268,8 +270,8 @@ jobs:
         uses: actions/upload-artifact@v4
         continue-on-error: true
         with:
-          name: coverage-${{ inputs.platform }}-${{ inputs.device }}-pytorch-all
-          path: coverage-${{ inputs.platform }}-${{ inputs.device }}-pytorch-all.json
+          name: coverage-${{ inputs.platform }}-${{ inputs.device }}-pytorch-unittest
+          path: coverage-${{ inputs.platform }}-${{ inputs.device }}-pytorch-unittest.json
 
       - name: Upload Coverage Report to FlagCICD
         if: steps.aggregate.outputs.coverage_aggregated == 'true'
@@ -280,5 +282,5 @@ jobs:
         with:
           backend_url: 'http://flagcicd-inner.flagos.net:8000/metrics/'
           user_id: '000000000000000000'
-          report_path: 'coverage-${{ inputs.platform }}-${{ inputs.device }}-pytorch-all.json'
+          report_path: 'coverage-${{ inputs.platform }}-${{ inputs.device }}-pytorch-unittest.json'
           fail_on_error: 'false'
