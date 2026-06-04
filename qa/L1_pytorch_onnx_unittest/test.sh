@@ -5,7 +5,6 @@
 
 pip3 install onnxruntime
 pip3 install onnxruntime_extensions
-pip3 install tensorrt --index-url=https://pypi.tuna.tsinghua.edu.cn/simple
 
 : ${TE_PATH:=/opt/transformerengine}
 : ${XML_LOG_DIR:=/logs}

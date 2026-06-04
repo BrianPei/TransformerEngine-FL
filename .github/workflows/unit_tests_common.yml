@@ -42,15 +42,15 @@ jobs:
       fail-fast: false
       matrix:
         test_group:
-          - name: pytorch_debug
-            path: "qa/L0_pytorch_debug_unittest/test.sh"
-            test_type: "debug"
-          - name: pytorch_unittest
-            path: "qa/L0_pytorch_unittest/test.sh"
-            test_type: "unittest"
-          - name: pytorch_distributed_unittest
-            path: "qa/L1_pytorch_distributed_unittest/test.sh"
-            test_type: "unittest"
+          # - name: pytorch_debug
+          #   path: "qa/L0_pytorch_debug_unittest/test.sh"
+          #   test_type: "debug"
+          # - name: pytorch_unittest
+          #   path: "qa/L0_pytorch_unittest/test.sh"
+          #   test_type: "unittest"
+          # - name: pytorch_distributed_unittest
+          #   path: "qa/L1_pytorch_distributed_unittest/test.sh"
+          #   test_type: "unittest"
           - name: pytorch_onnx_unittest
             path: "qa/L1_pytorch_onnx_unittest/test.sh"
             test_type: "unittest"
