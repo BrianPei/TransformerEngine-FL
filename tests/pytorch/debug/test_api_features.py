@@ -42,7 +42,9 @@ def test_transformer_engine_no_config(feature_dirs):
 
 def test_disable_fp8_gemm(configs_dir, feature_dirs):
     try:
-        debug_api.initialize(configs_dir + "disable_fp8_gemms.yaml", feature_dirs=feature_dirs)
+        debug_api.initialize(
+            configs_dir + "disable_fp8_gemms.yaml", feature_dirs=feature_dirs
+        )
 
         assert debug_api.transformer_engine.fp8_gemm_enabled(
             "decoder.1.attn.qkv", gemm="fprop", iteration=0
@@ -71,7 +73,9 @@ def test_disable_fp8_gemm(configs_dir, feature_dirs):
 
 def test_disable_fp8_layer(configs_dir, feature_dirs):
     try:
-        debug_api.initialize(configs_dir + "disable_fp8_layer.yaml", feature_dirs=feature_dirs)
+        debug_api.initialize(
+            configs_dir + "disable_fp8_layer.yaml", feature_dirs=feature_dirs
+        )
 
         assert debug_api.transformer_engine.fp8_gemm_enabled(
             "decoder.1.mlp.fc1", gemm="fprop", iteration=0
@@ -99,7 +103,9 @@ def test_disable_fp8_layer(configs_dir, feature_dirs):
 def test_per_tensor_scaling(configs_dir, feature_dirs):
     try:
 
-        debug_api.initialize(configs_dir + "per_tensor_scaling.yaml", feature_dirs=feature_dirs)
+        debug_api.initialize(
+            configs_dir + "per_tensor_scaling.yaml", feature_dirs=feature_dirs
+        )
 
         tensor = torch.rand(24, 2046).cuda()
 
@@ -145,7 +151,7 @@ def test_per_tensor_scaling(configs_dir, feature_dirs):
             tensor=tensor,
         )
         assert type(output1) == Float8Tensor
-        assert output1._fp8_dtype == tex.DType.kFloat8E4M3
+        assert output1._fp8_dtype.value == tex.DType.kFloat8E4M3.value
 
         output2 = debug_api.transformer_engine.modify_tensor(
             "decoder.1.mlp.fc1",
@@ -156,7 +162,7 @@ def test_per_tensor_scaling(configs_dir, feature_dirs):
             iteration=0,
         )
         assert type(output2) == Float8Tensor
-        assert output2._fp8_dtype == tex.DType.kFloat8E5M2
+        assert output2._fp8_dtype.value == tex.DType.kFloat8E5M2.value
 
         assert not debug_api.transformer_engine.modify_tensor_enabled(
             "decoder.1.mlp.fc1",
@@ -239,7 +245,9 @@ def test_statistics_collection(configs_dir, feature_dirs):
         tensor_fp8 = quantizer(tensor)
 
         def log():
-            from transformer_engine.debug.features.utils.stats_buffer import STATS_BUFFERS
+            from transformer_engine.debug.features.utils.stats_buffer import (
+                STATS_BUFFERS,
+            )
 
             return STATS_BUFFERS.log_stats()
 
@@ -259,7 +267,10 @@ def test_statistics_collection(configs_dir, feature_dirs):
             columnwise_quantized_tensor=tensor_fp8,
         )
         stats = log()
-        assert stats[("decoder.1.mlp.fc1", "activation", "cur_amax", 200)] == tensor.abs().max()
+        assert (
+            stats[("decoder.1.mlp.fc1", "activation", "cur_amax", 200)]
+            == tensor.abs().max()
+        )
         assert not debug_api.transformer_engine.inspect_tensor_enabled(
             "decoder.1.mlp.fc1", tensor_name="activation", iteration=201
         )[0]
@@ -268,7 +279,9 @@ def test_statistics_collection(configs_dir, feature_dirs):
         )[0]
 
         expected_underflows = (
-            ((tensor_fp8.dequantize() == 0).sum() - (tensor == 0).sum()) * 100 / (100 * 100 * 5)
+            ((tensor_fp8.dequantize() == 0).sum() - (tensor == 0).sum())
+            * 100
+            / (100 * 100 * 5)
         )
 
         assert debug_api.transformer_engine.inspect_tensor_enabled(
@@ -291,7 +304,8 @@ def test_statistics_collection(configs_dir, feature_dirs):
         )
         stats = log()
         torch.testing.assert_close(
-            stats[("decoder.1.mlp.fc1", "gradient", "underflows%", 200)], expected_underflows
+            stats[("decoder.1.mlp.fc1", "gradient", "underflows%", 200)],
+            expected_underflows,
         )
 
         assert not debug_api.transformer_engine.inspect_tensor_enabled(
@@ -315,7 +329,10 @@ def test_statistics_collection(configs_dir, feature_dirs):
         )
         stats = log()
         stats_names = [x[3] for x in stats.keys()]
-        all(s in stats_names for s in ["cur_amax", "dynamic_range", "mean", "std", "l1_norm"])
+        all(
+            s in stats_names
+            for s in ["cur_amax", "dynamic_range", "mean", "std", "l1_norm"]
+        )
         torch.testing.assert_close(
             stats[("decoder.6.mlp.fc1", "activation", "mean", 200)], tensor.mean()
         )
@@ -333,7 +350,9 @@ def test_statistics_collection(configs_dir, feature_dirs):
         stats = log()
         stats_names = [x[3] for x in stats.keys()]
         all(s in stats_names for s in ["mean", "std", "l1_norm", "min", "max"])
-        torch.testing.assert_close(stats[("decoder.7.mlp.fc1", "weight", "max", 200)], tensor.max())
+        torch.testing.assert_close(
+            stats[("decoder.7.mlp.fc1", "weight", "max", 200)], tensor.max()
+        )
 
         assert not debug_api.transformer_engine.inspect_tensor_enabled(
             "decoder.7.mlp.fc1", tensor_name="weight", iteration=201
@@ -365,7 +384,9 @@ def test_statistics_multi_run(configs_dir, feature_dirs):
             )
 
         def log_stats():
-            from transformer_engine.debug.features.utils.stats_buffer import STATS_BUFFERS
+            from transformer_engine.debug.features.utils.stats_buffer import (
+                STATS_BUFFERS,
+            )
 
             return STATS_BUFFERS.log_stats()
 
