@@ -1,5 +1,5 @@
 /*************************************************************************
- * Copyright (c) 2022-2025, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * Copyright (c) 2022-2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
  *
  * See LICENSE for license information.
  ************************************************************************/
@@ -927,6 +927,13 @@ using fp8e5m2 = __nv_fp8_e5m2;
 using e8m0_t = uint8_t;
 
 enum ScalingType { ROWWISE = 0, COLWISE = 1, BIDIMENSIONAL = 2 };
+
+enum ShapeRepresentation {
+  SAME_BOTH_DIMS = 0,
+  VARYING_FIRST_DIM = 1,
+  VARYING_LAST_DIM = 2,
+  VARYING_BOTH_DIMS = 3
+};
 
 template <typename T>
 struct Numeric_Traits;

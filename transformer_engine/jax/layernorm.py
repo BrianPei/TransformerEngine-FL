@@ -1,4 +1,4 @@
-# Copyright (c) 2022-2025, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# Copyright (c) 2022-2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 #
 # See LICENSE for license information.
 """Layer normalization operations for Transformer Engine in JAX.
@@ -31,7 +31,11 @@ def canonicalize_norm_type(x):
         Canonicalized normalization type string
     """
     canonicalized = x.lower().strip().replace("-", "").replace("_", "")
-    assert canonicalized in ["layernorm", "rmsnorm"]
+    if canonicalized not in ["layernorm", "rmsnorm"]:
+        raise ValueError(
+            f"Unsupported normalization type '{x}' (canonicalized: '{canonicalized}'). "
+            "Valid options are: 'layernorm', 'rmsnorm'."
+        )
     return canonicalized
 
 

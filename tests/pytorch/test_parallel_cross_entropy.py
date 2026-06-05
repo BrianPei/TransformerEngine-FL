@@ -1,4 +1,4 @@
-# Copyright (c) 2022-2025, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# Copyright (c) 2022-2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 #
 # See LICENSE for license information.
 
@@ -89,7 +89,7 @@ class TestParallelCrossEntropy:
         # Check that loss and grad input match
         tols = dtype_tols(dtype)
         test_loss = test_loss.to(dtype=torch.float64, device="cpu")
-        ref_loss = test_loss.to(dtype=torch.float64, device="cpu")
+        ref_loss = ref_loss.to(dtype=torch.float64, device="cpu")
         ref_loss = ref_loss.reshape(test_loss.size())
         test_grad_input = self.input_test.grad.to(dtype=torch.float64, device="cpu")
         ref_grad_input = self.input_ref.grad.to(dtype=torch.float64, device="cpu")
@@ -154,3 +154,37 @@ class TestParallelCrossEntropy:
                 reduce_loss=False,
                 ignore_idx=True,
             )
+
+    def test_ignore_idx_reduced_loss(self):
+        """Test ignore_idx with reduce_loss=True"""
+        self.generate_iters(5)
+        self.generate_infra(True, 0)  # reduce_loss=True
+        for i in range(self.iters):
+            self.one_iteration_test(
+                dtype=torch.float32,
+                swap_dim=random.choice([True, False]),
+                label_smoothing=0,
+                reduce_loss=True,
+                ignore_idx=True,
+            )
+
+
+def test_non_contiguous_transposed_input():
+    """Regression test: stride(-2) != shape[-1] should not produce wrong results."""
+    s, b, v = 4, 2, 8
+    torch.manual_seed(42)
+    logits = torch.randn(s, b, v, device="cuda")
+    target = torch.randint(0, v, (b, s), device="cuda")
+
+    logits_transposed = logits.transpose(0, 1)  # stride(-2) != shape[-1]
+    logits_contiguous = logits_transposed.contiguous()
+
+    assert logits_transposed.stride(-1) == 1
+    assert logits_transposed.stride(-2) != logits_transposed.shape[-1]
+
+    loss_t = parallel_cross_entropy(logits_transposed, target, 0.0, False, None)
+    loss_c = parallel_cross_entropy(logits_contiguous, target, 0.0, False, None)
+
+    assert torch.allclose(
+        loss_t, loss_c
+    ), f"Non-contiguous transposed input gave wrong results: {loss_t} vs {loss_c}"

@@ -1,4 +1,4 @@
-# Copyright (c) 2022-2025, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# Copyright (c) 2022-2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 #
 # See LICENSE for license information.
 
@@ -7,7 +7,7 @@ import subprocess
 import sys
 import pathlib
 import logging
-
+import copy
 import pytest
 import torch
 from transformer_engine.pytorch import (
@@ -22,7 +22,7 @@ from transformer_engine.pytorch.attention.dot_product_attention.utils import Fla
 
 _current_file = pathlib.Path(__file__).resolve()
 sys.path.append(str(_current_file.parent.parent))
-from utils import ModelConfig, get_available_attention_backends
+from utils import ModelConfig, get_available_attention_backends, run_distributed
 
 pytest_logging_level = logging.getLevelName(logging.root.level)
 
@@ -73,7 +73,7 @@ dtypes = ["bf16", "fp16"]
 qkv_formats = ["bshd", "sbhd", "thd"]
 cp_comm_types = ["p2p", "all_gather", "a2a", "a2a+p2p"]
 if test_essential:
-    configs = ["cp_1_0", "cp_2_1", "cp_3_2", "cp_3_3"]
+    configs = ["cp_1_0", "cp_1_2", "cp_2_1", "cp_3_2", "cp_3_3"]
     model_configs_flash_attn = {k: model_configs_flash_attn[k] for k in configs}
     dtypes = ["bf16"]
     qkv_formats = ["sbhd", "thd"]
@@ -96,12 +96,16 @@ def test_cp_with_flash_attention(dtype, model, qkv_format, cp_comm_type):
 
     if "p2p" in cp_comm_type and config.window_size != (-1, 0) and config.window_size != (-1, -1):
         pytest.skip("CP implementation with KV P2P does not support sliding window yet!")
-    if cp_comm_type == "all_gather" and qkv_format == "thd":
-        pytest.skip("CP implementation with KV all-gather does not support THD format yet!")
     if cp_comm_type == "all_gather" and config.attn_bias_type != "no_bias":
         pytest.skip("CP implementation with KV all-gather does not support bias yet!")
-    if "a2a" in cp_comm_type and qkv_format == "thd":
-        pytest.skip("CP implementation with QKVO A2A does not support THD format yet!")
+    if qkv_format == "thd":
+        if cp_comm_type == "all_gather":
+            pytest.skip("CP implementation with KV all-gather does not support THD format yet!")
+        if cp_comm_type == "a2a+p2p":
+            pytest.skip(
+                "CP implementation with QKVO A2A+P2P (Hierarchical A2A) does not support THD format"
+                " yet!"
+            )
     if "a2a" in cp_comm_type and config.attn_bias_type != "no_bias":
         pytest.skip("CP implementation with QKVO A2A does not support bias yet!")
     if "a2a" in cp_comm_type and (config.num_heads % 2 != 0 or config.num_gqa_groups % 2 != 0):
@@ -121,7 +125,7 @@ def test_cp_with_flash_attention(dtype, model, qkv_format, cp_comm_type):
     if not flash_attn_supported:
         pytest.skip("No attention backend available.")
 
-    subprocess.run(
+    run_distributed(
         get_bash_arguments(
             num_gpus_per_node=num_gpus,
             dtype=dtype,
@@ -131,7 +135,6 @@ def test_cp_with_flash_attention(dtype, model, qkv_format, cp_comm_type):
             cp_comm_type=cp_comm_type,
             log_level=pytest_logging_level,
         ),
-        check=True,
     )
 
 
@@ -143,7 +146,10 @@ model_configs_fused_attn = {
         2, 4096, 12, 128, attn_mask_type="causal", attn_bias_type="post_scale_bias"
     ),  # MHA
     "cp_1_3": ModelConfig(2, 4096, 12, 128, attn_bias_type="post_scale_bias"),  # MHA
-    "cp_1_4": ModelConfig(2, 4096, 12, 128, attn_mask_type="causal", window_size=(512, 0)),  # MHA
+    "cp_1_4": ModelConfig(
+        2, 4096, 12, 128, attn_bias_type="post_scale_bias", bias_shape="bhss"
+    ),  # MHA
+    "cp_1_5": ModelConfig(2, 4096, 12, 128, attn_mask_type="causal", window_size=(512, 512)),  # MHA
     "cp_2_0": ModelConfig(2, 4096, 12, 128, num_gqa_groups=2, attn_mask_type="causal"),  # GQA
     "cp_2_1": ModelConfig(2, 4096, 12, 128, num_gqa_groups=2),  # GQA
     "cp_2_2": ModelConfig(
@@ -156,10 +162,31 @@ model_configs_fused_attn = {
         attn_bias_type="post_scale_bias",
     ),  # GQA
     "cp_2_3": ModelConfig(
-        2, 4096, 12, 128, num_gqa_groups=2, attn_bias_type="post_scale_bias"
+        2,
+        4096,
+        12,
+        128,
+        num_gqa_groups=2,
+        attn_mask_type="causal",
+        attn_bias_type="post_scale_bias",
+        bias_shape="11ss",
     ),  # GQA
     "cp_2_4": ModelConfig(
-        2, 4096, 12, 128, num_gqa_groups=2, attn_mask_type="causal", window_size=(512, 0)
+        2,
+        4096,
+        12,
+        128,
+        num_gqa_groups=2,
+        attn_mask_type="causal",
+        attn_bias_type="post_scale_bias",
+        bias_shape="111s",
+        return_max_logit=True,
+    ),  # GQA
+    "cp_2_5": ModelConfig(
+        2, 4096, 12, 128, num_gqa_groups=2, attn_bias_type="post_scale_bias"
+    ),  # GQA
+    "cp_2_6": ModelConfig(
+        2, 4096, 12, 128, num_gqa_groups=2, attn_mask_type="causal", window_size=(512, 512)
     ),  # GQA
     "cp_3_0": ModelConfig(2, 4096, 12, 128, attn_mask_type="causal", head_dim_v=64),  # MLA
     "cp_3_1": ModelConfig(2, 4096, 12, 128, head_dim_v=64),  # MLA
@@ -167,6 +194,9 @@ model_configs_fused_attn = {
         2, 4096, 12, 128, attn_mask_type="causal", attn_bias_type="post_scale_bias", head_dim_v=64
     ),  # MLA
     "cp_3_3": ModelConfig(2, 4096, 12, 128, attn_bias_type="post_scale_bias", head_dim_v=64),  # MLA
+    "cp_3_4": ModelConfig(
+        2, 4096, 12, 128, attn_bias_type="post_scale_bias", bias_shape="b1ss", head_dim_v=64
+    ),  # MLA
     "cp_4_0": ModelConfig(
         2, 4096, 64, 64, num_gqa_groups=8, attn_mask_type="causal", softmax_type="vanilla"
     ),  # GQA
@@ -183,7 +213,19 @@ dtypes = ["bf16", "fp16", "fp8"]
 qkv_formats = ["bshd", "sbhd", "thd"]
 cp_comm_types = ["p2p", "all_gather", "a2a", "a2a+p2p"]
 if test_essential:
-    configs = ["cp_1_0", "cp_1_1", "cp_2_0", "cp_2_2", "cp_3_2", "cp_4_2"]
+    configs = [
+        "cp_1_0",
+        "cp_1_1",
+        "cp_1_4",
+        "cp_1_5",
+        "cp_2_0",
+        "cp_2_2",
+        "cp_2_3",
+        "cp_2_4",
+        "cp_3_2",
+        "cp_3_4",
+        "cp_4_2",
+    ]
     model_configs_fused_attn = {k: model_configs_fused_attn[k] for k in configs}
     dtypes = ["bf16", "fp8"]
     qkv_formats = ["sbhd", "thd"]
@@ -224,10 +266,14 @@ def test_cp_with_fused_attention(
 
     if qkv_format == "thd" and config.attn_bias_type == "post_scale_bias":
         pytest.skip("THD format does not support post_scale_bias yet!")
-    if qkv_format == "thd" and cp_comm_type == "all_gather":
-        pytest.skip("CP implementation with KV all-gather does not support THD format yet!")
-    if qkv_format == "thd" and "a2a" in cp_comm_type:
-        pytest.skip("CP implementation with QKVO A2A does not support THD format yet!")
+    if qkv_format == "thd":
+        if cp_comm_type == "all_gather":
+            pytest.skip("CP implementation with KV all-gather does not support THD format yet!")
+        if cp_comm_type == "a2a+p2p":
+            pytest.skip(
+                "CP implementation with QKVO A2A+P2P (Hierarchical A2A) does not support THD format"
+                " yet!"
+            )
     if dtype == "fp8" and cp_comm_type == "all_gather":
         pytest.skip(
             "CP implementation with KV all-gather does not support FP8 + context parallelism yet!"
@@ -275,12 +321,25 @@ def test_cp_with_fused_attention(
         pytest.skip(
             "CP implementation only supports cp_comm_type=a2a for non-vanilla softmax types!"
         )
-    if config.softmax_type != "vanilla" and qkv_format == "thd":
+    if (
+        get_cudnn_version() < (9, 18, 0)
+        and config.softmax_type != "vanilla"
+        and qkv_format == "thd"
+    ):
         pytest.skip(
-            "CP implementation does not support qkv_format=thd for non-vanilla softmax types!"
+            "Unless cudnn version >= 9.18.0, CP implementation does not support qkv_format=thd for"
+            " non-vanilla softmax types!"
         )
 
     dtypes = {"fp16": torch.float16, "bf16": torch.bfloat16, "fp8": torch.bfloat16}
+
+    if qkv_format == "thd":
+        config = copy.deepcopy(config)
+        if "causal" in config.attn_mask_type:
+            config.attn_mask_type = "padding_causal"
+        else:
+            config.attn_mask_type = "padding"
+
     fp8_meta = {}
     fp8_meta["recipe"] = None
     fp8_meta["local_recipes"] = []
@@ -294,18 +353,21 @@ def test_cp_with_fused_attention(
             Float8CurrentScaling(fp8_dpa=True),
             DelayedScaling(fp8_dpa=True),
         ]
+    # For 111s, dbias calculation is not supported as of cuDNN 9.18, hence, test fwd only for 111s.
+    is_training = False if config.bias_shape == "111s" else True
     available_backends, _, fused_attn_backends = get_available_attention_backends(
         config,
         qkv_dtype=dtypes[dtype] if dtype != "fp8" else torch.float8_e4m3fn,
         qkv_layout="_".join([qkv_format] * 3),
         fp8=fp8,
         fp8_meta=fp8_meta,
+        is_training=is_training,
     )
     _, fused_attn_supported, _ = available_backends
     if not fused_attn_supported:
         pytest.skip("No attention backend available.")
 
-    subprocess.run(
+    run_distributed(
         get_bash_arguments(
             num_gpus_per_node=num_gpus,
             dtype=dtype,
@@ -318,7 +380,7 @@ def test_cp_with_fused_attention(
             fp8_mha=fp8_mha,
             scaling_mode=scaling_mode,
             f16_O=f16_O,
+            is_training=is_training,
             log_level=pytest_logging_level,
         ),
-        check=True,
     )

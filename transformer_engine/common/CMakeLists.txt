@@ -1,4 +1,4 @@
-# Copyright (c) 2022-2025, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# Copyright (c) 2022-2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 #
 # See LICENSE for license information.
 
@@ -98,28 +98,6 @@ set(CUTLASS_TOOLS_INCLUDE_DIR
 # Python
 find_package(Python COMPONENTS Interpreter Development.Module REQUIRED)
 
-# NVIDIA MathDX include directory (from Python package install location)
-if(NOT DEFINED MATHDX_INCLUDE_DIR)
-  execute_process(
-    COMMAND ${Python_EXECUTABLE} -m pip show nvidia-mathdx
-    OUTPUT_VARIABLE _PIP_SHOW_MATHDX
-    ERROR_VARIABLE _PIP_SHOW_MATHDX_ERR
-    RESULT_VARIABLE _PIP_SHOW_MATHDX_RES
-    OUTPUT_STRIP_TRAILING_WHITESPACE)
-  if(NOT _PIP_SHOW_MATHDX_RES EQUAL 0)
-    message(FATAL_ERROR "Failed to query 'nvidia-mathdx' with pip (using ${Python_EXECUTABLE}): ${_PIP_SHOW_MATHDX_ERR}")
-  endif()
-  string(REGEX MATCH "Location: ([^\n\r]+)" _MATHDX_LOC_MATCH "${_PIP_SHOW_MATHDX}")
-  if(NOT _MATHDX_LOC_MATCH)
-    message(FATAL_ERROR "Could not parse installation location for 'nvidia-mathdx'. Output was:\n${_PIP_SHOW_MATHDX}")
-  endif()
-  set(MATHDX_LOCATION "${CMAKE_MATCH_1}")
-  set(MATHDX_INCLUDE_DIR "${MATHDX_LOCATION}/nvidia/mathdx/include")
-endif()
-if(NOT EXISTS "${MATHDX_INCLUDE_DIR}")
-  message(FATAL_ERROR "MATHDX include directory not found at ${MATHDX_INCLUDE_DIR}. Set MATHDX_INCLUDE_DIR or ensure 'nvidia-mathdx' is installed for ${Python_EXECUTABLE}.")
-endif()
-
 # Configure Transformer Engine library
 include_directories(${PROJECT_SOURCE_DIR}/..)
 set(transformer_engine_SOURCES)
@@ -147,7 +125,6 @@ list(APPEND transformer_engine_cpp_sources
 list(APPEND transformer_engine_cuda_sources
      common.cu
      multi_tensor/adam.cu
-     multi_tensor/compute_scale.cu
      multi_tensor/l2norm.cu
      multi_tensor/scale.cu
      multi_tensor/sgd.cu
@@ -167,11 +144,13 @@ list(APPEND transformer_engine_cuda_sources
      fused_attn/fused_attn_fp8.cu
      fused_attn/utils.cu
      gemm/cublaslt_gemm.cu
+     gemm/cublaslt_grouped_gemm.cu
      normalization/layernorm/ln_bwd_semi_cuda_kernel.cu
      normalization/layernorm/ln_fwd_cuda_kernel.cu
      normalization/rmsnorm/rmsnorm_bwd_semi_cuda_kernel.cu
      normalization/rmsnorm/rmsnorm_fwd_cuda_kernel.cu
      permutation/permutation.cu
+     util/utils.cu
      util/padding.cu
      swizzle/swizzle.cu
      swizzle/swizzle_block_scaling.cu
@@ -185,19 +164,28 @@ list(APPEND transformer_engine_cuda_sources
      recipe/current_scaling.cu
      recipe/delayed_scaling.cu
      recipe/fp8_block_scaling.cu
-     recipe/nvfp4.cu
      comm_gemm_overlap/userbuffers/userbuffers.cu)
 
 list(APPEND transformer_engine_cuda_arch_specific_sources
-     gemm/cutlass_grouped_gemm.cu
-     util/cast.cu
      activation/gelu.cu
+     activation/glu.cu
      activation/relu.cu
      activation/swiglu.cu
-     transpose/quantize_transpose_square_blockwise.cu
-     transpose/quantize_transpose_vector_blockwise_fp4.cu
+     cast/cast.cu
+     gemm/cutlass_grouped_gemm.cu
+     hadamard_transform/group_hadamard_transform.cu
+     hadamard_transform/graph_safe_group_hadamard_transform.cu
      hadamard_transform/hadamard_transform.cu
-     hadamard_transform/hadamard_transform_cast_fusion.cu)
+     hadamard_transform/hadamard_transform_cast_fusion.cu
+     hadamard_transform/row_cast_col_hadamard_transform_cast_fusion.cu
+     hadamard_transform/group_hadamard_transform_cast_fusion.cu
+     hadamard_transform/group_row_cast_col_hadamard_transform_cast_fusion.cu
+     hadamard_transform/graph_safe_group_row_cast_col_hadamard_transform_cast_fusion.cu
+     multi_tensor/compute_scale.cu
+     recipe/mxfp8_scaling.cu
+     recipe/nvfp4.cu
+     transpose/quantize_transpose_square_blockwise.cu
+     transpose/quantize_transpose_vector_blockwise_fp4.cu)
 
 # Compiling the files with the worst compilation time first to hopefully overlap
 # better with the faster-compiling cpp files
@@ -248,12 +236,24 @@ add_library(transformer_engine SHARED ${transformer_engine_SOURCES})
 target_include_directories(transformer_engine PUBLIC
                            "${CMAKE_CURRENT_SOURCE_DIR}/include")
 
-# CUTLASS kernels require SM90a and cause hang in debug build
+# Grouped GEMM kernels require SM90a
 set_property(
   SOURCE gemm/cutlass_grouped_gemm.cu
   APPEND
   PROPERTY
-  COMPILE_OPTIONS "--generate-code=arch=compute_90a,code=sm_90a;-g0")
+  COMPILE_OPTIONS "--generate-code=arch=compute_90a,code=sm_90a")
+
+# CUTLASS kernels could cause hang in debug build
+set(CUTLASS_KERNEL_SOURCES
+    gemm/cutlass_grouped_gemm.cu
+    hadamard_transform/group_hadamard_transform_cast_fusion.cu
+    hadamard_transform/group_row_cast_col_hadamard_transform_cast_fusion.cu
+    hadamard_transform/hadamard_transform_cast_fusion.cu)
+set_property(
+  SOURCE ${CUTLASS_KERNEL_SOURCES}
+  APPEND
+  PROPERTY
+  COMPILE_OPTIONS "-g0;-dopt=on")
 
 # Configure dependencies
 target_link_libraries(transformer_engine PUBLIC
@@ -263,7 +263,6 @@ target_link_libraries(transformer_engine PUBLIC
 
 target_include_directories(transformer_engine PRIVATE
                            ${CMAKE_CUDA_TOOLKIT_INCLUDE_DIRECTORIES})
-target_include_directories(transformer_engine PRIVATE ${MATHDX_INCLUDE_DIR})
 target_include_directories(transformer_engine SYSTEM PRIVATE
                            ${CMAKE_CUDA_TOOLKIT_INCLUDE_DIRECTORIES}/cccl)
 target_include_directories(transformer_engine PRIVATE "${CUDNN_FRONTEND_INCLUDE_DIR}")
@@ -290,21 +289,35 @@ endif()
 option(NVTE_WITH_CUBLASMP "Use cuBLASMp for tensor parallel GEMMs" OFF)
 if (NVTE_WITH_CUBLASMP)
     target_compile_definitions(transformer_engine PRIVATE NVTE_WITH_CUBLASMP)
-    target_include_directories(transformer_engine PRIVATE ${CUBLASMP_DIR}/include ${NVSHMEM_DIR}/include)
+    target_include_directories(transformer_engine PRIVATE ${CUBLASMP_DIR}/include)
     find_library(CUBLASMP_LIB
                  NAMES cublasmp libcublasmp
                  PATHS ${CUBLASMP_DIR}
                  PATH_SUFFIXES lib
                  REQUIRED)
-    find_library(NVSHMEM_HOST_LIB
-                 NAMES nvshmem_host libnvshmem_host.so.3
-                 PATHS ${NVSHMEM_DIR}
+    find_library(NCCL_LIB
+                 NAMES nccl libnccl
                  PATH_SUFFIXES lib
                  REQUIRED)
-  target_link_libraries(transformer_engine PUBLIC ${CUBLASMP_LIB} ${NVSHMEM_HOST_LIB})
+  target_link_libraries(transformer_engine PUBLIC ${NCCL_LIB} ${CUBLASMP_LIB})
   message(STATUS "Using cuBLASMp at: ${CUBLASMP_DIR}")
-  message(STATUS "Using nvshmem at: ${NVSHMEM_DIR}")
 endif()
+
+# Number of philox4x32 rounds for stochastic rounding (build-time constant).
+set(NVTE_BUILD_NUM_PHILOX_ROUNDS_STR $ENV{NVTE_BUILD_NUM_PHILOX_ROUNDS})
+if (NOT NVTE_BUILD_NUM_PHILOX_ROUNDS_STR)
+  set(NVTE_BUILD_NUM_PHILOX_ROUNDS_STR "10")
+endif()
+if (NOT NVTE_BUILD_NUM_PHILOX_ROUNDS_STR MATCHES "^[1-9][0-9]*$")
+  message(FATAL_ERROR
+          "Environment variable NVTE_BUILD_NUM_PHILOX_ROUNDS must be a positive integer, "
+          "but got '${NVTE_BUILD_NUM_PHILOX_ROUNDS_STR}'.")
+endif()
+set(NVTE_BUILD_NUM_PHILOX_ROUNDS ${NVTE_BUILD_NUM_PHILOX_ROUNDS_STR})
+
+target_compile_definitions(transformer_engine
+                           PUBLIC NVTE_BUILD_NUM_PHILOX_ROUNDS=${NVTE_BUILD_NUM_PHILOX_ROUNDS})
+message(STATUS "Philox rounds for stochastic rounding: ${NVTE_BUILD_NUM_PHILOX_ROUNDS}")
 
 # Hack to enable dynamic loading in cuDNN frontend
 target_compile_definitions(transformer_engine PUBLIC NV_CUDNN_FRONTEND_USE_DYNAMIC_LOADING)
@@ -358,9 +371,9 @@ list(APPEND nvte_sources_with_fast_math fused_softmax/scaled_masked_softmax.cu
 option(NVTE_BUILD_ACTIVATION_WITH_FAST_MATH "Compile activation kernels with --use_fast_math option" OFF)
 if (NVTE_BUILD_ACTIVATION_WITH_FAST_MATH)
   list(APPEND nvte_sources_with_fast_math activation/gelu.cu
+                                          activation/glu.cu
                                           activation/relu.cu
-                                          activation/swiglu.cu
-                                          util/cast.cu)
+                                          activation/swiglu.cu)
 endif()
 
 foreach(cuda_source IN LISTS nvte_sources_with_fast_math)
@@ -375,10 +388,10 @@ set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} --expt-relaxed-constexpr")
 set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} -O3")
 
 # Number of parallel build jobs
-if(ENV{MAX_JOBS})
-  set(BUILD_JOBS_STR "$ENV{MAX_JOBS}")
-elseif(ENV{NVTE_BUILD_MAX_JOBS})
-  set(BUILD_JOBS_STR "$ENV{NVTE_BUILD_MAX_JOBS}")
+if($ENV{MAX_JOBS})
+  set(BUILD_JOBS_STR $ENV{MAX_JOBS})
+elseif($ENV{NVTE_BUILD_MAX_JOBS})
+  set(BUILD_JOBS_STR $ENV{NVTE_BUILD_MAX_JOBS})
 else()
   set(BUILD_JOBS_STR "max")
 endif()

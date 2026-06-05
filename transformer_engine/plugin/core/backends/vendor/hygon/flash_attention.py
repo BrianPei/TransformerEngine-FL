@@ -97,6 +97,7 @@ class FlashAttentionHYGON(FlashAttentionBase):
         inference_params: Optional[Any] = None,
         flash_attention_backend: Optional[Any] = None,
         fp8_output: bool = False,
+        num_splits: Optional[int] = 1,
     ) -> torch.Tensor:
         # Ensure native flash attention is initialized
         self._ensure_native_flash_attn()
@@ -124,4 +125,5 @@ class FlashAttentionHYGON(FlashAttentionBase):
             inference_params=inference_params,
             flash_attention_backend=flash_attention_backend,
             fp8_output=fp8_output,
+            num_splits=num_splits,
         )

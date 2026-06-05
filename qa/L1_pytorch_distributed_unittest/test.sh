@@ -157,7 +157,7 @@ run_test_step "pytest_test_cast_master_weights_to_fp8.xml" "$TE_PATH/tests/pytor
 # standard numerics tests with initialized debug
 if [ "$DEBUG_TESTS_READY" -eq 1 ]; then
     run_test_step "pytest_test_numerics_2.xml" "$TE_PATH/tests/pytorch/distributed/test_numerics.py" \
-    "NVTE_TEST_NVINSPECT_ENABLED=True NVTE_TEST_NVINSPECT_CONFIG_FILE=$NVTE_TEST_NVINSPECT_DUMMY_CONFIG_FILE NVTE_TEST_NVINSPECT_FEATURE_DIRS=$NVTE_TEST_NVINSPECT_FEATURE_DIRS pytest -v -s --junitxml=$XML_LOG_DIR/pytest_test_numerics_2.xml $TE_PATH/tests/pytorch/distributed/test_numerics.py" \
+    "NVTE_TEST_NVINSPECT_ENABLED=1 NVTE_TEST_NVINSPECT_CONFIG_FILE=$NVTE_TEST_NVINSPECT_DUMMY_CONFIG_FILE NVTE_TEST_NVINSPECT_FEATURE_DIRS=$NVTE_TEST_NVINSPECT_FEATURE_DIRS pytest -v -s --junitxml=$XML_LOG_DIR/pytest_test_numerics_2.xml $TE_PATH/tests/pytorch/distributed/test_numerics.py" \
     "test_numerics.py (debug)"
 else
     echo "Skipping debug test_numerics.py because nvdlfw_inspect is unavailable"

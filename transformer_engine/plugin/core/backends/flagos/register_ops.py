@@ -83,6 +83,14 @@ def register_builtins(registry) -> None:
             priority=150,
         ),
         OpImpl(
+            op_name="multi_tensor_scale_tensor",
+            impl_id="default.flagos",
+            kind=BackendImplKind.DEFAULT,
+            fn=_bind_is_available(backend.multi_tensor_scale_tensor, is_avail),
+            vendor=None,
+            priority=150,
+        ),
+        OpImpl(
             op_name="multi_tensor_adam",
             impl_id="default.flagos",
             kind=BackendImplKind.DEFAULT,

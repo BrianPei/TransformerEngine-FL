@@ -1,5 +1,5 @@
 /*************************************************************************
- * Copyright (c) 2022-2025, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * Copyright (c) 2022-2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
  *
  * See LICENSE for license information.
  ************************************************************************/
@@ -34,11 +34,23 @@ inline size_t product(const std::vector<size_t> &shape) {
   return ret;
 }
 
-enum class QuantizeLayout {
+enum class JAXX_Quantize_Layout : int64_t {
   ROWWISE,
   COLWISE,
   ROWWISE_COLWISE,
 };
+
+inline bool is_quantize_rowwise(const JAXX_Quantize_Layout &layout) {
+  return layout == JAXX_Quantize_Layout::ROWWISE || layout == JAXX_Quantize_Layout::ROWWISE_COLWISE;
+}
+
+inline bool is_quantize_colwise(const JAXX_Quantize_Layout &layout) {
+  return layout == JAXX_Quantize_Layout::COLWISE || layout == JAXX_Quantize_Layout::ROWWISE_COLWISE;
+}
+
+inline bool is_quantize_2x2x(const JAXX_Quantize_Layout &layout) {
+  return layout == JAXX_Quantize_Layout::ROWWISE_COLWISE;
+}
 
 enum class JAXX_Scaling_Mode : int64_t {
   NO_SCALING = 0,
@@ -109,6 +121,11 @@ void hash_combine(int64_t &seed, const T &v, Rest... rest) {
   seed ^= std::hash<T>{}(v) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
   (hash_combine(seed, rest), ...);
 }
+
+enum class JAXX_Score_Function : int64_t {
+  SIGMOID = 0,
+  SOFTMAX = 1,
+};
 
 enum class JAXX_Collective_Op : int64_t {
   NONE = 0,

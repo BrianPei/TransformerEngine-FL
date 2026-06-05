@@ -53,8 +53,13 @@ from .impl import (
     multi_tensor_scale_torch,
     multi_tensor_l2norm_torch,
     multi_tensor_adam_torch,
+    multi_tensor_adam_fp8_torch,
+    multi_tensor_adam_capturable_torch,
+    multi_tensor_adam_capturable_master_torch,
     multi_tensor_adam_param_remainder_torch,
     multi_tensor_sgd_torch,
+    multi_tensor_compute_scale_and_scale_inv_torch,
+    multi_tensor_compute_scale_inv_e8m0_torch,
 )
 
 
@@ -447,6 +452,8 @@ class ReferenceBackend(TEFLBackendBase):
         _window_size_left: int,
         _window_size_right: int,
         _return_max_logit: bool,
+        _cuda_graph: bool = False,
+        _deterministic: bool = False,
     ) -> NVTE_Fused_Attn_Backend:
         return NVTE_Fused_Attn_Backend.NVTE_No_Backend
 
@@ -455,7 +462,7 @@ class ReferenceBackend(TEFLBackendBase):
         self,
         input: torch.Tensor,
         dropout_probability: float,
-        out: Optional[torch.Tensor],
+        out: Optional[torch.Tensor] = None,
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         return dropout_fwd_torch(input, dropout_probability, out)
 
@@ -464,7 +471,7 @@ class ReferenceBackend(TEFLBackendBase):
         grad_output: torch.Tensor,
         mask: torch.Tensor,
         dropout_probability: float,
-        grad_input: Optional[torch.Tensor],
+        grad_input: Optional[torch.Tensor] = None,
     ) -> torch.Tensor:
         return dropout_bwd_torch(grad_output, mask, dropout_probability, grad_input)
 
@@ -487,6 +494,17 @@ class ReferenceBackend(TEFLBackendBase):
         scale: float,
     ) -> None:
         return multi_tensor_scale_torch(chunk_size, noop_flag, tensor_lists, scale)
+
+    def multi_tensor_scale_tensor(
+        self,
+        chunk_size: int,
+        noop_flag: torch.Tensor,
+        tensor_lists: List[List[torch.Tensor]],
+        scale: torch.Tensor,
+    ) -> None:
+        # Reuse multi_tensor_scale by converting tensor scale to float
+        scale_value = scale.item()
+        return multi_tensor_scale_torch(chunk_size, noop_flag, tensor_lists, scale_value)
 
     def multi_tensor_l2norm(
         self,
@@ -544,6 +562,96 @@ class ReferenceBackend(TEFLBackendBase):
             weight_decay,
         )
 
+    def multi_tensor_adam_fp8(
+        self,
+        chunk_size: int,
+        noop_flag: torch.Tensor,
+        tensor_lists: List[List[torch.Tensor]],
+        lr: float,
+        beta1: float,
+        beta2: float,
+        epsilon: float,
+        step: int,
+        mode: int,
+        bias_correction: int,
+        weight_decay: float,
+        fp8_dtype,
+    ) -> None:
+        return multi_tensor_adam_fp8_torch(
+            chunk_size,
+            noop_flag,
+            tensor_lists,
+            lr,
+            beta1,
+            beta2,
+            epsilon,
+            step,
+            mode,
+            bias_correction,
+            weight_decay,
+            fp8_dtype,
+        )
+
+    def multi_tensor_adam_capturable(
+        self,
+        chunk_size: int,
+        noop_flag: torch.Tensor,
+        tensor_lists: List[List[torch.Tensor]],
+        lr: torch.Tensor,
+        beta1: float,
+        beta2: float,
+        epsilon: float,
+        step: torch.Tensor,
+        mode: int,
+        bias_correction: int,
+        weight_decay: float,
+        inv_scale: torch.Tensor,
+    ) -> None:
+        return multi_tensor_adam_capturable_torch(
+            chunk_size,
+            noop_flag,
+            tensor_lists,
+            lr,
+            beta1,
+            beta2,
+            epsilon,
+            step,
+            mode,
+            bias_correction,
+            weight_decay,
+            inv_scale,
+        )
+
+    def multi_tensor_adam_capturable_master(
+        self,
+        chunk_size: int,
+        noop_flag: torch.Tensor,
+        tensor_lists: List[List[torch.Tensor]],
+        lr: torch.Tensor,
+        beta1: float,
+        beta2: float,
+        epsilon: float,
+        step: torch.Tensor,
+        mode: int,
+        bias_correction: int,
+        weight_decay: float,
+        inv_scale: torch.Tensor,
+    ) -> None:
+        return multi_tensor_adam_capturable_master_torch(
+            chunk_size,
+            noop_flag,
+            tensor_lists,
+            lr,
+            beta1,
+            beta2,
+            epsilon,
+            step,
+            mode,
+            bias_correction,
+            weight_decay,
+            inv_scale,
+        )
+
     def multi_tensor_adam_param_remainder(
         self,
         chunk_size: int,
@@ -598,6 +706,38 @@ class ReferenceBackend(TEFLBackendBase):
             first_run,
             wd_after_momentum,
             scale,
+        )
+
+    def multi_tensor_compute_scale_and_scale_inv(
+        self,
+        chunk_size: int,
+        noop_flag: torch.Tensor,
+        tensor_lists: List[List[torch.Tensor]],
+        max_fp8: float,
+        force_pow_2_scales: bool,
+        epsilon: float,
+    ) -> None:
+        return multi_tensor_compute_scale_and_scale_inv_torch(
+            chunk_size,
+            noop_flag,
+            tensor_lists,
+            max_fp8,
+            force_pow_2_scales,
+            epsilon,
+        )
+
+    def multi_tensor_compute_scale_inv_e8m0(
+        self,
+        chunk_size: int,
+        noop_flag: torch.Tensor,
+        tensor_lists: List[List[torch.Tensor]],
+        block_len: int,
+    ) -> None:
+        return multi_tensor_compute_scale_inv_e8m0_torch(
+            chunk_size,
+            noop_flag,
+            tensor_lists,
+            block_len,
         )
 
     def get_flash_attention_class(self):

@@ -1,5 +1,5 @@
 /*************************************************************************
- * Copyright (c) 2022-2025, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * Copyright (c) 2022-2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
  *
  * See LICENSE for license information.
  ************************************************************************/
@@ -17,9 +17,9 @@
 #include "common/common.h"
 #include "common/recipe/recipe_common.cuh"
 #include "common/transpose/cast_transpose.h"
+#include "common/util/curanddx.hpp"
 #include "common/util/ptx.cuh"
 #include "common/utils.cuh"
-#include "curanddx.hpp"
 
 namespace transformer_engine {
 
@@ -32,14 +32,6 @@ using std::uint32_t;
 using std::uint8_t;
 
 using transformer_engine::detail::TypeExtrema;
-
-// Define a cuRANDDx descriptor
-// Note curanddx::PhiloxRounds<4> means 4 rounds of philox4_32. If the operator is not specified, it will be default to 10.
-// curanddx::SM<800>() does NOT mean the code can only run on SM 800. The operator is used for do some internal checks, e.g.,
-// if shared memory, if needed, is enough for the described problem, usually not applicable.
-// curanddx doc: https://docs.nvidia.com/cuda/curanddx/index.html
-using RNG = decltype(curanddx::Generator<curanddx::philox4_32>() + curanddx::PhiloxRounds<10>() +
-                     curanddx::SM<800>() + curanddx::Thread());
 
 // clang-format off
 /*
@@ -176,10 +168,9 @@ __device__ __forceinline__ float groupMax(float val, unsigned int groupMask) {
 }
 
 template <typename ScaleType>
-__device__ __forceinline__ ScaleType ComputeDecodeScaleFP4(const float amax,
-                                                           const float global_encode_scale) {
-  float decode_scale = amax / TypeExtrema<fp4e2m1>::max;
-  decode_scale = decode_scale * global_encode_scale;
+__device__ __forceinline__ ScaleType
+ComputeDecodeScaleFP4(const float amax, const float global_encode_scale_multiplier) {
+  float decode_scale = amax * global_encode_scale_multiplier;
   decode_scale = fminf(decode_scale, TypeExtrema<float>::max);
   return static_cast<ScaleType>(decode_scale);
 }
@@ -209,12 +200,15 @@ __device__ __forceinline__ float ComputeGlobalEncodeScaleFP4(const float global_
   return global_encode_scale;
 }
 
-__device__ __forceinline__ uint32_t get_rbits(RNG& rng, uint4& random_uint4, int& rnd_idx) {
+__device__ __forceinline__ uint32_t get_rbits(
+    transformer_engine::curanddx::detail::philox4x32_native_state<NVTE_BUILD_NUM_PHILOX_ROUNDS>&
+        rng,  // NVTE_BUILD_NUM_PHILOX_ROUNDS rounds of philox4x32
+    uint4& random_uint4, int& rnd_idx) {
   if (rnd_idx == 4) {
     rnd_idx = 0;
-    curanddx::uniform_bits dist;
-    random_uint4 = dist.generate4(rng);
+    random_uint4 = rng.generate4();
   }
+
   // Treat uint4 as an array of 4x uint32_t elements for indexing
   const uint32_t* const rbits_arr = reinterpret_cast<uint32_t*>(&random_uint4);
   const uint32_t rbits = rbits_arr[rnd_idx++];
@@ -348,9 +342,11 @@ __global__ void __launch_bounds__(kThreadsPerBlock) block_scaled_1d_cast_transpo
       threadIdx.x + block_idx_x * kThreadsPerBlock + block_idx_y * gridDim.x * kThreadsPerBlock;
   const size_t rng_seed = rng_state != nullptr ? rng_state[0] : 0;
   const size_t rng_offset = rng_state != nullptr ? rng_state[1] : 0;
-  RNG rng(rng_seed, rng_sequence, rng_offset);
-  curanddx::uniform_bits dist;
-  uint4 random_uint4 = kApplyStochasticRounding ? dist.generate4(rng) : uint4{0, 0, 0, 0};
+
+  transformer_engine::curanddx::detail::philox4x32_native_state<NVTE_BUILD_NUM_PHILOX_ROUNDS> rng;
+  rng.init(rng_seed, rng_sequence, rng_offset);
+  uint4 random_uint4 = kApplyStochasticRounding ? rng.generate4() : uint4{0, 0, 0, 0};
+
   int rnd_idx =
       0;  // Index of the random number. It increments each time when used and resets to 0 if reaches 4x
 
@@ -423,6 +419,8 @@ __global__ void __launch_bounds__(kThreadsPerBlock) block_scaled_1d_cast_transpo
   const int kNumThreadsReduce = kScaleBlockDim / kNVecOut;
   const float global_encode_scale =
       kIsE8Scaling ? 1.0f : ComputeGlobalEncodeScaleFP4(global_amax[0]);
+  constexpr float fp4_max_inv = 1.0f / TypeExtrema<fp4e2m1>::max;
+  const float global_encode_scale_multiplier = global_encode_scale * fp4_max_inv;
   const float global_decode_scale = 1.0 / global_encode_scale;
 
   // Step 2: Cast and store to output_c
@@ -511,7 +509,7 @@ __global__ void __launch_bounds__(kThreadsPerBlock) block_scaled_1d_cast_transpo
         amax = amax_smem[data_row_idx / kFP4BlockScalingSize][tid_in_warp_x];
       }
       // Step 2.4: Compute scale
-      ScaleType scale_inv = ComputeDecodeScaleFP4<ScaleType>(amax, global_encode_scale);
+      ScaleType scale_inv = ComputeDecodeScaleFP4<ScaleType>(amax, global_encode_scale_multiplier);
       float encode_scale = ComputeEncodeScaleFP4<ScaleType>(scale_inv, global_decode_scale);
       // Step 2.5: Write scale_inv
       bool write_scale_inv = is_src_lane;
@@ -634,7 +632,8 @@ __global__ void __launch_bounds__(kThreadsPerBlock) block_scaled_1d_cast_transpo
           amax = __shfl_sync(mask, amax, src_lane);
         }
         // Step 3.4: Compute scale
-        ScaleType scale_inv = ComputeDecodeScaleFP4<ScaleType>(amax, global_encode_scale);
+        ScaleType scale_inv =
+            ComputeDecodeScaleFP4<ScaleType>(amax, global_encode_scale_multiplier);
         float encode_scale = ComputeEncodeScaleFP4<ScaleType>(scale_inv, global_decode_scale);
         // Step 3.5: Write scale_inv_t
         bool write_scale_inv = is_src_lane;
@@ -718,13 +717,11 @@ void quantize_transpose_vector_blockwise_fp4(
   // raise error if pow2_scale is true
   NVTE_CHECK(!pow2_scale, "No support for pow2_scale for MXFP4 for now");
 
-  if (!return_identity && !return_transpose) {
-    return;
-  }
+  NVTE_CHECK(return_identity || return_transpose,
+             "At least one of return_identity or return_transpose must be true.");
 
-  if (use_2d_quantization && !return_identity) {
-    return;
-  }
+  NVTE_CHECK(return_identity || !use_2d_quantization,
+             "2D block quantization is only supported when return_identity is true.");
 
   const size_t row_length = input.shape.size() > 0 ? input.shape.at(input.shape.size() - 1) : 1u;
   size_t num_elements = row_length;
@@ -777,7 +774,7 @@ void quantize_transpose_vector_blockwise_fp4(
       input.dtype, InputType,
 
       TRANSFORMER_ENGINE_TYPE_SWITCH_FP4x2_ONLY(
-          output.dtype, 2, OutputType,
+          return_identity ? output.dtype : output_t.dtype, 2, OutputType,
 
           dim3 grid(num_blocks_x, num_blocks_y, 1);
 

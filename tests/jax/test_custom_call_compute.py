@@ -1,4 +1,4 @@
-# Copyright (c) 2022-2025, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# Copyright (c) 2022-2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 #
 # See LICENSE for license information.
 
@@ -40,12 +40,13 @@ from transformer_engine.jax.quantize import (
     QuantizerFactory,
     QuantizeLayout,
     noop_quantizer_set,
+    QuantizeMetaSet,
+    QuantizeMeta,
 )
 from transformer_engine.jax.quantize import helper
 from transformer_engine.jax.activation import activation
 from transformer_engine.jax.dense import dense, grouped_dense
 from transformer_engine.jax.layernorm_dense import layernorm_dense
-from transformer_engine.common import recipe
 
 GEMM_CASES = [
     (256, 256, 512),
@@ -605,7 +606,12 @@ class TestNorm:
         )
 
     @pytest.mark.skipif(not is_mxfp8_supported, reason=mxfp8_unsupported_reason)
-    @pytest.mark.parametrize("out_dtype", [jnp.float8_e4m3fn, jnp.float8_e5m2])
+    @pytest.mark.parametrize(
+        "out_dtype",
+        [
+            jnp.float8_e4m3fn,
+        ],
+    )
     def test_norm_forward_with_block_scaling_fp8(
         self, n, hidden, norm_type, zero_centered_gamma, epsilon, inp_dtype, out_dtype
     ):
@@ -876,7 +882,7 @@ class TestStochasticRounding:
         for i in range(num_samples):
             iter_key = jax.random.fold_in(key, i)
             sr_rng_state = jax.random.randint(
-                iter_key, (4,), minval=0, maxval=2**30 - 1, dtype=jnp.uint32
+                iter_key, (1, 4), minval=0, maxval=2**30 - 1, dtype=jnp.uint32
             )
             quantizer = QuantizerFactory.create(
                 q_dtype=q_dtype,
@@ -1453,7 +1459,12 @@ class TestDense:
         value_n_grad_primitive_func = value_and_grad(primitive_func, (0, 1, 2))
         value_n_grad_ref_func = value_and_grad(ref_func, (0, 1, 2))
 
-        quantizer_set = QuantizerFactory.create_set(fp8_recipe=recipe)
+        quantizer_set = QuantizerFactory.create_set(
+            fp8_recipe=recipe,
+            quantize_meta_set=QuantizeMetaSet(
+                x=QuantizeMeta(), kernel=QuantizeMeta(), grad=QuantizeMeta()
+            ),
+        )
 
         n_iterations = 3 if recipe.delayed() else 1
         with use_jax_gemm(enabled=with_jax_gemm):
@@ -1512,7 +1523,12 @@ class TestFusedDense:
 
         gamma = jax.random.normal(subkeys[2], (k,)).astype(jnp.bfloat16)
 
-        quantizer_set = QuantizerFactory.create_set(fp8_recipe=recipe)
+        quantizer_set = QuantizerFactory.create_set(
+            fp8_recipe=recipe,
+            quantize_meta_set=QuantizeMetaSet(
+                x=QuantizeMeta(), kernel=QuantizeMeta(), grad=QuantizeMeta()
+            ),
+        )
 
         if norm_type == "layernorm":
             beta = jax.random.normal(subkeys[3], (k,)).astype(jnp.bfloat16)
@@ -1601,6 +1617,9 @@ class TestFusedDense:
         quantizer_sets = QuantizerFactory.create_set(
             n_quantizer_sets=2,
             fp8_recipe=recipe,
+            quantize_meta_set=QuantizeMetaSet(
+                x=QuantizeMeta(), kernel=QuantizeMeta(), grad=QuantizeMeta()
+            ),
         )
 
         if norm_type == "layernorm":
@@ -1902,3 +1921,37 @@ class TestGroupedDense:
         assert_allclose(prim_dgrad, ref_dgrad, dtype=bwd_dtype)
         assert_allclose(prim_wgrad, ref_wgrad, dtype=bwd_dtype)
         assert_allclose(prim_dbias, ref_dbias, dtype=dtype)
+
+
+class TestDebugInspectFFI:
+
+    @pytest_parametrize_wrapper("shape", [(256, 128)])
+    @pytest_parametrize_wrapper(
+        "dtype",
+        [
+            jnp.float32,
+            jnp.bfloat16,
+            jnp.float16,
+            # Note: fp4 currently doesn't work
+            # jnp.float4_e2m1fn
+        ]
+        + ([jnp.float8_e4m3fn, jnp.float8_e5m2] if is_fp8_supported else []),
+    )
+    def test_debug_inspect_ffi(self, shape, dtype):
+        from transformer_engine.jax.debug.experimental import inspect_array, load_array_dump
+
+        def f(x):
+            x = x + 1
+            x = inspect_array(x, "my_array")
+            x = x + 1
+            return x
+
+        key = jax.random.PRNGKey(0)
+        x = jax.random.uniform(key, shape, jnp.float32)
+        x = x.astype(dtype)
+        _ = jax.jit(f)(x)
+
+        expected = x + 1
+        actual = load_array_dump("my_tensor_gpu0.bin", shape, dtype)
+
+        assert_allclose(actual, expected, dtype=dtype)

@@ -9,12 +9,12 @@ display_name: 'NVIDIA CUDA (A100)'
 ci_image: harbor.baai.ac.cn/flagscale/cuda12.8.1-torch2.7.1-python3.10-te2.9:20260209
 
 # Runner labels for self-hosted A100 node
-# runner_labels:
-#   - self-hosted
-#   - Linux
-#   - X64
-#   - nvidia
-#   - gpu-8
+runner_labels:
+  - self-hosted
+  - Linux
+  - X64
+  - nvidia
+  - gpu-8
 
 # Runner labels for online env
 runner_labels:

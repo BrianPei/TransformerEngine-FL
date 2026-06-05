@@ -1,5 +1,5 @@
 /*************************************************************************
- * Copyright (c) 2022-2025, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * Copyright (c) 2022-2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
  *
  * See LICENSE for license information.
  ************************************************************************/
@@ -23,9 +23,14 @@ using namespace normalization;
 void rmsnorm_fwd(const Tensor &x, const Tensor &gamma, const float epsilon, Tensor *z,
                  Tensor *rsigma, Tensor *workspace, const int multiprocessorCount,
                  const bool zero_centered_gamma, cudaStream_t stream) {
+  // Check for unsupported configurations
   if (is_fp8_dtype(z->data.dtype) && !is_delayed_tensor_scaling(z->scaling_mode) &&
       !is_mxfp8_scaling(z->scaling_mode)) {
     NVTE_ERROR("Not implemented scaling mode: " + to_string(z->scaling_mode) + ".");
+  }
+  if (is_mxfp8_scaling(z->scaling_mode)) {
+    NVTE_CHECK(!z->with_gemm_swizzled_scales,
+               "MXFP8 output must have scales in compact format, not swizzled for GEMM.");
   }
 
   NVTE_CHECK(x.data.shape.size() == 2, "x must be 2D tensor.");
@@ -39,7 +44,7 @@ void rmsnorm_fwd(const Tensor &x, const Tensor &gamma, const float epsilon, Tens
              "RSigma must be 1D tensor with shape (x.shape[0],).");
   NVTE_CHECK(rsigma->data.dtype == DType::kFloat32, "RSigma must be a float32 tensor.");
 
-  if (!workspace->data.shape.empty()) {
+  if (workspace->data.numel() != 0) {
     CheckInputTensor(x, "x");
     CheckInputTensor(gamma, "gamma");
 
@@ -79,7 +84,7 @@ void rmsnorm_fwd(const Tensor &x, const Tensor &gamma, const float epsilon, Tens
       multiprocessorCount, zero_centered_gamma, is_aligned, z->scaling_mode, training,
       gamma_in_weight_dtype);
 
-  if (workspace->data.shape.empty()) {
+  if (workspace->data.numel() == 0) {
     workspace->data.shape = plan->getWorkspaceShape();
     workspace->data.dtype = DType::kByte;
     return;
@@ -125,7 +130,7 @@ void rmsnorm_bwd(const Tensor &dz, const Tensor &x, const Tensor &rsigma, const 
   NVTE_CHECK(dgamma->data.shape == gamma.data.shape);
   NVTE_CHECK(dgamma->data.dtype == gamma.data.dtype);
 
-  if (!workspace->data.shape.empty()) {
+  if (workspace->data.numel() != 0) {
     CheckInputTensor(dz, "dz");
     CheckInputTensor(x, "x");
     CheckInputTensor(rsigma, "rsigma");
@@ -156,7 +161,7 @@ void rmsnorm_bwd(const Tensor &dz, const Tensor &x, const Tensor &rsigma, const 
       multiprocessorCount, zero_centered_gamma, is_aligned, NVTE_DELAYED_TENSOR_SCALING, true,
       gamma_in_weight_dtype);
 
-  if (workspace->data.shape.empty()) {
+  if (workspace->data.numel() == 0) {
     workspace->data.shape = plan->getWorkspaceShape();
     workspace->data.dtype = DType::kByte;
     return;
@@ -191,7 +196,7 @@ void rmsnorm_bwd_add(const Tensor &dz, const Tensor &x, const Tensor &add, const
   NVTE_CHECK(dgamma->data.shape == gamma.data.shape);
   NVTE_CHECK(dgamma->data.dtype == gamma.data.dtype);
 
-  if (!workspace->data.shape.empty()) {
+  if (workspace->data.numel() != 0) {
     CheckInputTensor(dz, "dz");
     CheckInputTensor(x, "x");
     CheckInputTensor(add, "add");
@@ -201,16 +206,21 @@ void rmsnorm_bwd_add(const Tensor &dz, const Tensor &x, const Tensor &add, const
     CheckOutputTensor(*dgamma, "dgamma");
   }
 
-  // cuDNN does not currently support fused backward+add
-  NVTE_Norm_Backend norm_backend = NVTE_Norm_Backend::Te;
-
-  // TE backend does not currently support zero_centered_gamma_in_weight_dtype
-  NVTE_CHECK(!use_zero_centered_gamma_in_weight_dtype(),
-             "zero_centered_gamma_in_weight_dtype is currently not supported for rmsnorm_bwd_add");
-
-  bool is_aligned = is_ptr_aligned(x.data.dptr, gamma.data.dptr, rsigma.data.dptr, dx->data.dptr,
-                                   dz.data.dptr, dgamma->data.dptr, add.data.dptr);
+  NVTE_Norm_Backend norm_backend;
+  bool is_aligned = true;
   bool gamma_in_weight_dtype = false;
+  if (use_cudnn_norm_bwd()) {
+    norm_backend = NVTE_Norm_Backend::Cudnn;
+    gamma_in_weight_dtype = use_zero_centered_gamma_in_weight_dtype();
+  } else {
+    norm_backend = NVTE_Norm_Backend::Te;
+    // TE backend does not currently support zero_centered_gamma_in_weight_dtype
+    NVTE_CHECK(!use_zero_centered_gamma_in_weight_dtype(),
+               "zero_centered_gamma_in_weight_dtype is currently not supported "
+               "for rmsnorm_bwd_add with TE backend");
+    is_aligned = is_ptr_aligned(x.data.dptr, gamma.data.dptr, rsigma.data.dptr, dx->data.dptr,
+                                dz.data.dptr, dgamma->data.dptr, add.data.dptr);
+  }
 
   auto plan = NormalizationPlanRegistry::getInstance().getNormalizationPlan(
       norm_backend, NVTE_Norm_Type::RMSNorm, NVTE_Norm_Stage::BackwardAdd,
@@ -222,7 +232,7 @@ void rmsnorm_bwd_add(const Tensor &dz, const Tensor &x, const Tensor &add, const
       multiprocessorCount, zero_centered_gamma, is_aligned, NVTE_DELAYED_TENSOR_SCALING, true,
       gamma_in_weight_dtype);
 
-  if (workspace->data.shape.empty()) {
+  if (workspace->data.numel() == 0) {
     workspace->data.shape = plan->getWorkspaceShape();
     workspace->data.dtype = DType::kByte;
     return;

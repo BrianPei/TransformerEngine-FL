@@ -1,5 +1,5 @@
 /*************************************************************************
- * Copyright (c) 2022-2025, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * Copyright (c) 2022-2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
  *
  * See LICENSE for license information.
  ************************************************************************/
@@ -23,7 +23,7 @@ extern "C" {
  * the last, the last entry shifts to the second to last) and the
  * first entry is set to zero. The scaling factor is estimated so the
  * FP8 tensor's maximum absolute value is
- * @f$ 2^{-\text{margin}} \text{max}_\text{fp8\_dtype} @f$.
+ * @f$ 2^{-margin} \max_{fp8\_dtype} @f$.
  *
  *  \param[in] amax_history             History of maximum absolute values.
  *                                      Shape: [history_length, num_scales]
@@ -54,7 +54,7 @@ void nvte_delayed_scaling_recipe_amax_and_scale_update(
  * the last, the last entry shifts to the second to last) and the
  * first entry is set to zero. The scaling factor is estimated so the
  * FP8 tensor's maximum absolute value is
- * @f$ 2^{-\text{margin}} \text{max}_\text{fp8\_dtype} @f$.
+ * @f$ 2^{-margin} \max_{fp8\_dtype} @f$.
  *
  *  \param[in] amax_reduction_buffer    The contiguous buffer used for amax reduction.
  *                                      Shape: [num_scales * num_tensors]
@@ -111,20 +111,315 @@ void nvte_compute_amax_with_config(const NVTETensor input, NVTETensor output,
 void nvte_compute_scale_from_amax(NVTETensor output, const NVTEQuantizationConfig config,
                                   cudaStream_t stream);
 
+/*! \brief Compute partial amax for FP8 blockwise scaling.
+ *
+ *  This function computes the maximum absolute values for each block of the original tensor.
+ *  `inp` contains a continuous segment from the flattened original tensor. For each block,
+ *  if it overlaps with the range [start_offset, start_offset+inp.length), the amax is
+ *  computed from inp; otherwise, the amax is set to 0.
+ *
+ *  Example: Original tensor (logically 512x512) divided into 16 blocks of size 128x128.
+ *  `inp` contains continuous elements starting from position start_offset
+ *  in the flattened original tensor.
+ *
+ *  Logical view - Original Tensor (e.g., 512x512) divided into 16 blocks of size 128x128:
+ *  ┌─────────┬─────────┬─────────┬─────────┐
+ *  │ Block0  │ Block1  │ Block2  │ Block3  │  Each block: 128x128
+ *  │ 128x128 │ 128x128 │ 128x128 │ 128x128 │
+ *  ├─────────┼─────────┼─────────┼─────────┤
+ *  │ Block4  │ Block5  │ Block6  │ Block7  │
+ *  ├─────────┼─────────┼─────────┼─────────┤
+ *  │ Block8  │ Block9  │ Block10 │ Block11 │
+ *  ├─────────┼─────────┼─────────┼─────────┤
+ *  │ Block12 │ Block13 │ Block14 │ Block15 │
+ *  └─────────┴─────────┴─────────┴─────────┘
+ *
+ *  Physical view - Flattened in row-major order:
+ *  ┌────────────────────────────────────────────────────────────────┐
+ *  │[0...128][128...256][256...384][384...512]...[261632...262143]  │
+ *  └────────────────────────────────────────────────────────────────┘
+ *                 ^            ^
+ *            start_offset  start_offset + inp.length
+ *
+ *  For each 128x128 block, compute amax:
+ *  - If the block overlaps with [start_offset, start_offset+inp.length), compute amax
+ *  - If the block is completely outside this range, set amax = 0
+ *
+ *  amax output (one value per 128x128 block), block 1 and block 2 are non-zero because they
+ *  overlap with the [start_offset, start_offset+inp.length) range:
+ *  ┌───────┬───────┬───────┬───────┐
+ *  │    0  │ amax  │ amax  │    0  │  Block0-3
+ *  ├───────┼───────┼───────┼───────┤
+ *  │    0  │    0  │    0  │    0  │  Block4-7
+ *  ├───────┼───────┼───────┼───────┤
+ *  │    0  │    0  │    0  │    0  │  Block8-11
+ *  ├───────┼───────┼───────┼───────┤
+ *  │    0  │    0  │    0  │    0  │  Block12-15
+ *  └───────┴───────┴───────┴───────┘
+ *
+ *  \param[in]     inp              Input tensor (continuous slice of flattened original tensor).
+ *  \param[in,out] amax             Output tensor for maximum absolute values per block.
+ *  \param[in]     h                Height dimension of the logical tensor.
+ *  \param[in]     w                Width dimension of the logical tensor.
+ *  \param[in]     amax_stride_h    Stride in height dimension for amax tensor.
+ *  \param[in]     amax_stride_w    Stride in width dimension for amax tensor.
+ *  \param[in]     start_offset     Starting offset in the flattened tensor.
+ *  \param[in]     block_len        Length of a quantization block to process.
+ *  \param[in]     stream           CUDA stream used for the operation.
+ */
 void nvte_fp8_block_scaling_compute_partial_amax(const NVTETensor inp, NVTETensor amax, size_t h,
                                                  size_t w, size_t amax_stride_h,
                                                  size_t amax_stride_w, size_t start_offset,
                                                  size_t block_len, cudaStream_t stream);
 
+/*! \brief Perform partial FP8 casting with blockwise scaling.
+ *
+ *  This function casts the input tensor to FP8 format using blockwise scaling factors.
+ *  `inp` contains a continuous segment from the flattened original tensor.
+ *
+ *  \param[in]     inp              Input tensor.
+ *  \param[out]    out              Output tensor in FP8 format.
+ *  \param[in]     scale            Scaling factors per block.
+ *  \param[in]     h                Height dimension of the tensor.
+ *  \param[in]     w                Width dimension of the tensor.
+ *  \param[in]     scale_stride_h   Stride in height dimension for scale tensor.
+ *  \param[in]     scale_stride_w   Stride in width dimension for scale tensor.
+ *  \param[in]     start_offset     Starting offset for partial computation.
+ *  \param[in]     block_len        Length of the block to process.
+ *  \param[in]     out_dtype        Output FP8 datatype.
+ *  \param[in]     stream           CUDA stream used for the operation.
+ */
 void nvte_fp8_block_scaling_partial_cast(const NVTETensor inp, NVTETensor out,
                                          const NVTETensor scale, size_t h, size_t w,
                                          size_t scale_stride_h, size_t scale_stride_w,
                                          size_t start_offset, size_t block_len,
                                          const NVTEDType out_dtype, cudaStream_t stream);
 
+/*! \brief Compute partial amax for MXFP8 scaling.
+ *
+ *  This function computes the maximum absolute values along both row and column dimensions.
+ *  input contains a continuous segment from the flattened original tensor. For each row/column
+ *  block, if it overlaps with the range starting from start_offset, the amax is computed from
+ *  `input`; otherwise, the amax is set to 0.
+ *
+ *  Example: Original tensor (64 rows x 64 cols).
+ *  Rowwise amax granularity: 1x32 (each row divided into 2 blocks)
+ *  Columnwise amax granularity: 32x1 (each column divided into 2 blocks)
+ *  input contains a continuous segment starting from start_offset.
+ *
+ *  Logical view - Original Tensor (64x64) with 1x32 and 32x1 blocks:
+ *
+ *  Rowwise blocks (1x32): Each row has 2 blocks
+ *       ┌──────────────┬──────────────┐
+ *  row0 │  Block_r0_0  │  Block_r0_1  │  (cols 0-31, 32-63)
+ *       ├──────────────┼──────────────┤
+ *  row1 │  Block_r1_0  │  Block_r1_1  │
+ *       ├──────────────┼──────────────┤
+ *   ... │     ...      │     ...      │
+ *       ├──────────────┼──────────────┤
+ *  row63│  Block_r63_0 │  Block_r63_1 │
+ *       └──────────────┴──────────────┘
+ *
+ *  Columnwise blocks (32x1): Each column has 2 blocks
+ *       ┌───┬───┬─────┬───┬───┐
+ *       │c0 │c1 │ ... │c62│c63│
+ *  ┌────┼───┼───┼─────┼───┼───┤
+ *  │Blk0│   │   │     │   │   │  rows 0-31
+ *  ├────┼───┼───┼─────┼───┼───┤
+ *  │Blk1│   │   │     │   │   │  rows 32-63
+ *  └────┴───┴───┴─────┴───┴───┘
+ *
+ *  Physical view - Flattened in row-major order:
+ *  Total elements: 64*64 = 4096
+ *  ┌──────────────────────────────────────────────────────┐
+ *  │[0...63][64...127][128...191]...[4032...4095]         │
+ *  └──────────────────────────────────────────────────────┘
+ *       ^                ^
+ *     start_offset=60  start_offset + input.length=130
+ *
+ *  Row-wise amax output (one value per 1x32 block):
+ *  ┌────────┬────────┐
+ *  │ amax   │  amax  │  row0 (block0 and block1 partially covered)
+ *  ├────────┼────────┤
+ *  │    0   │    0   │  row1 (not covered)
+ *  ├────────┼────────┤
+ *  │   ...  │   ...  │
+ *  ├────────┼────────┤
+ *  │    0   │    0   │  row63 (not covered)
+ *  └────────┴────────┘
+ *
+ *  Column-wise amax output (one value per 32x1 block):
+ *  ┌────────┬────────┬────────┬────────┬────────┬────────┬────────┐
+ *  │  amax  │  amax  │  amax  │ amax   │  amax  │ amax   │ amax   │ ... row 0-31
+ *  ├────────┼────────┼────────┼────────┼────────┼────────┼────────┤
+ *  │ amax=0 │ amax=0 │ amax=0 │ amax=0 │ amax=0 │ amax=0 │ amax=0 │ ... row 32-62
+ *  └────────┴────────┴────────┴────────┴────────┴────────┴────────┘
+ *    col0     col1     col2     col3     col4     col5     col6
+ *
+ *  For each 1x32 or 32x1 block, if it overlaps with [start_offset, start_offset+input.length),
+ *  compute amax; otherwise set to 0.
+ *
+ *  \param[in]     input            Input tensor (continuous segment of flattened original tensor).
+ *  \param[in,out] amax_rowwise     Output tensor for row-wise maximum absolute values.
+ *  \param[in,out] amax_colwise     Output tensor for column-wise maximum absolute values.
+ *  \param[in]     rows             Number of rows in the logical tensor.
+ *  \param[in]     cols             Number of columns in the logical tensor.
+ *  \param[in]     start_offset     Starting offset in the flattened tensor.
+ *  \param[in]     stream           CUDA stream used for the operation.
+ */
+void nvte_mxfp8_scaling_compute_partial_amax(const NVTETensor input, NVTETensor amax_rowwise,
+                                             NVTETensor amax_colwise, int rows, int cols,
+                                             size_t start_offset, cudaStream_t stream);
+
+/*! \brief Perform partial MXFP8 casting.
+ *
+ *  This function casts the input tensor to MXFP8 format, producing both row-wise and
+ *  column-wise scaled outputs. input contains a continuous segment from the flattened
+ *  original tensor.
+ *
+ *  \param[in]     input               Input (continuous segment of flattened original tensor).
+ *  \param[out]    output_rowwise      Output tensor with row-wise scaling (MXFP8 format).
+ *  \param[out]    output_colwise      Output tensor with column-wise scaling (MXFP8 format).
+ *  \param[in]     scale_inv_rowwise   Inverse scaling factors for row-wise scaling.
+ *  \param[in]     scale_inv_colwise   Inverse scaling factors for column-wise scaling.
+ *  \param[in]     rows                Number of rows in the logical tensor.
+ *  \param[in]     cols                Number of columns in the logical tensor.
+ *  \param[in]     start_offset        Starting offset in the flattened tensor.
+ *  \param[in]     stream              CUDA stream used for the operation.
+ */
+void nvte_mxfp8_scaling_partial_cast(const NVTETensor input, NVTETensor output_rowwise,
+                                     NVTETensor output_colwise, const NVTETensor scale_inv_rowwise,
+                                     const NVTETensor scale_inv_colwise, int rows, int cols,
+                                     size_t start_offset, cudaStream_t stream);
+
+/*! \brief Compute per-tensor scaling factor for NVFP4 format.
+ *
+ *  This function computes the scaling factor (alpha) for NVFP4 quantization based
+ *  on the input tensors A and B, with options for using row-wise amax values.
+ *
+ *  \param[in]     inpA                Input tensor A.
+ *  \param[in]     use_rowwise_amax_A  Whether to use row-wise amax for tensor A.
+ *  \param[in]     inpB                Input tensor B.
+ *  \param[in]     use_rowwise_amax_B  Whether to use row-wise amax for tensor B.
+ *  \param[in]     alpha_in            Input scaling factor.
+ *  \param[out]    alpha_out           Output scaling factor.
+ *  \param[in]     stream              CUDA stream used for the operation.
+ */
 void nvte_nvfp4_compute_per_tensor_scale(const NVTETensor inpA, const bool use_rowwise_amax_A,
                                          const NVTETensor inpB, const bool use_rowwise_amax_B,
                                          float alpha_in, NVTETensor alpha_out, cudaStream_t stream);
+
+/*! \brief Compute tile-level amax for a partial shard of a 2D tensor.
+ *
+ *  For NVFP4 2D quantization with 16x16 tiles. Computes the maximum absolute
+ *  value within each tile, but only for elements in [start_offset, start_offset + len)
+ *  of the flattened tensor. Used in distributed settings where each rank owns a shard.
+ *
+ *  \param[in]     inp             Input tensor (partial shard, high-precision).
+ *  \param[out]    amax            Output amax buffer [tile_rows, tile_cols], float32.
+ *  \param[in]     h               Number of rows in the full 2D tensor.
+ *  \param[in]     w               Number of columns in the full 2D tensor.
+ *  \param[in]     amax_stride_h   Stride for amax in tile-row dimension.
+ *  \param[in]     amax_stride_w   Stride for amax in tile-col dimension.
+ *  \param[in]     start_offset    Starting element offset in the flattened tensor.
+ *  \param[in]     block_len       Tile dimension (must be 16 for NVFP4 2D).
+ *  \param[in]     stream          CUDA stream used for the operation.
+ */
+void nvte_nvfp4_2d_compute_partial_amax(const NVTETensor inp, NVTETensor amax, size_t h, size_t w,
+                                        size_t amax_stride_h, size_t amax_stride_w,
+                                        size_t start_offset, size_t block_len, cudaStream_t stream);
+
+/*! \brief Cast a partial shard of a tensor to NVFP4 using 2D tile-based quantization.
+ *
+ *  Quantizes elements in [start_offset, start_offset + len) of the flattened tensor
+ *  using precomputed per-tile scales. Each 16x16 tile uses its own scale factor.
+ *  Used in distributed settings where each rank casts its owned shard.
+ *
+ *  \param[in]     inp             Input tensor (partial shard, high-precision).
+ *  \param[out]    out             Output NVFP4 packed tensor (2 values per byte).
+ *  \param[in]     scale           Per-tile scale factors [tile_rows, tile_cols], float32.
+ *  \param[in]     global_scale    Global scale factor [1], float32.
+ *  \param[in]     h               Number of rows in the full 2D tensor.
+ *  \param[in]     w               Number of columns in the full 2D tensor.
+ *  \param[in]     scale_stride_h  Stride for scale in tile-row dimension.
+ *  \param[in]     scale_stride_w  Stride for scale in tile-col dimension.
+ *  \param[in]     start_offset    Starting element offset in the flattened tensor.
+ *  \param[in]     block_len       Tile dimension (must be 16 for NVFP4 2D).
+ *  \param[in]     stream          CUDA stream used for the operation.
+ */
+void nvte_nvfp4_2d_partial_cast(const NVTETensor inp, NVTETensor out, const NVTETensor scale,
+                                const NVTETensor global_scale, size_t h, size_t w,
+                                size_t scale_stride_h, size_t scale_stride_w, size_t start_offset,
+                                size_t block_len, cudaStream_t stream);
+
+/*! \brief Expand tile-level scales to row-level scales and convert to FP8 E4M3, used in partial cast.
+ *
+ * Each tile row's scale is repeated block_len times in the output.
+ *
+ *  \param[in]     input       Input tensor with tile scales [tile_rows, tile_cols], float32.
+ *  \param[out]    output      Output tensor with expanded scales [rows_padded, tile_cols], uint8 (E4M3).
+ *  \param[in]     tile_rows   Number of tile rows.
+ *  \param[in]     tile_cols   Number of tile columns.
+ *  \param[in]     rows_padded Padded row count in output.
+ *  \param[in]     block_len   Block length (typically 16 for NVFP4).
+ *  \param[in]     stream      CUDA stream.
+ */
+void nvte_nvfp4_expand_scale_to_fp8(const NVTETensor input, NVTETensor output, size_t tile_rows,
+                                    size_t tile_cols, size_t rows_padded, size_t block_len,
+                                    cudaStream_t stream);
+
+/*! \brief Compute per-block decode scale from block amax and global amax.
+ *
+ * Computes:
+ *   global_scale = (fp8_max * fp4_max) / global_amax = 2688 / global_amax
+ *   per_block_decode_scale = block_amax / fp4_max * global_scale
+ *
+ * This matches the CUDA device function compute_decoding_scaling_factor() in core_nvfp4.cuh.
+ *
+ *  \param[in]     block_amax   Input block amax tensor [tile_rows, tile_cols], float32.
+ *  \param[out]    scale        Output scale tensor [tile_rows, tile_cols], float32.
+ *  \param[in]     global_amax  Global amax tensor (single element), float32. Avoids D2H transfer.
+ *  \param[in]     stream       CUDA stream.
+ */
+void nvte_nvfp4_compute_per_block_scale(const NVTETensor block_amax, NVTETensor scale,
+                                        const NVTETensor global_amax, cudaStream_t stream);
+
+/*! \brief Fused kernel for NVFP4 scale computation.
+ *
+ *  Fuses three operations into one kernel:
+ *  1. Compute per-block decode scales from block amax and global amax
+ *  2. Copy global amax to target tensor
+ *  3. Expand tile-level scales to row-level and convert to FP8 E4M3
+ *
+ *  Saves 2 kernel launches per parameter.
+ *
+ *  \param[in]     block_amax      Input block amax tensor [tile_rows, tile_cols], float32.
+ *  \param[in]     global_amax     Global amax tensor [1], float32.
+ *  \param[out]    per_block_scale Output per-block scale [tile_rows, tile_cols], float32 (for partial_cast).
+ *  \param[out]    target_scale    Output scale tensor [rows_padded, tile_cols], uint8 (E4M3).
+ *  \param[out]    target_amax     Output amax tensor [1], float32 (copy of global_amax).
+ *  \param[in]     tile_rows       Number of tile rows.
+ *  \param[in]     tile_cols       Number of tile columns.
+ *  \param[in]     rows_padded     Total padded rows in output.
+ *  \param[in]     block_len       Block length (16 for NVFP4).
+ *  \param[in]     stream          CUDA stream.
+ */
+void nvte_nvfp4_fused_scale(const NVTETensor block_amax, const NVTETensor global_amax,
+                            NVTETensor per_block_scale, NVTETensor target_scale,
+                            NVTETensor target_amax, size_t tile_rows, size_t tile_cols,
+                            size_t rows_padded, size_t block_len, cudaStream_t stream);
+
+/*! \brief Compute global encode scale from global amax.
+ *
+ * Computes: global_scale = (fp8_max * fp4_max) / global_amax = 2688 / global_amax
+ * If global_amax <= 0, returns 1.0.
+ *
+ *  \param[in]     global_amax   Input global amax tensor [num_params], float32.
+ *  \param[out]    global_scale  Output global scale tensor [num_params], float32.
+ *  \param[in]     stream        CUDA stream.
+ */
+void nvte_nvfp4_compute_global_scale(const NVTETensor global_amax, NVTETensor global_scale,
+                                     cudaStream_t stream);
 
 #ifdef __cplusplus
 }  // extern "C"

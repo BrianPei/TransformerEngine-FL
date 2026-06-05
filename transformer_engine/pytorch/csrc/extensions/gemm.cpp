@@ -1,5 +1,5 @@
 /*************************************************************************
- * Copyright (c) 2022-2025, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * Copyright (c) 2022-2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
  *
  * See LICENSE for license information.
  ************************************************************************/
@@ -9,9 +9,7 @@
 #include <optional>
 #include <string>
 
-#include "../common.h"
 #include "../extensions.h"
-#include "common.h"
 #include "common/util/cuda_runtime.h"
 #include "common/util/system.h"
 #include "pybind.h"
@@ -43,10 +41,10 @@ bool is_low_precision(const DType type) {
 std::vector<size_t> getGemmOutputShape(const NVTEShape& A_shape, const bool transa,
                                        const NVTEShape& B_shape, const bool transb) {
   // Flatten outer dims to get 2D matrices
-  const size_t A0 = product(A_shape, 0, A_shape.ndim - 1);
-  const size_t A1 = A_shape.data[A_shape.ndim - 1];
-  const size_t B0 = product(B_shape, 0, B_shape.ndim - 1);
-  const size_t B1 = B_shape.data[B_shape.ndim - 1];
+  const size_t A0 = A_shape.ndim > 0 ? product(A_shape, 0, A_shape.ndim - 1) : 1;
+  const size_t A1 = A_shape.ndim > 0 ? A_shape.data[A_shape.ndim - 1] : 1;
+  const size_t B0 = B_shape.ndim > 0 ? product(B_shape, 0, B_shape.ndim - 1) : 1;
+  const size_t B1 = B_shape.ndim > 0 ? B_shape.data[B_shape.ndim - 1] : 1;
 
   // Check matrix dims
   NVTE_CHECK((transa ? A1 : A0) == (transb ? B0 : B1), "Invalid matrix dimensions for GEMM (A=(",
@@ -78,6 +76,46 @@ bool checkGemmShape(const std::vector<size_t>& expected, const NVTEShape& actual
   return true;
 }
 
+struct GroupedGemmConfig {
+  TensorWrapper te_alpha;
+  TensorWrapper te_beta;
+  TensorWrapper te_workspace_setup;
+  TensorWrapper te_workspace_cublas;
+  std::optional<transformer_engine::GroupedMatmulConfigWrapper> matmul_config;
+};
+
+GroupedGemmConfig prepare_grouped_gemm_config(at::Tensor alpha, at::Tensor beta,
+                                              at::Tensor workspace_setup,
+                                              at::Tensor workspace_cublas, size_t num_tensors,
+                                              int math_sm_count, bool use_split_accumulator) {
+  NVTE_CHECK(alpha.numel() == static_cast<int64_t>(num_tensors),
+             "Grouped GEMM expects alpha to have num_tensors elements.");
+  NVTE_CHECK(beta.numel() == static_cast<int64_t>(num_tensors),
+             "Grouped GEMM expects beta to have num_tensors elements.");
+
+  GroupedGemmConfig grouped_gemm_config{
+      makeTransformerEngineTensor(alpha),
+      makeTransformerEngineTensor(beta),
+      makeTransformerEngineTensor(workspace_setup.data_ptr(),
+                                  std::vector<size_t>{static_cast<size_t>(workspace_setup.numel())},
+                                  DType::kByte),
+      makeTransformerEngineTensor(
+          workspace_cublas.data_ptr(),
+          std::vector<size_t>{static_cast<size_t>(workspace_cublas.numel())}, DType::kByte),
+      std::nullopt,
+  };
+
+  if (math_sm_count > 0 || use_split_accumulator) {
+    grouped_gemm_config.matmul_config.emplace();
+    if (math_sm_count > 0) {
+      grouped_gemm_config.matmul_config->set_sm_count(math_sm_count);
+    }
+    grouped_gemm_config.matmul_config->set_use_split_accumulator(use_split_accumulator);
+  }
+
+  return grouped_gemm_config;
+}
+
 }  // namespace detail
 
 std::pair<TensorWrapper, py::object> createOutputTensor(const std::vector<size_t>& shape,
@@ -94,6 +132,11 @@ std::vector<py::object> gemm(py::handle A, bool transa, py::handle B, bool trans
                              std::optional<CommOverlapType> comm_type, MaybeTensor extra_output,
                              bool bulk_overlap, float alpha, std::optional<float> beta) {
   using namespace transformer_engine::pytorch::detail;
+
+  // Ensure that cublasLt handle is created on the correct device,
+  // overriding torch.cuda.set_device calls from user side.
+  // Assumes all tensors passed are on the same device.
+  at::cuda::CUDAGuard device_guard(workspace.device());
 
   // Input tensors
   NVTE_CHECK(!A.is_none(), "Tensor A has not been provided");
@@ -235,9 +278,12 @@ std::vector<py::object> gemm(py::handle A, bool transa, py::handle B, bool trans
   auto main_stream = at::cuda::getCurrentCUDAStream();
   if (A_tensor.numel() != 0 && B_tensor.numel() != 0) {
     // Optionally swizzle the scaling factors
-    swizzled_scale_inverses_list.emplace_back(std::move(swizzle_scaling_factors(A_tensor, transa)));
-    swizzled_scale_inverses_list.emplace_back(
-        std::move(swizzle_scaling_factors(B_tensor, !transb)));
+    auto [A_row_scales, A_col_scales] = swizzle_scales_for_gemm(A_tensor, transa, !transa);
+    auto [B_row_scales, B_col_scales] = swizzle_scales_for_gemm(B_tensor, !transb, transb);
+    swizzled_scale_inverses_list.emplace_back(std::move(A_row_scales));
+    swizzled_scale_inverses_list.emplace_back(std::move(A_col_scales));
+    swizzled_scale_inverses_list.emplace_back(std::move(B_row_scales));
+    swizzled_scale_inverses_list.emplace_back(std::move(B_col_scales));
 
     // Emulate the FP8 block scaling recipe with MXFP8 on Blackwell and newer
     // as it is not natively supported by cublasLt
@@ -351,6 +397,11 @@ void te_atomic_gemm(at::Tensor A, at::Tensor A_scale_inverse, DType A_type,
                     at::Tensor workspace, size_t workspaceSize, bool accumulate,
                     bool use_split_accumulator, int math_sm_count, int m_split, int n_split,
                     bool gemm_producer, at::Tensor counter) {
+  // Ensure that cublasLt handle is created on the correct device,
+  // overriding torch.cuda.set_device calls from user side.
+  // Assumes all tensors passed are on the same device.
+  at::cuda::CUDAGuard device_guard(workspace.device());
+
   // TODO: Handle scaling modes
   NVTEScalingMode nvte_scaling_modeA = NVTE_DELAYED_TENSOR_SCALING;
   NVTEScalingMode nvte_scaling_modeB = NVTE_DELAYED_TENSOR_SCALING;
@@ -399,6 +450,11 @@ std::optional<std::vector<at::Tensor>> te_general_grouped_gemm(
   if (single_output && D == std::nullopt) {
     NVTE_ERROR("not implemented, D should be allocated for single output case.");
   }
+
+  // Ensure that cublasLt handle is created on the correct device,
+  // overriding torch.cuda.set_device calls from user side.
+  // Assumes all tensors passed are on the same device.
+  at::cuda::CUDAGuard device_guard(workspace[0].device());
 
   void* output_data_ptr = nullptr;
   if (single_output) {
@@ -486,9 +542,9 @@ std::optional<std::vector<at::Tensor>> te_general_grouped_gemm(
 
   // Optionally swizzle the scaling factors
   swizzled_scale_inverses_list.emplace_back(
-      multi_tensor_swizzle_scaling_factors(te_A_wrappers, transa));
+      multi_tensor_swizzle_scales_for_gemm(te_A_wrappers, transa, !transa));
   swizzled_scale_inverses_list.emplace_back(
-      multi_tensor_swizzle_scaling_factors(te_B_wrappers, !transb));
+      multi_tensor_swizzle_scales_for_gemm(te_B_wrappers, !transb, transb));
 
   // Emulate the FP8 block scaling recipe with MXFP8 on Blackwell and newer
   // as it is not natively supported by cublasLt
@@ -550,6 +606,187 @@ std::optional<std::vector<at::Tensor>> te_general_grouped_gemm(
                            use_split_accumulator, math_sm_count, at::cuda::getCurrentCUDAStream());
   });
   return bias;
+}
+
+py::object te_general_grouped_gemm_for_grouped_tensor(
+    py::handle A, bool transa, py::handle B, bool transb, py::handle D, py::object bias,
+    at::Tensor alpha, at::Tensor beta, at::Tensor workspace_setup, at::Tensor workspace_cublas,
+    bool use_split_accumulator, int math_sm_count) {
+  using namespace transformer_engine::pytorch::detail;
+
+  init_extension();
+
+  // Ensure that cublasLt handle is created on the correct device,
+  // overriding torch.cuda.set_device calls from user side.
+  // Assumes all tensors passed are on the same device.
+  at::cuda::CUDAGuard device_guard(workspace_cublas.device());
+
+  auto grouped_A = GroupedTensorFromPyTorchGroupedTensor(A);
+  auto grouped_B = GroupedTensorFromPyTorchGroupedTensor(B);
+  auto grouped_D = GroupedTensorFromPyTorchGroupedTensor(D);
+
+  const size_t num_tensors = grouped_A.num_tensors();
+  NVTE_CHECK(num_tensors > 0, "Grouped GEMM requires non-empty inputs.");
+  NVTE_CHECK(grouped_B.num_tensors() == num_tensors,
+             "Grouped GEMM requires A and B to have the same num_tensors.");
+  NVTE_CHECK(grouped_D.num_tensors() == num_tensors,
+             "Grouped GEMM requires D to have the same num_tensors as inputs.");
+
+  auto gemm_config = prepare_grouped_gemm_config(alpha, beta, workspace_setup, workspace_cublas,
+                                                 num_tensors, math_sm_count, use_split_accumulator);
+
+  [[maybe_unused]] auto swizzled_scales_A =
+      maybe_swizzle_grouped_tensor(grouped_A, transa, !transa);
+  [[maybe_unused]] auto swizzled_scales_B =
+      maybe_swizzle_grouped_tensor(grouped_B, transb, !transb);
+
+  NVTE_SCOPED_GIL_RELEASE({
+    nvte_grouped_gemm(grouped_A.data(), transa, grouped_B.data(), transb, grouped_D.data(),
+                      grouped_D.data(), gemm_config.te_alpha.data(), gemm_config.te_beta.data(),
+                      gemm_config.te_workspace_setup.data(), gemm_config.te_workspace_cublas.data(),
+                      gemm_config.matmul_config.has_value()
+                          ? static_cast<NVTEGroupedMatmulConfig>(*gemm_config.matmul_config)
+                          : nullptr,
+                      at::cuda::getCurrentCUDAStream());
+  });
+
+  if (!bias.is_none()) {
+    auto grouped_bias = GroupedTensorFromPyTorchGroupedTensor(bias);
+    NVTE_SCOPED_GIL_RELEASE({
+      nvte_grouped_bias_add(grouped_D.data(), grouped_bias.data(),
+                            at::cuda::getCurrentCUDAStream());
+    });
+  }
+
+  return py::reinterpret_borrow<py::object>(D);
+}
+
+py::object te_general_grouped_gemm_for_discrete_in(py::handle A, bool transa, py::handle B,
+                                                   bool transb, py::handle D, py::object bias,
+                                                   at::Tensor alpha, at::Tensor beta,
+                                                   at::Tensor workspace_setup,
+                                                   at::Tensor workspace_cublas,
+                                                   bool use_split_accumulator, int math_sm_count) {
+  using namespace transformer_engine::pytorch::detail;
+
+  init_extension();
+
+  // Ensure that cublasLt handle is created on the correct device,
+  // overriding torch.cuda.set_device calls from user side.
+  // Assumes all tensors passed are on the same device.
+  at::cuda::CUDAGuard device_guard(workspace_cublas.device());
+
+  auto grouped_B = GroupedTensorFromPyTorchGroupedTensor(B);
+  auto grouped_D = GroupedTensorFromPyTorchGroupedTensor(D);
+
+  const auto A_list = py::cast<std::vector<py::object>>(A);
+  const size_t num_tensors = grouped_B.num_tensors();
+  NVTE_CHECK(num_tensors > 0, "Grouped GEMM requires non-empty inputs.");
+  NVTE_CHECK(A_list.size() == num_tensors,
+             "Grouped GEMM requires A_list to have num_tensors elements.");
+  NVTE_CHECK(grouped_D.num_tensors() == num_tensors,
+             "Grouped GEMM requires D to have the same num_tensors as inputs.");
+
+  auto gemm_config = prepare_grouped_gemm_config(alpha, beta, workspace_setup, workspace_cublas,
+                                                 num_tensors, math_sm_count, use_split_accumulator);
+
+  std::vector<TensorWrapper> te_A_wrappers;
+  std::vector<NVTETensor> te_A_vector;
+  te_A_wrappers.reserve(num_tensors);
+  te_A_vector.reserve(num_tensors);
+  const auto none = py::none();
+  for (const auto& tensor : A_list) {
+    te_A_wrappers.emplace_back(makeTransformerEngineTensor(tensor, none));
+    te_A_vector.emplace_back(te_A_wrappers.back().data());
+  }
+
+  std::vector<std::optional<at::Tensor>> swizzled_scale_inverses_list;
+  swizzled_scale_inverses_list.emplace_back(
+      multi_tensor_swizzle_scales_for_gemm(te_A_wrappers, transa, !transa));
+
+  [[maybe_unused]] auto swizzled_scales_B =
+      maybe_swizzle_grouped_tensor(grouped_B, transb, !transb);
+
+  NVTE_SCOPED_GIL_RELEASE({
+    nvte_grouped_gemm_with_discrete_inputA(
+        te_A_vector.data(), num_tensors, transa, grouped_B.data(), transb, grouped_D.data(),
+        grouped_D.data(), gemm_config.te_alpha.data(), gemm_config.te_beta.data(),
+        gemm_config.te_workspace_setup.data(), gemm_config.te_workspace_cublas.data(),
+        gemm_config.matmul_config.has_value()
+            ? static_cast<NVTEGroupedMatmulConfig>(*gemm_config.matmul_config)
+            : nullptr,
+        at::cuda::getCurrentCUDAStream());
+  });
+
+  if (!bias.is_none()) {
+    auto grouped_bias = GroupedTensorFromPyTorchGroupedTensor(bias);
+    NVTE_SCOPED_GIL_RELEASE({
+      nvte_grouped_bias_add(grouped_D.data(), grouped_bias.data(),
+                            at::cuda::getCurrentCUDAStream());
+    });
+  }
+
+  return py::reinterpret_borrow<py::object>(D);
+}
+
+py::object te_general_grouped_gemm_for_discrete_out(py::handle A, bool transa, py::handle B,
+                                                    bool transb, py::handle D, py::object bias,
+                                                    at::Tensor alpha, at::Tensor beta,
+                                                    at::Tensor workspace_setup,
+                                                    at::Tensor workspace_cublas,
+                                                    bool use_split_accumulator, int math_sm_count) {
+  using namespace transformer_engine::pytorch::detail;
+
+  init_extension();
+
+  // Ensure that cublasLt handle is created on the correct device,
+  // overriding torch.cuda.set_device calls from user side.
+  // Assumes all tensors passed are on the same device.
+  at::cuda::CUDAGuard device_guard(workspace_cublas.device());
+
+  NVTE_CHECK(bias.is_none(), "Bias is not supported for discrete output grouped GEMM.");
+
+  auto grouped_A = GroupedTensorFromPyTorchGroupedTensor(A);
+  auto grouped_B = GroupedTensorFromPyTorchGroupedTensor(B);
+
+  const auto D_list = py::cast<std::vector<py::object>>(D);
+  const size_t num_tensors = grouped_A.num_tensors();
+  NVTE_CHECK(num_tensors > 0, "Grouped GEMM requires non-empty inputs.");
+  NVTE_CHECK(grouped_B.num_tensors() == num_tensors,
+             "Grouped GEMM requires A and B to have the same num_tensors.");
+  NVTE_CHECK(D_list.size() == num_tensors,
+             "Grouped GEMM requires D_list to have num_tensors elements.");
+
+  auto gemm_config = prepare_grouped_gemm_config(alpha, beta, workspace_setup, workspace_cublas,
+                                                 num_tensors, math_sm_count, use_split_accumulator);
+
+  std::vector<TensorWrapper> te_D_wrappers;
+  std::vector<NVTETensor> te_D_vector;
+  te_D_wrappers.reserve(num_tensors);
+  te_D_vector.reserve(num_tensors);
+  const auto none = py::none();
+  for (const auto& tensor : D_list) {
+    te_D_wrappers.emplace_back(makeTransformerEngineTensor(tensor, none));
+    te_D_vector.emplace_back(te_D_wrappers.back().data());
+  }
+
+  [[maybe_unused]] auto swizzled_scales_A =
+      maybe_swizzle_grouped_tensor(grouped_A, transa, !transa);
+  [[maybe_unused]] auto swizzled_scales_B =
+      maybe_swizzle_grouped_tensor(grouped_B, transb, !transb);
+
+  NVTE_SCOPED_GIL_RELEASE({
+    nvte_grouped_gemm_with_discrete_out(
+        grouped_A.data(), transa, grouped_B.data(), transb, te_D_vector.data(), num_tensors,
+        te_D_vector.data(), num_tensors, gemm_config.te_alpha.data(), gemm_config.te_beta.data(),
+        gemm_config.te_workspace_setup.data(), gemm_config.te_workspace_cublas.data(),
+        gemm_config.matmul_config.has_value()
+            ? static_cast<NVTEGroupedMatmulConfig>(*gemm_config.matmul_config)
+            : nullptr,
+        at::cuda::getCurrentCUDAStream());
+  });
+
+  return py::reinterpret_borrow<py::object>(D);
 }
 
 }  // namespace transformer_engine::pytorch

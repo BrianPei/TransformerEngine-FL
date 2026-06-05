@@ -1,4 +1,4 @@
-# Copyright (c) 2022-2025, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# Copyright (c) 2022-2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 #
 # See LICENSE for license information.
 
@@ -12,7 +12,10 @@ import torch
 import torch.nn as nn
 from torch.nn import Parameter
 
-from transformer_engine.pytorch.quantization import FP8GlobalStateManager
+from transformer_engine.pytorch.quantization import (
+    FP8GlobalStateManager,
+    get_align_size_for_quantization,
+)
 from transformer_engine.pytorch.utils import (
     init_method_normal,
     scaled_init_method_normal,
@@ -40,10 +43,15 @@ from transformer_engine.pytorch import (
     is_mxfp8_available,
     is_fp8_block_scaling_available,
     is_bf16_available,
+    is_nvfp4_available,
 )
 from transformer_engine.pytorch import checkpoint as te_checkpoint
-from transformer_engine.pytorch.cpp_extensions import general_gemm, general_grouped_gemm
-from transformer_engine.pytorch.module.base import get_multi_stream_cublas_workspace, get_workspace
+from transformer_engine.pytorch.cpp_extensions import (
+    general_gemm,
+    general_grouped_gemm,
+    general_grouped_gemm_for_grouped_tensor,
+)
+from transformer_engine.pytorch.tensor.grouped_tensor import GroupedTensor
 from transformer_engine.common import recipe
 import transformer_engine_torch as tex
 from utils import ModelConfig, reset_rng_states
@@ -53,6 +61,7 @@ from utils import ModelConfig, reset_rng_states
 fp8_available, reason_for_no_fp8 = is_fp8_available(return_reason=True)
 mxfp8_available, reason_for_no_mxfp8 = is_mxfp8_available(return_reason=True)
 fp8_block_scaling_available = is_fp8_block_scaling_available()
+nvfp4_available = is_nvfp4_available()
 
 sm_80plus = get_device_compute_capability() >= (8, 0)
 
@@ -85,6 +94,7 @@ all_boolean = [True, False]
 all_activations = [
     "gelu",
     "geglu",
+    "glu",
     "qgelu",
     "qgeglu",
     "relu",
@@ -114,6 +124,43 @@ if NVTE_TEST_NVINSPECT_ENABLED:
     )
 
 
+def nvfp4_rht_and_2d_quantization():
+    nvfp4_recipe = recipe.NVFP4BlockScaling()
+    nvfp4_recipe.fp4_quant_fwd_inp = recipe.QParams(
+        random_hadamard_transform=True, fp4_2d_quantization=False
+    )
+    nvfp4_recipe.fp4_quant_fwd_weight = recipe.QParams(
+        random_hadamard_transform=False, fp4_2d_quantization=True
+    )
+    nvfp4_recipe.fp4_quant_bwd_grad = recipe.QParams(
+        random_hadamard_transform=True, fp4_2d_quantization=False
+    )
+    return nvfp4_recipe
+
+
+def check_rht_usage(recipe: recipe.Recipe) -> bool:
+    # if using RHT, we can only support bf16
+    # check fp4_quant_fwd_inp, fp4_quant_fwd_weight, fp4_quant_bwd_grad
+    if recipe.nvfp4():
+        if (
+            recipe.fp4_quant_fwd_inp.random_hadamard_transform
+            or recipe.fp4_quant_fwd_weight.random_hadamard_transform
+            or recipe.fp4_quant_bwd_grad.random_hadamard_transform
+        ):
+            return True
+    return False
+
+
+def get_nvfp4_inp_supported_dtypes(recipe: recipe.Recipe, dtype: torch.dtype) -> bool:
+    supported_input_dtypes = []
+    if recipe.nvfp4():
+        supported_input_dtypes.append(torch.bfloat16)
+        # if not using RHT, we can add fp32 as well
+    if not check_rht_usage(recipe):
+        supported_input_dtypes.append(torch.float32)
+    return supported_input_dtypes
+
+
 fp8_recipes = []
 if mxfp8_available:
     fp8_recipes.append(recipe.MXFP8BlockScaling())
@@ -122,6 +169,8 @@ if fp8_block_scaling_available:
 if fp8_available:
     fp8_recipes.append(recipe.Float8CurrentScaling())
     fp8_recipes.append(recipe.DelayedScaling())
+if nvfp4_available:
+    fp8_recipes.append(nvfp4_rht_and_2d_quantization())
 
 use_cutlass_grouped_gemm = [False]
 # Only enable cutlass grouped gemm on Hopper
@@ -145,7 +194,7 @@ def dtype_tols(dtype: torch.dtype) -> Dict[str, float]:
         return dict(rtol=1e-3, atol=1e-5)
     if dtype == torch.bfloat16:
         return dict(rtol=1.6e-2, atol=1e-5)
-    raise ValueError(f"Unsuppored dtype ({dtype})")
+    raise ValueError(f"Unsupported dtype ({dtype})")
 
 
 def assert_allclose(
@@ -436,6 +485,7 @@ class TorchGroupedLinearWithPadding(nn.Module):
 _supported_act = {
     "gelu": nn.GELU(approximate="tanh"),
     "geglu": nn.GELU(approximate="tanh"),
+    "glu": nn.Sigmoid(),
     "qgelu": TorchQuickGELU(),
     "qgeglu": TorchQuickGELU(),
     "relu": nn.ReLU(),
@@ -582,6 +632,11 @@ def _test_e2e_selective_recompute(
 def test_gpt_selective_activation_recompute(dtype, bs, model, fp8, recipe, fp8_model_params):
     if fp8_model_params and NVTE_TEST_NVINSPECT_ENABLED:
         pytest.skip("FP8 parameters are not supported in debug mode.")
+    if fp8 and recipe.nvfp4():
+        if dtype not in get_nvfp4_inp_supported_dtypes(recipe, dtype):
+            pytest.skip(
+                f"Input dtype {dtype} not supported for NVFP4 Recipe {recipe.__class__.__name__}"
+            )
 
     config = model_configs[model]
 
@@ -692,6 +747,11 @@ def test_gpt_full_activation_recompute(
 ):
     if fp8_model_params and NVTE_TEST_NVINSPECT_ENABLED:
         pytest.skip("FP8 parameters are not supported in debug mode.")
+    if fp8 and recipe.nvfp4():
+        if dtype not in get_nvfp4_inp_supported_dtypes(recipe, dtype):
+            pytest.skip(
+                f"Input dtype {dtype} not supported for NVFP4 Recipe {recipe.__class__.__name__}"
+            )
 
     config = model_configs[model]
 
@@ -1217,6 +1277,9 @@ def test_linear_accuracy(dtype, bs, model, return_bias, bias):
 @pytest.mark.parametrize("bias", all_boolean)
 @pytest.mark.parametrize("fuse_wgrad_accumulation", all_boolean)
 def test_linear_accuracy_delay_wgrad_compute(dtype, bs, model, bias, fuse_wgrad_accumulation):
+    if NVTE_TEST_NVINSPECT_ENABLED:
+        pytest.skip("Delayed wgrad compute is not supported in debug mode.")
+
     config = model_configs[model]
 
     te_linear_ref = Linear(
@@ -1275,6 +1338,12 @@ def test_linear_accuracy_save_original_input(dtype, model, recipe):
     if config.max_seqlen_q % 16 != 0 and fp8:
         pytest.skip("FP8 requires sequence length to be divisible by 16.")
 
+    if recipe is not None and recipe.nvfp4():
+        if dtype not in get_nvfp4_inp_supported_dtypes(recipe, dtype):
+            pytest.skip(
+                f"Input dtype {dtype} not supported for NVFP4 Recipe {recipe.__class__.__name__}"
+            )
+
     with quantized_model_init(enabled=fp8 and fp8_model_params, recipe=recipe):
         te_linear_ref = Linear(
             config.hidden_size,
@@ -1307,7 +1376,7 @@ def test_linear_accuracy_save_original_input(dtype, model, recipe):
     te_outputs = _test_granular_accuracy(te_linear, bs, dtype, config, recipe=recipe)
     te_outputs_ref = _test_granular_accuracy(te_linear_ref, bs, dtype, config, recipe=recipe)
 
-    # Shoule be bit-wise match
+    # Should be bit-wise match
     for i, (o, o_ref) in enumerate(zip(te_outputs, te_outputs_ref)):
         torch.testing.assert_close(o, o_ref, rtol=0, atol=0)
 
@@ -1507,6 +1576,9 @@ def test_layernorm_linear_accuracy(
 def test_layernorm_linear_accuracy_delay_wgrad_compute(
     dtype, bs, model, normalization, zero_centered_gamma, bias, fuse_wgrad_accumulation
 ):
+    if NVTE_TEST_NVINSPECT_ENABLED:
+        pytest.skip("Delayed wgrad compute is not supported in debug mode.")
+
     config = model_configs[model]
 
     ln_linear_ref = LayerNormLinear(
@@ -1640,8 +1712,15 @@ def test_layernorm_mlp_accuracy(dtype, bs, model, activation, normalization, ret
 @pytest.mark.parametrize("bias", all_boolean)
 @pytest.mark.parametrize("fuse_wgrad_accumulation", all_boolean)
 def test_layernorm_mlp_accuracy_delay_wgrad_compute(
-    dtype, bs, model, bias, fuse_wgrad_accumulation
+    dtype,
+    bs,
+    model,
+    bias,
+    fuse_wgrad_accumulation,
 ):
+    if NVTE_TEST_NVINSPECT_ENABLED:
+        pytest.skip("Delayed wgrad compute is not supported in debug mode.")
+
     config = model_configs[model]
 
     ln_mlp = LayerNormMLP(
@@ -1691,6 +1770,58 @@ def test_layernorm_mlp_accuracy_delay_wgrad_compute(
         torch.testing.assert_close(o, o_ref, rtol=0, atol=0)
 
 
+@pytest.mark.parametrize("dtype", param_types)
+@pytest.mark.parametrize("bs", [2])
+@pytest.mark.parametrize("model", ["small"])
+@pytest.mark.parametrize("bias", all_boolean)
+def test_layernorm_mlp_accuracy_checkpoint(
+    dtype,
+    bs,
+    model,
+    bias,
+):
+    config = model_configs[model]
+
+    ln_mlp = LayerNormMLP(
+        hidden_size=config.hidden_size,
+        ffn_hidden_size=4 * config.hidden_size,
+        eps=config.eps,
+        bias=bias,
+        params_dtype=dtype,
+        device="cuda",
+        checkpoint=True,
+    ).eval()
+
+    ln_mlp_ref = LayerNormMLP(
+        hidden_size=config.hidden_size,
+        ffn_hidden_size=4 * config.hidden_size,
+        eps=config.eps,
+        bias=bias,
+        params_dtype=dtype,
+        device="cuda",
+        checkpoint=False,
+    ).eval()
+
+    # Share params
+    with torch.no_grad():
+        ln_mlp_ref.layer_norm_weight = Parameter(ln_mlp.layer_norm_weight.clone())
+        ln_mlp_ref.layer_norm_bias = Parameter(ln_mlp.layer_norm_bias.clone())
+        ln_mlp_ref.fc1_weight = Parameter(ln_mlp.fc1_weight.clone())
+        ln_mlp_ref.fc2_weight = Parameter(ln_mlp.fc2_weight.clone())
+        if bias:
+            ln_mlp_ref.fc1_bias = Parameter(ln_mlp.fc1_bias.clone())
+            ln_mlp_ref.fc2_bias = Parameter(ln_mlp.fc2_bias.clone())
+
+    te_outputs = _test_granular_accuracy(ln_mlp, bs, dtype, config, delay_wgrad_compute=False)
+    te_outputs_ref = _test_granular_accuracy(
+        ln_mlp_ref, bs, dtype, config, delay_wgrad_compute=False
+    )
+
+    # Shoule be bit-wise match
+    for i, (o, o_ref) in enumerate(zip(te_outputs, te_outputs_ref)):
+        torch.testing.assert_close(o, o_ref, rtol=0, atol=0)
+
+
 def _test_grouped_linear_accuracy(
     block,
     num_gemms,
@@ -1717,9 +1848,7 @@ def _test_grouped_linear_accuracy(
     if num_gemms > 1:
         split_size = 1
         if fp8:
-            split_size = 16
-            if recipe.mxfp8():
-                split_size = 128
+            split_size = get_align_size_for_quantization(recipe)
         m = config.max_seqlen_q // split_size
         dist = torch.sort(torch.randint(0, m, (num_gemms - 2,))).values.tolist()
         dist.append(dist[-1])  # Manually add a zero
@@ -1786,10 +1915,18 @@ def test_grouped_linear_accuracy(
     fp8 = recipe is not None
     if fp8 and fp8_model_params and NVTE_TEST_NVINSPECT_ENABLED:
         pytest.skip("FP8 parameters are not supported in debug mode.")
+    if NVTE_TEST_NVINSPECT_ENABLED and delay_wgrad_compute:
+        pytest.skip("Delayed wgrad compute is not supported in debug mode.")
 
     config = model_configs[model]
     if config.max_seqlen_q % 16 != 0 and fp8:
         pytest.skip("FP8 requires sequence length to be divisible by 16.")
+
+    if recipe is not None and recipe.nvfp4():
+        if dtype not in get_nvfp4_inp_supported_dtypes(recipe, dtype):
+            pytest.skip(
+                f"Input dtype {dtype} not supported for NVFP4 Recipe {recipe.__class__.__name__}"
+            )
 
     with quantized_model_init(enabled=fp8 and fp8_model_params, recipe=recipe):
         grouped_linear = GroupedLinear(
@@ -1922,10 +2059,18 @@ def test_grouped_linear_accuracy_save_original_input(
         pytest.skip("FP8 parameters are not supported in debug mode.")
     if fp8 and recipe.delayed():
         pytest.skip("DelayedScaling recipe is not supported with save_original_input")
+    if NVTE_TEST_NVINSPECT_ENABLED and delay_wgrad_compute:
+        pytest.skip("Delayed wgrad compute is not supported in debug mode.")
 
     config = model_configs[model]
     if config.max_seqlen_q % 16 != 0 and fp8:
         pytest.skip("FP8 requires sequence length to be divisible by 16.")
+
+    if recipe is not None and recipe.nvfp4():
+        if dtype not in get_nvfp4_inp_supported_dtypes(recipe, dtype):
+            pytest.skip(
+                f"Input dtype {dtype} not supported for NVFP4 Recipe {recipe.__class__.__name__}"
+            )
 
     with quantized_model_init(enabled=fp8 and fp8_model_params, recipe=recipe):
         grouped_linear = GroupedLinear(
@@ -2013,9 +2158,7 @@ def test_grouped_linear_accuracy_single_gemm(recipe):
 def _test_padding_grouped_linear_accuracy(block, num_gemms, bs, dtype, config, recipe, fp8=False):
 
     def _pad_tensor_for_fp8(hidden_states, tokens_per_expert):
-        align_size = 16
-        if recipe.mxfp8():
-            align_size = 32
+        align_size = get_align_size_for_quantization(recipe)
         padded_tokens_per_expert = [
             (num_tokens + align_size - 1) // align_size * align_size
             for num_tokens in tokens_per_expert
@@ -2129,6 +2272,12 @@ def test_padding_grouped_linear_accuracy(
     if config.max_seqlen_q % 16 != 0 and fp8:
         pytest.skip("FP8 requires sequence length to be divisible by 16.")
 
+    if recipe is not None and recipe.nvfp4():
+        if dtype not in get_nvfp4_inp_supported_dtypes(recipe, dtype):
+            pytest.skip(
+                f"Input dtype {dtype} not supported for NVFP4 Recipe {recipe.__class__.__name__}"
+            )
+
     with quantized_model_init(enabled=fp8 and fp8_model_params, recipe=recipe):
         grouped_linear = TorchGroupedLinearWithPadding(
             num_gemms,
@@ -2199,6 +2348,12 @@ def test_padding_grouped_linear_accuracy_save_original_input(
     config = model_configs[model]
     if config.max_seqlen_q % 16 != 0 and fp8:
         pytest.skip("FP8 requires sequence length to be divisible by 16.")
+
+    if recipe is not None and recipe.nvfp4():
+        if dtype not in get_nvfp4_inp_supported_dtypes(recipe, dtype):
+            pytest.skip(
+                f"Input dtype {dtype} not supported for NVFP4 Recipe {recipe.__class__.__name__}"
+            )
 
     with quantized_model_init(enabled=fp8 and fp8_model_params, recipe=recipe):
         grouped_linear = TorchGroupedLinearWithPadding(
@@ -2409,6 +2564,12 @@ def test_gpt_fp8_parameters(dtype, bs, model, recipe):
     if NVTE_TEST_NVINSPECT_ENABLED:
         pytest.skip("FP8 parameters are not supported in debug mode.")
 
+    if recipe.nvfp4():
+        if dtype not in get_nvfp4_inp_supported_dtypes(recipe, dtype):
+            pytest.skip(
+                f"Input dtype {dtype} not supported for NVFP4 Recipe {recipe.__class__.__name__}"
+            )
+
     config = model_configs[model]
 
     outputs = _test_gpt_fp8_parameters(bs, dtype, config, False, recipe)
@@ -2603,7 +2764,6 @@ def test_grouped_gemm(shape, dtype, layout, accumulate, use_cutlass):
         general_gemm(
             A[i],
             B[i],
-            get_workspace(),
             dtype,
             grad=grad,
             accumulate=accumulate,
@@ -2617,8 +2777,8 @@ def test_grouped_gemm(shape, dtype, layout, accumulate, use_cutlass):
         A,
         B,
         out,
+        [None] * z,
         dtype,
-        get_multi_stream_cublas_workspace(),
         m_splits=m_splits,
         grad=grad,
         accumulate=accumulate,
@@ -2635,6 +2795,446 @@ def test_grouped_gemm(shape, dtype, layout, accumulate, use_cutlass):
 
     if use_cutlass:
         os.environ.pop("NVTE_USE_CUTLASS_GROUPED_GEMM", None)
+
+
+def _pack_grouped_tensor(grouped_tensor: GroupedTensor, tensors: List[torch.Tensor]) -> None:
+    data = grouped_tensor.rowwise_data
+    if data is None:
+        data = grouped_tensor.columnwise_data
+    if data is None:
+        raise ValueError("GroupedTensor has no data buffers to pack.")
+    offset = 0
+    for tensor in tensors:
+        numel = tensor.numel()
+        data[offset : offset + numel].copy_(tensor.reshape(-1))
+        offset += numel
+
+
+def _make_grouped_tensor_from_splits(
+    m_sizes: List[int],
+    last_dim: int,
+    device: torch.device,
+    dtype: torch.dtype,
+) -> GroupedTensor:
+    first_dims = torch.tensor(m_sizes, device=device, dtype=torch.int64)
+    return GroupedTensor.make_grouped_tensor(
+        num_tensors=len(m_sizes),
+        first_dims=first_dims,
+        last_dims=None,
+        logical_first_dim=sum(m_sizes),
+        logical_last_dim=last_dim,
+        quantizer=None,
+        device=device,
+        dtype=dtype,
+    )
+
+
+def _make_grouped_tensor_uniform(
+    num_tensors: int,
+    first_dim: int,
+    last_dim: int,
+    device: torch.device,
+    dtype: torch.dtype,
+) -> GroupedTensor:
+    return GroupedTensor.make_grouped_tensor(
+        num_tensors=num_tensors,
+        first_dims=None,
+        last_dims=None,
+        logical_first_dim=num_tensors * first_dim,
+        logical_last_dim=last_dim,
+        quantizer=None,
+        device=device,
+        dtype=dtype,
+    )
+
+
+@pytest.mark.parametrize(
+    "z, m, n, k",
+    [
+        (4, 256, 256, 256),
+        (4, 512, 256, 512),
+        (4, 512, 512, 256),
+        (8, 512, 256, 512),
+    ],
+)
+@pytest.mark.parametrize("case", ["no_discrete", "discrete_in", "discrete_out"])
+@pytest.mark.parametrize("layout", ["TN", "NN", "NT"])
+@pytest.mark.parametrize("accumulate", [False, True])
+def test_grouped_gemm_grouped_tensor(z, m, n, k, case, layout, accumulate) -> None:
+    if tex.get_cublasLt_version() < 130300:
+        pytest.skip("Grouped GEMM requires cuBLAS 13.3+.")
+    if torch.cuda.get_device_capability() < (10, 0):
+        pytest.skip("Grouped GEMM requires Blackwell (SM100) or newer.")
+    if not is_bf16_available():
+        pytest.skip("bfloat16 is required for grouped GEMM test.")
+
+    torch.manual_seed(0)
+
+    dtype = torch.bfloat16
+
+    split_points = torch.randperm(m - 1)[: z - 1] + 1
+    split_points = torch.sort(split_points).values.tolist()
+    m_sizes = [split_points[0]]
+    m_sizes += [b - a for a, b in zip(split_points[:-1], split_points[1:])]
+    m_sizes.append(m - split_points[-1])
+    assert sum(m_sizes) == m and len(m_sizes) == z
+
+    if layout == "NT":
+        A = [torch.randn(ms, k, dtype=dtype, device="cuda") for ms in m_sizes]  # input
+        B = [torch.randn(ms, n, dtype=dtype, device="cuda") for ms in m_sizes]  # grad_output
+        out = [torch.randn(n, k, dtype=dtype, device="cuda") for _ in range(z)]  # wgrad
+        out_ref = [torch.matmul(B[i].transpose(0, 1).float(), A[i].float()) for i in range(z)]
+    else:
+        A = [torch.randn(n, k, dtype=dtype, device="cuda") for _ in range(z)]  # weight
+        B = [
+            torch.randn(ms, k if layout == "TN" else n, dtype=dtype, device="cuda")
+            for ms in m_sizes
+        ]  # TN --> input, NN --> grad_output
+        out = [
+            torch.randn(ms, n if layout == "TN" else k, dtype=dtype, device="cuda")
+            for ms in m_sizes
+        ]  # TN --> output, NN --> dgrad
+        if layout == "NN":
+            out_ref = [torch.matmul(B[i].float(), A[i].float()) for i in range(z)]
+        else:  # layout == "TN"
+            out_ref = [torch.matmul(B[i].float(), A[i].transpose(0, 1).float()) for i in range(z)]
+
+    if accumulate:
+        out_ref = [out[i].float() + o for i, o in enumerate(out_ref)]
+
+    # Bias is applied after GEMM (broadcasted along rows)
+    # Match kernel behavior: GEMM output is already in output dtype when bias is added.
+    out_ref_no_bias = [o.to(dtype) for o in out_ref]
+    if layout == "TN":
+        bias_last_dim = n
+    else:  # layout == "NT" or "NN"
+        bias_last_dim = k
+    bias = (
+        [torch.randn(1, bias_last_dim, dtype=dtype, device="cuda") for _ in range(z)]
+        if case != "discrete_out"
+        else None
+    )
+    # Bias add in grouped kernel accumulates in FP32 for BF16/FP16.
+    out_ref = (
+        [(o.float() + b.float()).to(dtype) for o, b in zip(out_ref_no_bias, bias)]
+        if bias is not None
+        else out_ref_no_bias
+    )
+    # Create grouped tensors based on case
+    device = A[0].device
+    grouped_A = A
+    grouped_out = out
+    grouped_out_bias = [o.clone() for o in out]
+    grouped_out_no_bias = [o.clone() for o in out]
+    grouped_bias = None
+    if layout == "TN":
+        grouped_A = (
+            _make_grouped_tensor_uniform(z, n, k, device, dtype) if case != "discrete_in" else A
+        )  # weight
+        grouped_B = _make_grouped_tensor_from_splits(m_sizes, k, device, dtype)  # input
+        if case != "discrete_out":
+            grouped_out = _make_grouped_tensor_from_splits(m_sizes, n, device, dtype)  # output
+            grouped_out_bias = _make_grouped_tensor_from_splits(m_sizes, n, device, dtype)
+            grouped_out_no_bias = _make_grouped_tensor_from_splits(m_sizes, n, device, dtype)
+    elif layout == "NN":
+        grouped_A = (
+            _make_grouped_tensor_uniform(z, n, k, device, dtype) if case != "discrete_in" else A
+        )  # weight
+        grouped_B = _make_grouped_tensor_from_splits(m_sizes, n, device, dtype)  # grad_output
+        if case != "discrete_out":
+            grouped_out = _make_grouped_tensor_from_splits(m_sizes, k, device, dtype)
+            grouped_out_bias = _make_grouped_tensor_from_splits(m_sizes, k, device, dtype)
+            grouped_out_no_bias = _make_grouped_tensor_from_splits(m_sizes, k, device, dtype)
+    else:  # layout == "NT"
+        grouped_A = (
+            _make_grouped_tensor_from_splits(m_sizes, k, device, dtype)
+            if case != "discrete_in"
+            else A
+        )  # input
+        grouped_B = _make_grouped_tensor_from_splits(m_sizes, n, device, dtype)  # grad_output
+        if case != "discrete_out":
+            grouped_out = _make_grouped_tensor_uniform(z, n, k, device, dtype)  # wgrad
+            grouped_out_bias = _make_grouped_tensor_uniform(z, n, k, device, dtype)
+            grouped_out_no_bias = _make_grouped_tensor_uniform(z, n, k, device, dtype)
+    _pack_grouped_tensor(grouped_B, B)
+    if case != "discrete_out":
+        _pack_grouped_tensor(grouped_out, out)
+        _pack_grouped_tensor(grouped_out_bias, out)
+        _pack_grouped_tensor(grouped_out_no_bias, out)
+    if case != "discrete_in":
+        _pack_grouped_tensor(grouped_A, A)
+
+    if bias is not None:
+        grouped_bias = _make_grouped_tensor_uniform(z, 1, bias_last_dim, device, dtype)
+        _pack_grouped_tensor(grouped_bias, bias)
+
+    general_grouped_gemm_for_grouped_tensor(
+        grouped_A,
+        grouped_B,
+        grouped_out_no_bias,
+        layout=layout,
+        accumulate=accumulate,
+        bias=None,
+    )
+    general_grouped_gemm_for_grouped_tensor(
+        grouped_A,
+        grouped_B,
+        grouped_out_bias,
+        layout=layout,
+        accumulate=accumulate,
+        bias=grouped_bias,
+    )
+    out_grouped_no_bias = (
+        grouped_out_no_bias
+        if isinstance(grouped_out_no_bias, list)
+        else grouped_out_no_bias.split_into_quantized_tensors()
+    )
+    out_grouped_bias = (
+        grouped_out_bias
+        if isinstance(grouped_out_bias, list)
+        else grouped_out_bias.split_into_quantized_tensors()
+    )
+
+    out_grouped_manual_bias = (
+        [(o.float() + b.float()).to(dtype) for o, b in zip(out_grouped_no_bias, bias)]
+        if bias is not None
+        else out_grouped_no_bias
+    )
+    tols = dtype_tols(dtype)
+    for o, o_ref in zip(out_grouped_no_bias, out_ref_no_bias):
+        torch.testing.assert_close(o, o_ref, **tols)
+    if bias is not None:
+        for o, o_ref in zip(out_grouped_bias, out_grouped_manual_bias):
+            torch.testing.assert_close(o, o_ref, **tols)
+
+
+@pytest.mark.parametrize("layout", ["TN", "NN", "NT"])
+@pytest.mark.parametrize("accumulate", [False, True])
+@pytest.mark.parametrize("quant_type", ["bf16", "mxfp8"])
+def test_grouped_gemm_grouped_tensor_zero_work(layout, accumulate, quant_type) -> None:
+    """Grouped GEMM with all-zero split sizes (zero total work).
+
+    For wgrad (NT layout) the output should be zero when not accumulating,
+    or unchanged when accumulating with beta=1.
+    """
+    if torch.cuda.get_device_capability() < (10, 0):
+        pytest.skip("Grouped GEMM requires Blackwell (SM100) or newer.")
+    if not is_bf16_available():
+        pytest.skip("bfloat16 is required for grouped GEMM test.")
+    if quant_type == "mxfp8" and not mxfp8_available:
+        pytest.skip(reason_for_no_mxfp8)
+
+    z = 4
+    k, n = 256, 256
+    dtype = torch.bfloat16
+    device = torch.device("cuda")
+    use_mxfp8 = quant_type == "mxfp8"
+
+    transa = layout[0] == "T"
+    transb = layout[1] == "T"
+    zero_first_dims = torch.zeros(z, dtype=torch.int64, device=device)
+
+    def _make_zero_tokens_grouped_tensor(logical_last_dim, is_a):
+        """Create a GroupedTensor with non-zero logical_shape but zero first_dims."""
+        buf = torch.randn(0, logical_last_dim, dtype=dtype, device=device)
+        if use_mxfp8:
+            if is_a:
+                rowwise, columnwise = transa, not transa
+            else:
+                rowwise, columnwise = not transb, transb
+            quantizer = MXFP8Quantizer(
+                fp8_dtype=tex.DType.kFloat8E4M3,
+                rowwise=rowwise,
+                columnwise=columnwise,
+            )
+            quantizer.optimize_for_gemm = True
+            return tex.group_quantize(buf, quantizer, z, zero_first_dims)
+        return GroupedTensor.make_grouped_tensor(
+            num_tensors=z,
+            first_dims=zero_first_dims,
+            last_dims=None,
+            logical_first_dim=k,
+            logical_last_dim=logical_last_dim,
+            quantizer=None,
+            device=device,
+            dtype=dtype,
+        )
+
+    if layout in ("TN", "NN"):
+        weight_tensors = [torch.randn(n, k, dtype=dtype, device=device) for _ in range(z)]
+        if use_mxfp8:
+            grouped_A = _make_grouped_tensor_quantized_mxfp8(
+                weight_tensors, is_a=True, transposed=transa, device=device
+            )
+        else:
+            grouped_A = _make_grouped_tensor_uniform(z, n, k, device, dtype)
+            _pack_grouped_tensor(grouped_A, weight_tensors)
+    else:  # NT
+        grouped_A = _make_zero_tokens_grouped_tensor(k, is_a=True)
+
+    b_last_dim = k if layout == "TN" else n
+    grouped_B = _make_zero_tokens_grouped_tensor(b_last_dim, is_a=False)
+
+    if layout == "NT":
+        out = [torch.randn(n, k, dtype=dtype, device=device) for _ in range(z)]
+        grouped_out = _make_grouped_tensor_uniform(z, n, k, device, dtype)
+        _pack_grouped_tensor(grouped_out, out)
+    else:
+        out = [torch.zeros(0, dtype=dtype, device=device) for _ in range(z)]
+        out_last_dim = n if layout == "TN" else k
+        grouped_out = GroupedTensor.make_grouped_tensor(
+            num_tensors=z,
+            first_dims=zero_first_dims,
+            last_dims=None,
+            logical_first_dim=k,
+            logical_last_dim=out_last_dim,
+            quantizer=None,
+            device=device,
+            dtype=dtype,
+        )
+
+    out_before = [o.clone() for o in out]
+
+    general_grouped_gemm_for_grouped_tensor(
+        grouped_A,
+        grouped_B,
+        grouped_out,
+        layout=layout,
+        accumulate=accumulate,
+    )
+
+    out_result = (
+        grouped_out if isinstance(grouped_out, list) else grouped_out.split_into_quantized_tensors()
+    )
+    for i in range(z):
+        if out_result[i].numel() == 0:
+            continue
+        if accumulate:
+            torch.testing.assert_close(out_result[i], out_before[i])
+        else:
+            torch.testing.assert_close(out_result[i], torch.zeros_like(out_result[i]))
+
+
+def _make_grouped_tensor_quantized_mxfp8(
+    tensors: List[torch.Tensor],
+    *,
+    is_a: bool,
+    transposed: bool,
+    device: torch.device,
+    optimize_for_gemm: bool = True,
+) -> GroupedTensor:
+    if not tensors:
+        raise ValueError("Expected non-empty tensor list for grouped quantization.")
+    if is_a:
+        rowwise = transposed
+        columnwise = not transposed
+    else:
+        rowwise = not transposed
+        columnwise = transposed
+    quantizer = MXFP8Quantizer(
+        fp8_dtype=tex.DType.kFloat8E4M3,
+        rowwise=rowwise,
+        columnwise=columnwise,
+    )
+    quantizer.optimize_for_gemm = optimize_for_gemm
+    grouped_input = torch.cat(tensors, dim=0)
+    first_dims = torch.tensor([t.shape[0] for t in tensors], dtype=torch.int64, device=device)
+    return tex.group_quantize(grouped_input, quantizer, len(tensors), first_dims)
+
+
+@pytest.mark.parametrize(
+    "shape",
+    [
+        (1, 128, 128, 512),
+        (8, 1024, 128, 512),
+        (16, 4096, 128, 512),
+    ],
+)
+@pytest.mark.parametrize("accumulate", [False, True])
+@pytest.mark.parametrize("layout", ["TN", "NN", "NT"])
+@pytest.mark.parametrize("case", ["no_discrete", "discrete_in", "discrete_out"])
+@pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16])
+def test_grouped_gemm_grouped_tensor_mxfp8(
+    shape, accumulate, layout: str, case: str, dtype: torch.dtype
+) -> None:
+    if tex.get_cublasLt_version() < 130300:
+        pytest.skip("Grouped GEMM requires cuBLAS 13.3+.")
+    if torch.cuda.get_device_capability() < (10, 0):
+        pytest.skip("Grouped GEMM requires Blackwell (SM100) or newer.")
+    if dtype == torch.bfloat16 and not is_bf16_available():
+        pytest.skip("bfloat16 is required for grouped GEMM test.")
+
+    torch.manual_seed(0)
+    z, m, k, n = shape
+    m_sizes = [m // z] * z
+
+    if layout == "TN":
+        A = [torch.randn(n, k, dtype=dtype, device="cuda") for _ in range(z)]  # weight
+        B = [torch.randn(ms, k, dtype=dtype, device="cuda") for ms in m_sizes]  # input
+        out = [torch.randn(ms, n, dtype=dtype, device="cuda") for ms in m_sizes]  # output
+        grad = False
+    elif layout == "NN":
+        A = [torch.randn(n, k, dtype=dtype, device="cuda") for _ in range(z)]  # weight
+        B = [torch.randn(ms, n, dtype=dtype, device="cuda") for ms in m_sizes]  # grad_output
+        out = [torch.randn(ms, k, dtype=dtype, device="cuda") for ms in m_sizes]  # dgrad
+        grad = True
+    else:  # layout == "NT"
+        A = [torch.randn(ms, k, dtype=dtype, device="cuda") for ms in m_sizes]  # input
+        B = [torch.randn(ms, n, dtype=dtype, device="cuda") for ms in m_sizes]  # grad_output
+        out = [torch.randn(n, k, dtype=dtype, device="cuda") for _ in range(z)]  # wgrad
+        grad = True
+
+    out_ref = [o.clone() for o in out]
+
+    transa = layout[0] == "T"
+    transb = layout[1] == "T"
+    grouped_A = _make_grouped_tensor_quantized_mxfp8(A, is_a=True, transposed=transa, device="cuda")
+    grouped_B = _make_grouped_tensor_quantized_mxfp8(
+        B, is_a=False, transposed=transb, device="cuda"
+    )
+    A_fp8 = grouped_A.split_into_quantized_tensors()
+    B_fp8 = grouped_B.split_into_quantized_tensors()
+
+    general_grouped_gemm(
+        A_fp8,
+        B_fp8,
+        out_ref,
+        [None] * z,
+        dtype,
+        m_splits=m_sizes,
+        grad=grad,
+        accumulate=accumulate,
+        layout=layout,
+        single_output=False,
+    )
+
+    device = A[0].device
+
+    grouped_out = None
+    if case != "discrete_out":
+        if layout == "TN":
+            grouped_out = _make_grouped_tensor_from_splits(m_sizes, n, device, dtype)
+        elif layout == "NN":
+            grouped_out = _make_grouped_tensor_from_splits(m_sizes, k, device, dtype)
+        else:  # layout == "NT"
+            grouped_out = _make_grouped_tensor_uniform(z, n, k, device, dtype)
+        _pack_grouped_tensor(grouped_out, out)
+
+    grouped_out_input = out if case == "discrete_out" else grouped_out
+    grouped_A_input = A_fp8 if case == "discrete_in" else grouped_A
+    general_grouped_gemm_for_grouped_tensor(
+        grouped_A_input,
+        grouped_B,
+        grouped_out_input,
+        layout=layout,
+        accumulate=accumulate,
+    )
+
+    out_grouped = out if case == "discrete_out" else grouped_out.split_into_quantized_tensors()
+    tols = dict(rtol=0.125, atol=0.0675)  # mxfp8 tolerance
+
+    for o, o_ref in zip(out_grouped, out_ref):
+        torch.testing.assert_close(o, o_ref, **tols)
 
 
 @pytest.mark.parametrize("N", [32])
@@ -2673,7 +3273,6 @@ def test_fp8gemm_with_unfused_quantization(N, datatype, input_quantizer, out_qua
     quantized_out, *_ = general_gemm(
         weight_fp8,
         inp_fp8,
-        get_workspace(),
         outp_type,
         quantization_params=out_quantizer,
         bias=None,
@@ -2683,7 +3282,6 @@ def test_fp8gemm_with_unfused_quantization(N, datatype, input_quantizer, out_qua
     out, *_ = general_gemm(
         weight_fp8,
         inp_fp8,
-        get_workspace(),
         outp_type,
         quantization_params=None,
         bias=None,
@@ -2759,7 +3357,6 @@ def test_fp8_grouped_gemm(shape, accumulate):
         general_gemm(
             A_fp8[i],
             B_fp8[i],
-            get_workspace(),
             dtype,
             out=out_ref[i],
             accumulate=accumulate,
@@ -2768,8 +3365,8 @@ def test_fp8_grouped_gemm(shape, accumulate):
         A_fp8,
         B_fp8,
         out,
+        [None] * z,
         dtype,
-        get_multi_stream_cublas_workspace(),
         m_splits=m_splits,
         accumulate=accumulate,
     )

@@ -15,7 +15,7 @@ from transformer_engine.pytorch.utils import (
 )
 from transformer_engine.pytorch.utils import nvtx_range_push, nvtx_range_pop
 
-from transformer_engine.pytorch.tensor.quantized_tensor import (
+from transformer_engine.pytorch.quantized_tensor import (
     prepare_for_saving,
     restore_from_saved,
 )
@@ -99,11 +99,11 @@ class AttnFuncFL(torch.autograd.Function):
         ctx.nominal_dtype = out_nominal_dtype
 
         from transformer_engine.pytorch.cpu_offload import (
-            CPUOffloadEnabled,
+            is_cpu_offload_enabled,
             mark_activation_offload,
         )
 
-        if CPUOffloadEnabled:
+        if is_cpu_offload_enabled():
             tensor_list = [q, k, v, out]
 
             mark_activation_offload(*tensor_list)
@@ -278,6 +278,7 @@ class FlashAttentionFL(FlashAttentionBase):
         inference_params: Optional[InferenceParams] = None,
         flash_attention_backend: Optional[PkgVersion] = PkgVersion("0"),
         fp8_output: bool = False,
+        num_splits: Optional[int] = 1,
     ) -> torch.Tensor:
         assert all(
             x.dtype in [torch.float16, torch.bfloat16] or isinstance(x, Float8Tensor)

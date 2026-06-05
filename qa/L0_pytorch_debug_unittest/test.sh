@@ -24,6 +24,7 @@ pip install pytest==8.2.1
 METAX_IGNORED_TESTS=(
     "$TE_PATH/tests/pytorch/test_numerics.py"
     "$TE_PATH/tests/pytorch/test_sanity.py"
+    "$TE_PATH/tests/pytorch/debug/test_sanity.py"
 )
 
 should_skip_on_metax() {

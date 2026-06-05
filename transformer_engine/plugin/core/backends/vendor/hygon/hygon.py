@@ -182,6 +182,42 @@ class HygonBackend(TEFLBackendBase):
 
         return tex.bgrad_quantize(input, quantizer)
 
+    def group_quantize(
+        self,
+        input: torch.Tensor,
+        quantizer: Any,
+    ) -> List[Any]:
+        tex = self._get_tex()
+
+        # Normalize quantizer.dtype to this backend's `tex.DType`.
+        try:
+            if quantizer is not None and hasattr(quantizer, "dtype") and hasattr(tex, "DType"):
+                qdtype = quantizer.dtype
+                if qdtype is not None:
+                    quantizer.dtype = tex.DType(int(qdtype))
+        except Exception:
+            pass
+
+        return tex.group_quantize(input, quantizer)
+
+    def bgrad_group_quantize(
+        self,
+        input: torch.Tensor,
+        quantizer: Any,
+    ) -> List[Any]:
+        tex = self._get_tex()
+
+        # Normalize quantizer.dtype to this backend's `tex.DType`.
+        try:
+            if quantizer is not None and hasattr(quantizer, "dtype") and hasattr(tex, "DType"):
+                qdtype = quantizer.dtype
+                if qdtype is not None:
+                    quantizer.dtype = tex.DType(int(qdtype))
+        except Exception:
+            pass
+
+        return tex.bgrad_group_quantize(input, quantizer)
+
     def generic_gemm(
         self,
         A: Any,
@@ -237,6 +273,11 @@ class HygonBackend(TEFLBackendBase):
             beta,
         )
 
+    # GLU #
+    def glu(self, input: torch.Tensor, quantizer: Any) -> Any:
+        tex = self._get_tex()
+        return tex.glu(input, quantizer)
+
     # GELU and variants #
     def gelu(self, input: torch.Tensor, quantizer: Any) -> Any:
         tex = self._get_tex()
@@ -289,6 +330,11 @@ class HygonBackend(TEFLBackendBase):
     ) -> Any:
         tex = self._get_tex()
         return tex.clamped_swiglu(input, quantizer, limit, alpha)
+
+    # Backward of GLU #
+    def dglu(self, grad: torch.Tensor, fwd_input: torch.Tensor, quantizer: Any) -> Any:
+        tex = self._get_tex()
+        return tex.dglu(grad, fwd_input, quantizer)
 
     # Backward of GELU and variants #
     def dgelu(self, grad: torch.Tensor, fwd_input: torch.Tensor, quantizer: Any) -> Any:
@@ -584,9 +630,10 @@ class HygonBackend(TEFLBackendBase):
         tensor: torch.Tensor,
         split_sections: List[int],
         quantizer_list: List[Any],
+        disable_bulk_allocation: bool = False,
     ) -> List[Any]:
         tex = self._get_tex()
-        return tex.split_quantize(tensor, split_sections, quantizer_list)
+        return tex.split_quantize(tensor, split_sections, quantizer_list, disable_bulk_allocation)
 
     def te_general_grouped_gemm(
         self,
@@ -631,15 +678,27 @@ class HygonBackend(TEFLBackendBase):
             math_sm_count,
         )
 
+    def te_general_grouped_gemm_for_grouped_tensor(self, *args, **kwargs):
+        tex = self._get_tex()
+        return tex.te_general_grouped_gemm_for_grouped_tensor(*args, **kwargs)
+
+    def te_general_grouped_gemm_for_discrete_in(self, *args, **kwargs):
+        tex = self._get_tex()
+        return tex.te_general_grouped_gemm_for_discrete_in(*args, **kwargs)
+
+    def te_general_grouped_gemm_for_discrete_out(self, *args, **kwargs):
+        tex = self._get_tex()
+        return tex.te_general_grouped_gemm_for_discrete_out(*args, **kwargs)
+
     def fp8_transpose(
         self,
         input: torch.Tensor,
         dtype: DType,
-        out: Optional[torch.Tensor],
+        out: Optional[torch.Tensor] = None,
     ) -> torch.Tensor:
         tex = self._get_tex()
         dtype = tex.DType(int(dtype)) if dtype is not None else None
-        return tex.fp8_transpose(input, dtype, out)
+        return tex.fp8_transpose(input, dtype, out=out)
 
     def swap_first_dims(
         self,
@@ -648,6 +707,55 @@ class HygonBackend(TEFLBackendBase):
     ) -> torch.Tensor:
         tex = self._get_tex()
         return tex.swap_first_dims(tensor, out)
+
+    def nvfp4_data_transpose(
+        self,
+        input: torch.Tensor,
+        out: Optional[torch.Tensor] = None,
+    ) -> torch.Tensor:
+        tex = self._get_tex()
+        return tex.nvfp4_data_transpose(input, out=out)
+
+    def swizzle_scales_for_gemm_(self, tensor: torch.Tensor) -> None:
+        tex = self._get_tex()
+        return tex.swizzle_scales_for_gemm_(tensor)
+
+    def grouped_swizzle_for_gemm(
+        self,
+        tensor: Any,
+        rowwise: bool,
+        columnwise: bool,
+    ) -> None:
+        tex = self._get_tex()
+        return tex.grouped_swizzle_for_gemm(tensor, rowwise, columnwise)
+
+    def convert_host_pointers_to_tensor(
+        self,
+        tensor_lists: List[List[torch.Tensor]],
+    ) -> Any:
+        tex = self._get_tex()
+        return tex.convert_host_pointers_to_tensor(tensor_lists)
+
+    def get_device_pointer_for_data_and_scales(
+        self,
+        data_tensors: List[torch.Tensor],
+        scale_tensors: List[torch.Tensor],
+        swizzle: bool = False,
+        rowwise: bool = True,
+        data_dtype: Any = None,
+    ) -> Any:
+        tex = self._get_tex()
+        return tex.get_device_pointer_for_data_and_scales(
+            data_tensors, scale_tensors, swizzle, rowwise, data_dtype
+        )
+
+    def splits_to_offsets(
+        self,
+        first_dims: List[int],
+        logical_last_dim: int,
+    ) -> torch.Tensor:
+        tex = self._get_tex()
+        return tex.splits_to_offsets(first_dims, logical_last_dim)
 
     def get_fused_attn_backend(
         self,
@@ -668,6 +776,8 @@ class HygonBackend(TEFLBackendBase):
         window_size_left: int,
         window_size_right: int,
         return_max_logit: bool,
+        cuda_graph: bool = False,
+        deterministic: bool = False,
     ) -> NVTE_Fused_Attn_Backend:
         tex = self._get_tex()
 
@@ -700,6 +810,8 @@ class HygonBackend(TEFLBackendBase):
             window_size_left,
             window_size_right,
             return_max_logit,
+            cuda_graph,
+            deterministic,
         )
         return NVTE_Fused_Attn_Backend(result)
 
@@ -757,6 +869,152 @@ class HygonBackend(TEFLBackendBase):
             inp, out, scale, h, w, start_offset, block_len, out_dtype
         )
 
+    def mxfp8_scaling_compute_partial_amax(
+        self,
+        tensor: torch.Tensor,
+        amax: torch.Tensor,
+        h: int,
+        w: int,
+        start_offset: int,
+        block_len: int,
+    ) -> None:
+        tex = self._get_tex()
+        return tex.mxfp8_scaling_compute_partial_amax(tensor, amax, h, w, start_offset, block_len)
+
+    def mxfp8_scaling_partial_cast(
+        self,
+        inp: torch.Tensor,
+        out: torch.Tensor,
+        scale: torch.Tensor,
+        h: int,
+        w: int,
+        start_offset: int,
+        block_len: int,
+        out_dtype: DType,
+    ) -> None:
+        tex = self._get_tex()
+        out_dtype = tex.DType(int(out_dtype)) if out_dtype is not None else None
+        return tex.mxfp8_scaling_partial_cast(
+            inp, out, scale, h, w, start_offset, block_len, out_dtype
+        )
+
+    def nvfp4_2d_compute_partial_amax(
+        self,
+        tensor: torch.Tensor,
+        amax: torch.Tensor,
+        h: int,
+        w: int,
+        start_offset: int,
+        block_len: int = 16,
+    ) -> None:
+        tex = self._get_tex()
+        return tex.nvfp4_2d_compute_partial_amax(tensor, amax, h, w, start_offset, block_len)
+
+    def nvfp4_multi_tensor_compute_partial_amax(
+        self,
+        master_weight_list: List[torch.Tensor],
+        partial_amax_list: List[torch.Tensor],
+        global_amax_list: List[torch.Tensor],
+        h_list: List[int],
+        w_list: List[int],
+        start_offset_list: List[int],
+        block_len: int = 16,
+    ) -> None:
+        tex = self._get_tex()
+        return tex.nvfp4_multi_tensor_compute_partial_amax(
+            master_weight_list,
+            partial_amax_list,
+            global_amax_list,
+            h_list,
+            w_list,
+            start_offset_list,
+            block_len,
+        )
+
+    def nvfp4_compute_global_scale(
+        self,
+        global_amaxes: torch.Tensor,
+        global_scale_tensor: torch.Tensor,
+    ) -> None:
+        tex = self._get_tex()
+        return tex.nvfp4_compute_global_scale(global_amaxes, global_scale_tensor)
+
+    def nvfp4_compute_per_block_scale(self, *args, **kwargs):
+        tex = self._get_tex()
+        return tex.nvfp4_compute_per_block_scale(*args, **kwargs)
+
+    def nvfp4_expand_scale_to_fp8(self, *args, **kwargs):
+        tex = self._get_tex()
+        return tex.nvfp4_expand_scale_to_fp8(*args, **kwargs)
+
+    def nvfp4_fused_scale(self, *args, **kwargs):
+        tex = self._get_tex()
+        return tex.nvfp4_fused_scale(*args, **kwargs)
+
+    def nvfp4_multi_tensor_fused_scale(
+        self,
+        block_amax_list: List[torch.Tensor],
+        global_amax_list: List[torch.Tensor],
+        per_block_scale_list: List[torch.Tensor],
+        target_scale_list: List[torch.Tensor],
+        target_amax_list: List[torch.Tensor],
+        tile_rows_list: List[int],
+        tile_cols_list: List[int],
+        rows_padded_list: List[int],
+        block_len: int,
+    ) -> None:
+        tex = self._get_tex()
+        return tex.nvfp4_multi_tensor_fused_scale(
+            block_amax_list,
+            global_amax_list,
+            per_block_scale_list,
+            target_scale_list,
+            target_amax_list,
+            tile_rows_list,
+            tile_cols_list,
+            rows_padded_list,
+            block_len,
+        )
+
+    def nvfp4_2d_partial_cast(
+        self,
+        inp: torch.Tensor,
+        out: torch.Tensor,
+        scale: torch.Tensor,
+        global_scale: torch.Tensor,
+        h: int,
+        w: int,
+        start_offset: int,
+        block_len: int = 16,
+    ) -> None:
+        tex = self._get_tex()
+        return tex.nvfp4_2d_partial_cast(
+            inp, out, scale, global_scale, h, w, start_offset, block_len
+        )
+
+    def nvfp4_multi_tensor_2d_partial_cast(self, *args, **kwargs):
+        tex = self._get_tex()
+        return tex.nvfp4_multi_tensor_2d_partial_cast(*args, **kwargs)
+
+    def nvfp4_2d_multi_tensor_transpose(
+        self,
+        rowwise_data_list: List[torch.Tensor],
+        columnwise_data_list: List[torch.Tensor],
+        rowwise_scale_inv_list: List[torch.Tensor],
+        columnwise_scale_inv_list: List[torch.Tensor],
+        M_list: List[int],
+        K_list: List[int],
+    ) -> None:
+        tex = self._get_tex()
+        return tex.nvfp4_2d_multi_tensor_transpose(
+            rowwise_data_list,
+            columnwise_data_list,
+            rowwise_scale_inv_list,
+            columnwise_scale_inv_list,
+            M_list,
+            K_list,
+        )
+
     def fused_multi_row_padding(
         self,
         input: torch.Tensor,
@@ -807,6 +1065,7 @@ class HygonBackend(TEFLBackendBase):
         attn_mask_type: NVTE_Mask_Type,
         softmax_type: NVTE_Softmax_Type,
         window_size: List[int],
+        bottom_right_diagonal: Optional[bool],
         cu_seqlens_q: torch.Tensor,
         cu_seqlens_kv: torch.Tensor,
         Q: Any,
@@ -824,6 +1083,7 @@ class HygonBackend(TEFLBackendBase):
         rng_gen: Optional[torch.Generator],
         rng_elts_per_thread: int,
         return_max_logit: bool,
+        cuda_graph: bool = False,
     ) -> List[Any]:
         tex = self._get_tex()
 
@@ -848,6 +1108,7 @@ class HygonBackend(TEFLBackendBase):
             attn_mask_type,
             softmax_type,
             window_size,
+            bottom_right_diagonal,
             cu_seqlens_q,
             cu_seqlens_kv,
             Q,
@@ -865,6 +1126,7 @@ class HygonBackend(TEFLBackendBase):
             rng_gen,
             rng_elts_per_thread,
             return_max_logit,
+            cuda_graph,
         )
 
     def fused_attn_bwd(
@@ -879,6 +1141,7 @@ class HygonBackend(TEFLBackendBase):
         attn_mask_type: NVTE_Mask_Type,
         softmax_type: NVTE_Softmax_Type,
         window_size: List[int],
+        bottom_right_diagonal: Optional[bool],
         deterministic: bool,
         cu_seqlens_q: torch.Tensor,
         cu_seqlens_kv: torch.Tensor,
@@ -895,6 +1158,7 @@ class HygonBackend(TEFLBackendBase):
         s_quantizer: Any,
         dp_quantizer: Any,
         dqkv_quantizer: Any,
+        cuda_graph: bool = False,
     ) -> List[Any]:
         tex = self._get_tex()
 
@@ -919,6 +1183,7 @@ class HygonBackend(TEFLBackendBase):
             attn_mask_type,
             softmax_type,
             window_size,
+            bottom_right_diagonal,
             deterministic,
             cu_seqlens_q,
             cu_seqlens_kv,
@@ -935,6 +1200,7 @@ class HygonBackend(TEFLBackendBase):
             s_quantizer,
             dp_quantizer,
             dqkv_quantizer,
+            cuda_graph,
         )
 
     def copy_to_kv_cache(
@@ -1012,6 +1278,7 @@ class HygonBackend(TEFLBackendBase):
         self,
         output_grads: torch.Tensor,
         freqs: torch.Tensor,
+        start_positions: Optional[torch.Tensor],
         qkv_format: NVTE_QKV_Format,
         interleaved: bool,
         cu_seqlens: Optional[torch.Tensor],
@@ -1021,7 +1288,14 @@ class HygonBackend(TEFLBackendBase):
         tex = self._get_tex()
         qkv_format = tex.NVTE_QKV_Format(int(qkv_format)) if qkv_format is not None else None
         return tex.fused_rope_backward(
-            output_grads, freqs, qkv_format, interleaved, cu_seqlens, cp_size, cp_rank
+            output_grads,
+            freqs,
+            start_positions,
+            qkv_format,
+            interleaved,
+            cu_seqlens,
+            cp_size,
+            cp_rank,
         )
 
     def fused_qkv_rope_forward(
@@ -1109,6 +1383,7 @@ class HygonBackend(TEFLBackendBase):
         routing_map: torch.Tensor,
         intermediate_output: torch.Tensor,
         grad_probs: torch.Tensor,
+        grad_logits: torch.Tensor,
         topk: int,
         use_pre_softmax: bool,
         scaling_factor: Optional[float],
@@ -1121,6 +1396,7 @@ class HygonBackend(TEFLBackendBase):
             routing_map,
             intermediate_output,
             grad_probs,
+            grad_logits,
             topk,
             use_pre_softmax,
             scaling_factor,
@@ -1146,6 +1422,7 @@ class HygonBackend(TEFLBackendBase):
         num_experts: int,
         intermediate_output: torch.Tensor,
         grad_scores: torch.Tensor,
+        grad_logits: torch.Tensor,
         topk: int,
         score_function: str,
     ) -> torch.Tensor:
@@ -1155,6 +1432,7 @@ class HygonBackend(TEFLBackendBase):
             num_experts,
             intermediate_output,
             grad_scores,
+            grad_logits,
             topk,
             score_function,
         )
@@ -1200,7 +1478,7 @@ class HygonBackend(TEFLBackendBase):
         self,
         input: torch.Tensor,
         dropout_probability: float,
-        out: Optional[torch.Tensor],
+        out: Optional[torch.Tensor] = None,
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         tex = self._get_tex()
         return tex.dropout_fwd(input, dropout_probability, out)
@@ -1210,7 +1488,7 @@ class HygonBackend(TEFLBackendBase):
         grad_output: torch.Tensor,
         mask: torch.Tensor,
         dropout_probability: float,
-        grad_input: Optional[torch.Tensor],
+        grad_input: Optional[torch.Tensor] = None,
     ) -> torch.Tensor:
         tex = self._get_tex()
         return tex.dropout_bwd(grad_output, mask, dropout_probability, grad_input)
@@ -1342,6 +1620,16 @@ class HygonBackend(TEFLBackendBase):
     ) -> None:
         tex = self._get_tex()
         return tex.multi_tensor_scale(chunk_size, noop_flag, tensor_lists, scale)
+
+    def multi_tensor_scale_tensor(
+        self,
+        chunk_size: int,
+        noop_flag: torch.Tensor,
+        tensor_lists: List[List[torch.Tensor]],
+        scale: torch.Tensor,
+    ) -> None:
+        tex = self._get_tex()
+        return tex.multi_tensor_scale_tensor(chunk_size, noop_flag, tensor_lists, scale)
 
     def multi_tensor_l2norm(
         self,
@@ -1559,6 +1847,18 @@ class HygonBackend(TEFLBackendBase):
         tex = self._get_tex()
         return tex.multi_tensor_compute_scale_and_scale_inv(
             chunk_size, noop_flag, tensor_lists, max_fp8, force_pow_2_scales, epsilon
+        )
+
+    def multi_tensor_compute_scale_inv_e8m0(
+        self,
+        chunk_size: int,
+        noop_flag: torch.Tensor,
+        tensor_lists: List[List[torch.Tensor]],
+        block_len: int,
+    ) -> None:
+        tex = self._get_tex()
+        return tex.multi_tensor_compute_scale_inv_e8m0(
+            chunk_size, noop_flag, tensor_lists, block_len
         )
 
     # Comm+GEMM Overlap

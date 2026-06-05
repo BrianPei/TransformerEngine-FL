@@ -1,5 +1,5 @@
 /*************************************************************************
- * Copyright (c) 2022-2025, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * Copyright (c) 2022-2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
  *
  * See LICENSE for license information.
  ************************************************************************/
@@ -190,8 +190,9 @@ transformer_engine::TensorWrapper makeTransformerEngineTensor(
   const std::vector<size_t> meta_shape{1};
   ret.set_amax(amax_ptr, DType::kFloat32, meta_shape);
   ret.set_scale(scale_ptr, DType::kFloat32, meta_shape);
-  auto scale_inv_dtype =
-      (scaling_mode == NVTE_MXFP8_1D_SCALING) ? DType::kFloat8E8M0 : DType::kFloat32;
+  auto scale_inv_dtype = (scaling_mode == NVTE_MXFP8_1D_SCALING)   ? DType::kFloat8E8M0
+                         : (scaling_mode == NVTE_NVFP4_1D_SCALING) ? DType::kFloat8E4M3
+                                                                   : DType::kFloat32;
   ret.set_rowwise_scale_inv(scale_inv_ptr, scale_inv_dtype, scale_inv_shape);
   ret.set_columnwise_scale_inv(columnwise_scale_inv_ptr, scale_inv_dtype,
                                columnwise_scale_inv_shape);
@@ -271,7 +272,8 @@ at::Tensor allocateSpace(const NVTEShape& shape, const transformer_engine::DType
   } else if (size == 1) {
     return at::empty({static_cast<int64_t>(shape.data[0])}, at::CUDA(GetATenDType(type)));
   }
-  NVTE_CHECK(false, "Should never reach here! func: allocateSpace");
+  NVTE_ERROR("Unsupported tensor allocation: ndim=", size, ", init_to_zeros=", init_to_zeros,
+             ". Only 1D and 2D tensors are supported.");
 }
 
 at::Tensor allocateTorchTensor(int M, int N, transformer_engine::DType dtype) {
@@ -300,10 +302,12 @@ std::vector<size_t> convertShape(const NVTEShape& shape) {
   return std::vector<size_t>(shape.data, shape.data + shape.ndim);
 }
 
-size_t roundup(const size_t value, const size_t multiple) {
+size_t roundup(size_t value, size_t multiple) {
   assert(multiple > 0);
   return ((value + multiple - 1) / multiple) * multiple;
 }
+
+size_t ceildiv(size_t numer, size_t denom) { return (numer + denom - 1) / denom; }
 
 void philox_unpack(at::PhiloxCudaState arg, int64_t* rng_state_ptr) {
   NVTE_SCOPED_GIL_RELEASE({

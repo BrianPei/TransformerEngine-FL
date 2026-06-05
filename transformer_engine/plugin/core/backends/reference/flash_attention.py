@@ -223,6 +223,7 @@ class FlashAttentionTorch(FlashAttentionBase):
         inference_params: Optional[Any] = None,
         flash_attention_backend: Optional[Any] = None,
         fp8_output: bool = False,
+        num_splits: Optional[int] = 1,
     ) -> torch.Tensor:
         """Flash Attention implementation using PyTorch's scaled_dot_product_attention.
 

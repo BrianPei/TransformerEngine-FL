@@ -1,4 +1,4 @@
-# Copyright (c) 2022-2025, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# Copyright (c) 2022-2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 #
 # See LICENSE for license information.
 """JAX/TE custom ops for normalization"""
@@ -11,7 +11,7 @@ from typing import Optional, Union
 import jax
 import jax.numpy as jnp
 from jax import dtypes, ffi
-from jax.experimental.custom_partitioning import SdyShardingRule
+from jax.experimental.custom_partitioning import SdyShardingRule, BATCHING
 from jax.interpreters.mlir import ir
 from jax.sharding import PartitionSpec
 
@@ -27,7 +27,7 @@ from .misc import (
     NamedSharding,
     get_cudnn_version,
 )
-from .quantization import _quantize_dbias_impl, AmaxScope
+from .quantization import quantize, AmaxScope
 from ..sharding import (
     all_reduce_max_along_all_axes_except_PP,
     all_reduce_sum_along_dp_fsdp_tpsp,
@@ -35,9 +35,9 @@ from ..sharding import (
 from ..quantize import ScaledTensor, ScaledTensorFactory, NoScaleTensor
 from ..quantize import (
     Quantizer,
-    QuantizeLayout,
     DelayedScaleQuantizer,
     ScalingMode,
+    QuantizeLayout,
 )
 
 
@@ -112,7 +112,7 @@ class NormFwdPrimitive(BasePrimitive):
         epsilon,
         out_dtype,
         scaling_mode,
-        is_2x,
+        quantize_layout,
         scale_dtype,
         amax_scope,
         transpose_batch_sequence,
@@ -132,9 +132,17 @@ class NormFwdPrimitive(BasePrimitive):
         )
         x_dtype = dtypes.canonicalize_dtype(x_aval.dtype)
 
-        assert x_dtype in [jnp.float32, jnp.float16, jnp.bfloat16]
-        assert scale_aval is None or scale_aval.dtype == jnp.float32
-        assert amax_aval is None or amax_aval.dtype == jnp.float32
+        assert x_dtype in [
+            jnp.float32,
+            jnp.float16,
+            jnp.bfloat16,
+        ], f"Unsupported x_dtype={x_dtype}, expected one of [float32, float16, bfloat16]"
+        assert (
+            scale_aval is None or scale_aval.dtype == jnp.float32
+        ), f"Expected scale_aval.dtype=float32, but got scale_aval.dtype={scale_aval.dtype}"
+        assert (
+            amax_aval is None or amax_aval.dtype == jnp.float32
+        ), f"Expected amax_aval.dtype=float32, but got amax_aval.dtype={amax_aval.dtype}"
 
         assert (
             scaling_mode != ScalingMode.MXFP8_1D_SCALING.value
@@ -148,11 +156,21 @@ class NormFwdPrimitive(BasePrimitive):
             "Current tensor scaling is not supported for fused norm and quantization. Please do"
             " norm in higher-precision then quantize with current tensor scaling."
         )
+        assert not ScalingMode(scaling_mode).is_nvfp4_scaling, (
+            "NVFP4 block scaling is not yet supported for fused norm and quantization."
+            " Please do norm in higher-precision then quantize with current tensor scaling."
+        )
+        assert (
+            not quantize_layout.is_colwise_only
+        ), "Fused norm with colwise-only quantization is not supported."
 
         mu_rsigama_dtype = jnp.float32
 
         if norm_type == NVTE_Norm_Type.LayerNorm:
-            assert gamma_aval.size == beta_aval.size
+            assert gamma_aval.size == beta_aval.size, (
+                "Expected gamma_aval.size == beta_aval.size, but got"
+                f" gamma_aval.size={gamma_aval.size}, beta_aval.size={beta_aval.size}"
+            )
             assert gamma_aval.dtype == beta_aval.dtype, (
                 f"gamma and beta should have the same dtype, but got {gamma_aval.dtype} and "
                 f"{beta_aval.dtype}"
@@ -165,7 +183,7 @@ class NormFwdPrimitive(BasePrimitive):
 
         updated_amax_aval = jax.core.ShapedArray(shape=(1,), dtype=jnp.float32)
 
-        colwise_out_shape = x_aval.shape if is_2x else (1,)
+        colwise_out_shape = x_aval.shape if quantize_layout.has_colwise else (1,)
         colwise_out_aval = jax.core.ShapedArray(shape=colwise_out_shape, dtype=out_dtype)
 
         rowwise_scale_inv_shape, colwise_scale_inv_shape = ScalingMode(
@@ -173,7 +191,7 @@ class NormFwdPrimitive(BasePrimitive):
         ).get_scale_shape_2x(x_aval.shape, is_padded=not is_outer)
 
         scale_inv_aval = jax.core.ShapedArray(shape=rowwise_scale_inv_shape, dtype=scale_dtype)
-        colwise_scale_inv_shape = colwise_scale_inv_shape if is_2x else (1,)
+        colwise_scale_inv_shape = colwise_scale_inv_shape if quantize_layout.has_colwise else (1,)
         colwise_scale_inv_aval = jax.core.ShapedArray(
             shape=colwise_scale_inv_shape, dtype=scale_dtype
         )
@@ -189,7 +207,7 @@ class NormFwdPrimitive(BasePrimitive):
             zero_centered_gamma,
             epsilon,
             get_forward_sm_margin(),
-            is_2x,
+            True,  # is_training
         )
         wkspace_aval = jax.core.ShapedArray(
             shape=wkspace_info[0], dtype=te_dtype_to_jax_dtype(wkspace_info[1])
@@ -245,7 +263,7 @@ class NormFwdPrimitive(BasePrimitive):
         epsilon,
         out_dtype,
         scaling_mode,
-        is_2x,
+        quantize_layout,
         scale_dtype,
         amax_scope,
         transpose_batch_sequence,
@@ -258,18 +276,35 @@ class NormFwdPrimitive(BasePrimitive):
         del out_dtype, scale_dtype, is_outer, amax_scope, transpose_batch_sequence
         x_aval, scale_aval, amax_aval, gamma_aval, beta_aval = ctx.avals_in
 
-        assert x_aval.dtype in [jnp.float32, jnp.float16, jnp.bfloat16]
-        assert scale_aval is None or scale_aval.dtype == jnp.float32
-        assert amax_aval is None or amax_aval.dtype == jnp.float32
+        assert x_aval.dtype in [
+            jnp.float32,
+            jnp.float16,
+            jnp.bfloat16,
+        ], f"Unsupported x_aval.dtype={x_aval.dtype}, expected one of [float32, float16, bfloat16]"
+        assert (
+            scale_aval is None or scale_aval.dtype == jnp.float32
+        ), f"Expected scale_aval.dtype=float32, but got scale_aval.dtype={scale_aval.dtype}"
+        assert (
+            amax_aval is None or amax_aval.dtype == jnp.float32
+        ), f"Expected amax_aval.dtype=float32, but got amax_aval.dtype={amax_aval.dtype}"
 
         g_type = ir.RankedTensorType(gamma.type)
         g_shape = g_type.shape
         if norm_type == NVTE_Norm_Type.LayerNorm:
-            assert gamma_aval.dtype == beta_aval.dtype
+            assert gamma_aval.dtype == beta_aval.dtype, (
+                "Expected gamma and beta to have the same dtype, but got"
+                f" gamma_aval.dtype={gamma_aval.dtype}, beta_aval.dtype={beta_aval.dtype}"
+            )
             b_type = ir.RankedTensorType(beta.type)
             b_shape = b_type.shape
-            assert g_type == b_type
-            assert g_shape == b_shape
+            assert g_type == b_type, (
+                f"Expected gamma and beta to have the same IR type, but got gamma_type={g_type},"
+                f" beta_type={b_type}"
+            )
+            assert g_shape == b_shape, (
+                f"Expected gamma and beta to have the same shape, but got gamma_shape={g_shape},"
+                f" beta_shape={b_shape}"
+            )
 
         sm_margin = get_forward_sm_margin()
         return ffi.ffi_lowering(
@@ -287,7 +322,7 @@ class NormFwdPrimitive(BasePrimitive):
             epsilon=epsilon,
             sm_margin=sm_margin,
             scaling_mode=scaling_mode.value,
-            is_2x=is_2x,
+            quantize_layout=quantize_layout.value.value,
             output_amax_when_no_scaling=output_amax_when_no_scaling,
         )
 
@@ -303,7 +338,7 @@ class NormFwdPrimitive(BasePrimitive):
         epsilon,
         out_dtype,
         scaling_mode,
-        is_2x,
+        quantize_layout,
         scale_dtype,
         amax_scope,
         transpose_batch_sequence,
@@ -314,7 +349,9 @@ class NormFwdPrimitive(BasePrimitive):
         to describe implementation
         """
         del is_outer
-        assert NormFwdPrimitive.inner_primitive is not None
+        assert (
+            NormFwdPrimitive.inner_primitive is not None
+        ), "NormFwdPrimitive.inner_primitive has not been registered"
         (
             out,
             colwise_out,
@@ -335,7 +372,7 @@ class NormFwdPrimitive(BasePrimitive):
             epsilon=epsilon,
             out_dtype=out_dtype,
             scaling_mode=scaling_mode,
-            is_2x=is_2x,
+            quantize_layout=quantize_layout,
             scale_dtype=scale_dtype,
             amax_scope=amax_scope,
             transpose_batch_sequence=transpose_batch_sequence,
@@ -349,7 +386,7 @@ class NormFwdPrimitive(BasePrimitive):
         scale_inv = scale_inv.flatten()[: reduce(operator.mul, rowwise_scale_inv_shape, 1)].reshape(
             rowwise_scale_inv_shape
         )
-        if is_2x:
+        if quantize_layout.has_colwise:
             colwise_scale_inv = colwise_scale_inv.flatten()[
                 : reduce(operator.mul, colwise_scale_inv_shape, 1)
             ].reshape(colwise_scale_inv_shape)
@@ -373,7 +410,7 @@ class NormFwdPrimitive(BasePrimitive):
         epsilon,
         out_dtype,
         scaling_mode,
-        is_2x,
+        quantize_layout,
         scale_dtype,
         amax_scope,
         transpose_batch_sequence,
@@ -384,7 +421,9 @@ class NormFwdPrimitive(BasePrimitive):
         to describe batch rules for vmap
         """
         check_valid_batch_dims(batch_dims)
-        assert NormFwdPrimitive.outer_primitive is not None
+        assert (
+            NormFwdPrimitive.outer_primitive is not None
+        ), "NormFwdPrimitive.outer_primitive has not been registered"
         x, scale, amax, gamma, beta = batched_args
         x_bdim, scale_bdim, _, _, _ = batch_dims
 
@@ -409,7 +448,7 @@ class NormFwdPrimitive(BasePrimitive):
                 epsilon=epsilon,
                 out_dtype=out_dtype,
                 scaling_mode=scaling_mode,
-                is_2x=is_2x,
+                quantize_layout=quantize_layout,
                 scale_dtype=scale_dtype,
                 amax_scope=amax_scope,
                 transpose_batch_sequence=transpose_batch_sequence,
@@ -426,7 +465,7 @@ class NormFwdPrimitive(BasePrimitive):
         epsilon,
         out_dtype,
         scaling_mode,
-        is_2x,
+        quantize_layout,
         scale_dtype,
         amax_scope,
         transpose_batch_sequence,
@@ -450,7 +489,7 @@ class NormFwdPrimitive(BasePrimitive):
             )
 
         out_sharding = NamedSharding(mesh, PartitionSpec(*out_spec), desc="NormFwdPrimitive.out")
-        colwise_out_spec = out_spec if is_2x else (None,)
+        colwise_out_spec = out_spec if quantize_layout.has_colwise else (None,)
         colwise_out_sharding = NamedSharding(
             mesh, PartitionSpec(*colwise_out_spec), desc="NormFwdPrimitive.colwise_out"
         )
@@ -488,7 +527,7 @@ class NormFwdPrimitive(BasePrimitive):
         epsilon,
         out_dtype,
         scaling_mode,
-        is_2x,
+        quantize_layout,
         scale_dtype,
         amax_scope,
         transpose_batch_sequence,
@@ -524,7 +563,7 @@ class NormFwdPrimitive(BasePrimitive):
             )
 
         out_sharding = NamedSharding(mesh, PartitionSpec(*out_spec), desc="NormFwdPrimitive.out")
-        colwise_out_spec = out_spec if is_2x else (None,)
+        colwise_out_spec = out_spec if quantize_layout.has_colwise else (None,)
         colwise_out_sharding = NamedSharding(
             mesh, PartitionSpec(*colwise_out_spec), desc="NormFwdPrimitive.colwise_out"
         )
@@ -586,7 +625,7 @@ class NormFwdPrimitive(BasePrimitive):
                 epsilon=epsilon,
                 out_dtype=out_dtype,
                 scaling_mode=scaling_mode,
-                is_2x=is_2x,
+                quantize_layout=quantize_layout,
                 scale_dtype=scale_dtype,
                 amax_scope=amax_scope,
                 transpose_batch_sequence=transpose_batch_sequence,
@@ -623,7 +662,7 @@ class NormFwdPrimitive(BasePrimitive):
         epsilon,
         out_dtype,
         scaling_mode,
-        is_2x,
+        quantize_layout,
         scale_dtype,
         amax_scope,
         transpose_batch_sequence,
@@ -646,25 +685,29 @@ class NormFwdPrimitive(BasePrimitive):
             result_types,
         )
 
-        prefix = "NormFwd_"
+        prefix = "NormFwd"
         scale_rules = ScalingMode(scaling_mode).get_shardy_sharding_rules(
-            value_types[0].shape, unique_var=prefix + "x", flatten_axis=-1
+            value_types[0].shape,
+            unique_var=prefix,
+            flatten_axis=-1,
+            q_layout=quantize_layout,
         )
-        x_axes = scale_rules.input_spec
+        input_spec = scale_rules.input_spec
 
-        out = x_axes
-        colwise_out = out if is_2x else (prefix + "out_colwise",)
-        rsigma = x_axes[:-1]
-        mu = (prefix + "mu",) if norm_type == NVTE_Norm_Type.RMSNorm else rsigma
-        amax = (prefix + "amax",)
+        rsigma = input_spec[:-1]
+        mu = (BATCHING + prefix + "_mu",) if norm_type == NVTE_Norm_Type.RMSNorm else rsigma
+        amax = (BATCHING + prefix + "_amax",)
+        scale = (BATCHING + prefix + "_scale",)
+        gamma = (BATCHING + prefix + "_gamma",)
+        beta = (BATCHING + prefix + "_beta",)
 
         return SdyShardingRule(
-            (x_axes, ("…1",), amax, ("…2",), ("…3",)),
+            (input_spec, scale, amax, gamma, beta),
             (
-                out,
-                colwise_out,
-                scale_rules.rowwise_rule,
-                scale_rules.colwise_rule,
+                scale_rules.rowwise_out_spec,
+                scale_rules.colwise_out_spec,
+                scale_rules.rowwise_scale_spec,
+                scale_rules.colwise_scale_spec,
                 amax,
                 mu,
                 rsigma,
@@ -695,13 +738,26 @@ class NormBwdPrimitive(BasePrimitive):
         w_dtype = dtypes.canonicalize_dtype(gamma_aval.dtype)
         rsigma_dtype = dtypes.canonicalize_dtype(rsigma_aval.dtype)
 
-        assert dtypes.canonicalize_dtype(dz_aval.dtype) == w_dtype
-        assert dz_aval.shape == x_aval.shape
+        assert dtypes.canonicalize_dtype(dz_aval.dtype) == w_dtype, (
+            f"Expected dz_aval.dtype={w_dtype} (matching gamma dtype), but got"
+            f" dz_aval.dtype={dtypes.canonicalize_dtype(dz_aval.dtype)}"
+        )
+        assert dz_aval.shape == x_aval.shape, (
+            f"Expected dz_aval.shape == x_aval.shape, but got dz_aval.shape={dz_aval.shape},"
+            f" x_aval.shape={x_aval.shape}"
+        )
 
         if norm_type == NVTE_Norm_Type.LayerNorm:
             mu_dtype = dtypes.canonicalize_dtype(mu_aval.dtype)
-            assert mu_aval.shape == rsigma_aval.shape == x_aval.shape[:-1]
-            assert mu_dtype == rsigma_dtype == jnp.float32
+            assert mu_aval.shape == rsigma_aval.shape == x_aval.shape[:-1], (
+                "Expected mu_aval.shape == rsigma_aval.shape == x_aval.shape[:-1], but got"
+                f" mu_aval.shape={mu_aval.shape}, rsigma_aval.shape={rsigma_aval.shape},"
+                f" x_aval.shape[:-1]={x_aval.shape[:-1]}"
+            )
+            assert mu_dtype == rsigma_dtype == jnp.float32, (
+                f"Expected mu_dtype == rsigma_dtype == float32, but got mu_dtype={mu_dtype},"
+                f" rsigma_dtype={rsigma_dtype}"
+            )
 
         dx_aval = dz_aval
         dgamma_aval = dbeta_aval = gamma_aval
@@ -745,8 +801,14 @@ class NormBwdPrimitive(BasePrimitive):
         g_shape = g_type.shape
         b_type = ir.RankedTensorType(gamma.type)
         b_shape = b_type.shape
-        assert g_type == b_type
-        assert g_shape == b_shape
+        assert g_type == b_type, (
+            f"Expected gamma and beta to have the same IR type, but got gamma_type={g_type},"
+            f" beta_type={b_type}"
+        )
+        assert g_shape == b_shape, (
+            f"Expected gamma and beta to have the same shape, but got gamma_shape={g_shape},"
+            f" beta_shape={b_shape}"
+        )
 
         sm_margin = get_backward_sm_margin()
         return ffi.ffi_lowering(NormBwdPrimitive.name)(
@@ -763,7 +825,9 @@ class NormBwdPrimitive(BasePrimitive):
 
     @staticmethod
     def impl(dz, x, mu, rsigma, gamma, norm_type, zero_centered_gamma):
-        assert NormBwdPrimitive.inner_primitive is not None
+        assert (
+            NormBwdPrimitive.inner_primitive is not None
+        ), "NormBwdPrimitive.inner_primitive has not been registered"
         dx, dgamma, dbeta, _ = NormBwdPrimitive.inner_primitive.bind(
             dz, x, mu, rsigma, gamma, norm_type=norm_type, zero_centered_gamma=zero_centered_gamma
         )
@@ -772,7 +836,9 @@ class NormBwdPrimitive(BasePrimitive):
     @staticmethod
     def batcher(batched_args, batch_dims, *, norm_type, zero_centered_gamma):
         check_valid_batch_dims(batch_dims)
-        assert NormBwdPrimitive.outer_primitive is not None
+        assert (
+            NormBwdPrimitive.outer_primitive is not None
+        ), "NormBwdPrimitive.outer_primitive has not been registered"
         dz, x, mu, rsigma, gamma = batched_args
         _, x_bdim, _, _, gamma_bdim = batch_dims
 
@@ -945,7 +1011,7 @@ def layernorm_fwd(
     beta: jnp.ndarray,
     zero_centered_gamma: bool,
     epsilon: float,
-    quantizer: Optional[Quantizer],
+    quantizer: Optional[Quantizer] = None,
     amax_scope: AmaxScope = AmaxScope.LOCAL,
     transpose_batch_sequence: bool = False,
     output_amax_when_no_scaling: bool = False,
@@ -975,10 +1041,19 @@ def layernorm_fwd(
         - Reciprocal of the standard deviation of the input tensor. Shape: (..., 1)
     """
     if not NormFwdPrimitive.enabled():
-        return _jax_layernorm(x, gamma, beta, zero_centered_gamma, epsilon, quantizer)
+        output, mu, rsigma = _jax_layernorm(x, gamma, beta, zero_centered_gamma, epsilon)
+        if quantizer is not None:
+            output = quantize(
+                output,
+                quantizer,
+                flatten_axis=-1,
+                amax_scope=amax_scope,
+                transpose_batch_sequence=transpose_batch_sequence,
+            )
+        return (output, mu, rsigma)
 
     # TE/common does not support normalization with colwise only quantization yet
-    if quantizer is not None and quantizer.q_layout == QuantizeLayout.COLWISE:
+    if quantizer is not None and quantizer.q_layout.is_colwise_only:
         return _jax_layernorm(x, gamma, beta, zero_centered_gamma, epsilon, quantizer)
 
     scale = (
@@ -999,7 +1074,7 @@ def layernorm_fwd(
             epsilon=epsilon,
             out_dtype=x.dtype,
             scaling_mode=ScalingMode.NO_SCALING.value,
-            is_2x=False,
+            quantize_layout=QuantizeLayout.ROWWISE,
             scale_dtype=jnp.float32,
             amax_scope=amax_scope,
             transpose_batch_sequence=False,
@@ -1029,7 +1104,7 @@ def layernorm_fwd(
             transpose_batch_sequence=transpose_batch_sequence,
             output_amax_when_no_scaling=False,
         )
-        out, _ = _quantize_dbias_impl(
+        out, _ = quantize(
             out, quantizer, amax_scope=amax_scope, transpose_batch_sequence=transpose_batch_sequence
         )
         return out, mu, rsigma
@@ -1050,20 +1125,19 @@ def layernorm_fwd(
             transpose_batch_sequence=transpose_batch_sequence,
             output_amax_when_no_scaling=True,
         )
-        out, _ = _quantize_dbias_impl(
+        out = quantize(
             out,
-            is_dbias=False,
             quantizer=quantizer,
-            dq_dtype=x.dtype,
             amax_scope=amax_scope,
             transpose_batch_sequence=transpose_batch_sequence,
         )
         return out, mu, rsigma
 
-    is_2x2x = quantizer.is_2x2x()
-    # TE/common normalization doesn't support 2x delayed scaling
-    if quantizer.is_2x2x() and quantizer.scaling_mode.is_tensor_scaling():
-        is_2x2x = False
+    # TE/common Norm doesn't support 2x delayed scaling so do 1x then JAX transpose
+    q_layout = quantizer.q_layout
+    if quantizer.q_layout.is_rowwise_colwise and quantizer.scaling_mode.is_tensor_scaling():
+        q_layout = QuantizeLayout.ROWWISE
+
     (
         rowwise_casted_output,
         colwise_casted_output,
@@ -1083,7 +1157,7 @@ def layernorm_fwd(
         epsilon=epsilon,
         out_dtype=quantizer.q_dtype,
         scaling_mode=quantizer.scaling_mode.value,
-        is_2x=is_2x2x,
+        quantize_layout=q_layout,
         scale_dtype=quantizer.get_scale_dtype(),
         amax_scope=amax_scope,
         transpose_batch_sequence=transpose_batch_sequence,
@@ -1092,8 +1166,7 @@ def layernorm_fwd(
     )
     quantizer.update(updated_amax)
 
-    # TE/common Norm doesn't support 2x delayed scaling so do 1x then JAX transpose
-    if quantizer.is_2x2x() and quantizer.scaling_mode.is_tensor_scaling():
+    if quantizer.q_layout.is_rowwise_colwise and quantizer.scaling_mode.is_tensor_scaling():
         colwise_casted_output = jnp.transpose(
             rowwise_casted_output, (-1, *range(rowwise_casted_output.ndim - 1))
         )
@@ -1219,10 +1292,19 @@ def rmsnorm_fwd(
             Shape: (..., 1)
     """
     if not NormFwdPrimitive.enabled():
-        return _jax_rmsnorm(x, gamma, zero_centered_gamma, epsilon, quantizer)
+        output, rsigma = _jax_rmsnorm(x, gamma, zero_centered_gamma, epsilon)
+        if quantizer is not None:
+            output = quantize(
+                output,
+                quantizer,
+                flatten_axis=-1,
+                amax_scope=amax_scope,
+                transpose_batch_sequence=transpose_batch_sequence,
+            )
+        return (output, rsigma)
 
     # TE/common does not support normalization with colwise only quantization yet
-    if quantizer is not None and quantizer.q_layout == QuantizeLayout.COLWISE:
+    if quantizer is not None and quantizer.q_layout.is_colwise_only:
         return _jax_rmsnorm(x, gamma, zero_centered_gamma, epsilon, quantizer)
 
     scale = (
@@ -1245,7 +1327,7 @@ def rmsnorm_fwd(
             epsilon=epsilon,
             out_dtype=x.dtype,
             scaling_mode=ScalingMode.NO_SCALING.value,
-            is_2x=False,
+            quantize_layout=QuantizeLayout.ROWWISE,
             scale_dtype=jnp.float32,
             amax_scope=amax_scope,
             transpose_batch_sequence=transpose_batch_sequence,
@@ -1274,7 +1356,7 @@ def rmsnorm_fwd(
             transpose_batch_sequence=transpose_batch_sequence,
             output_amax_when_no_scaling=False,
         )
-        out, _ = _quantize_dbias_impl(
+        out = quantize(
             out.data,
             quantizer,
             amax_scope=amax_scope,
@@ -1297,20 +1379,19 @@ def rmsnorm_fwd(
             transpose_batch_sequence=transpose_batch_sequence,
             output_amax_when_no_scaling=True,
         )
-        out, _ = _quantize_dbias_impl(
+        out = quantize(
             out,
-            is_dbias=False,
             quantizer=quantizer,
-            dq_dtype=x.dtype,
             amax_scope=amax_scope,
             transpose_batch_sequence=transpose_batch_sequence,
         )
         return out, rsigma
 
-    is_2x2x = quantizer.is_2x2x()
-    # TE/common normalization doesn't support 2x delayed scaling
-    if quantizer.is_2x2x() and quantizer.scaling_mode.is_tensor_scaling():
-        is_2x2x = False
+    # TE/common Norm doesn't support 2x delayed scaling so do 1x then JAX transpose
+    q_layout = quantizer.q_layout
+    if quantizer.q_layout.is_rowwise_colwise and quantizer.scaling_mode.is_tensor_scaling():
+        q_layout = QuantizeLayout.ROWWISE
+
     (
         rowwise_casted_output,
         colwise_casted_output,
@@ -1330,7 +1411,7 @@ def rmsnorm_fwd(
         epsilon=epsilon,
         out_dtype=quantizer.q_dtype,
         scaling_mode=quantizer.scaling_mode.value,
-        is_2x=is_2x2x,
+        quantize_layout=q_layout,
         scale_dtype=quantizer.get_scale_dtype(),
         amax_scope=amax_scope,
         transpose_batch_sequence=transpose_batch_sequence,
@@ -1339,8 +1420,7 @@ def rmsnorm_fwd(
     )
     quantizer.update(updated_amax)
 
-    # TE/common Norm doesn't support 2x delayed scaling so do 1x then JAX transpose
-    if quantizer.is_2x2x() and quantizer.scaling_mode.is_tensor_scaling():
+    if quantizer.q_layout.is_rowwise_colwise and quantizer.scaling_mode.is_tensor_scaling():
         colwise_casted_output = jnp.transpose(
             rowwise_casted_output, (-1, *range(rowwise_casted_output.ndim - 1))
         )

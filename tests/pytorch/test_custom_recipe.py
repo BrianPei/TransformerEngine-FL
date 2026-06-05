@@ -1,4 +1,4 @@
-# Copyright (c) 2022-2025, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# Copyright (c) 2022-2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 #
 # See LICENSE for license information.
 
@@ -8,6 +8,7 @@ import torch
 import transformer_engine.pytorch as te
 import transformer_engine_torch as tex
 from transformer_engine.common import recipe
+from transformer_engine.pytorch.constants import FP8BwdTensorIdx, FP8FwdTensorIdx
 from transformer_engine.pytorch import (
     autocast,
     Linear,
@@ -17,6 +18,48 @@ from transformer_engine.pytorch import (
     Float8CurrentScalingQuantizer,
 )
 import transformer_engine.pytorch.ops as te_ops
+from transformer_engine.pytorch.custom_recipes.quantization_nvfp4 import (
+    nvfp4_ref_rht_2d_quantizer_factory,
+)
+
+
+@pytest.mark.parametrize("module_type", ["Linear", "LayerNormLinear", "OpsLinear"])
+def test_custom_recipe_sanity_modules_nvfp4(module_type):
+    """Test modules with NVFP4 custom recipe support"""
+    available, reason = te.is_fp8_available(return_reason=True)
+    if not torch.cuda.is_available() or not available:
+        pytest.skip(f"FP8 unsupported on this device: {reason}")
+
+    torch.manual_seed(0)
+
+    # Simple linear layer with dims divisible by 16
+    in_features = 64
+    out_features = 64
+    batch = 32
+
+    if module_type == "Linear":
+        model = Linear(in_features, out_features, params_dtype=torch.bfloat16, bias=False).cuda()
+    elif module_type == "LayerNormLinear":
+        model = LayerNormLinear(
+            in_features, out_features, params_dtype=torch.bfloat16, bias=False
+        ).cuda()
+    else:  # OpsLinear
+        model = te_ops.Linear(
+            in_features, out_features, device="cuda", dtype=torch.bfloat16, bias=False
+        )
+    inp = torch.randn(batch, in_features, device="cuda", dtype=torch.bfloat16, requires_grad=True)
+
+    # Use NVFP4 quantizer factory
+    custom_recipe = recipe.CustomRecipe(qfactory=nvfp4_ref_rht_2d_quantizer_factory)
+
+    # Execute with custom recipe
+    with autocast(enabled=True, recipe=custom_recipe):
+        out = model(inp)
+    loss = out.float().sum()
+    loss.backward()
+
+    # Basic sanity: gradients exist
+    assert inp.grad is not None
 
 
 @pytest.mark.parametrize("module_type", ["Linear", "LayerNormLinear", "OpsLinear", "LayerNormMLP"])
@@ -127,11 +170,11 @@ def test_custom_recipe_matches_current_scaling():
     with autocast(enabled=True, recipe=ref_recipe):
         out_ref = model_ref(inp_ref)
     # Assert dtypes for reference quantizers: HYBRID = E4M3 (fwd), E5M2 (bwd)
-    ref_fwd_in = model_ref.quantizers["scaling_fwd"][tex.FP8FwdTensors.GEMM1_INPUT]
-    ref_fwd_w = model_ref.quantizers["scaling_fwd"][tex.FP8FwdTensors.GEMM1_WEIGHT]
-    ref_fwd_out = model_ref.quantizers["scaling_fwd"][tex.FP8FwdTensors.GEMM1_OUTPUT]
-    ref_bwd_go = model_ref.quantizers["scaling_bwd"][tex.FP8BwdTensors.GRAD_OUTPUT1]
-    ref_bwd_gi = model_ref.quantizers["scaling_bwd"][tex.FP8BwdTensors.GRAD_INPUT1]
+    ref_fwd_in = model_ref.quantizers["scaling_fwd"][FP8FwdTensorIdx.GEMM1_INPUT]
+    ref_fwd_w = model_ref.quantizers["scaling_fwd"][FP8FwdTensorIdx.GEMM1_WEIGHT]
+    ref_fwd_out = model_ref.quantizers["scaling_fwd"][FP8FwdTensorIdx.GEMM1_OUTPUT]
+    ref_bwd_go = model_ref.quantizers["scaling_bwd"][FP8BwdTensorIdx.GRAD_OUTPUT1]
+    ref_bwd_gi = model_ref.quantizers["scaling_bwd"][FP8BwdTensorIdx.GRAD_INPUT1]
     assert ref_fwd_in.dtype == tex.DType.kFloat8E4M3
     assert ref_fwd_w.dtype == tex.DType.kFloat8E4M3
     assert ref_fwd_out.dtype == tex.DType.kFloat8E4M3
@@ -158,11 +201,11 @@ def test_custom_recipe_matches_current_scaling():
     with autocast(enabled=True, recipe=custom_recipe):
         out_custom = model_custom(inp_custom)
     # Assert dtypes for custom quantizers match reference mapping
-    cus_fwd_in = model_custom.quantizers["scaling_fwd"][tex.FP8FwdTensors.GEMM1_INPUT]
-    cus_fwd_w = model_custom.quantizers["scaling_fwd"][tex.FP8FwdTensors.GEMM1_WEIGHT]
-    cus_fwd_out = model_custom.quantizers["scaling_fwd"][tex.FP8FwdTensors.GEMM1_OUTPUT]
-    cus_bwd_go = model_custom.quantizers["scaling_bwd"][tex.FP8BwdTensors.GRAD_OUTPUT1]
-    cus_bwd_gi = model_custom.quantizers["scaling_bwd"][tex.FP8BwdTensors.GRAD_INPUT1]
+    cus_fwd_in = model_custom.quantizers["scaling_fwd"][FP8FwdTensorIdx.GEMM1_INPUT]
+    cus_fwd_w = model_custom.quantizers["scaling_fwd"][FP8FwdTensorIdx.GEMM1_WEIGHT]
+    cus_fwd_out = model_custom.quantizers["scaling_fwd"][FP8FwdTensorIdx.GEMM1_OUTPUT]
+    cus_bwd_go = model_custom.quantizers["scaling_bwd"][FP8BwdTensorIdx.GRAD_OUTPUT1]
+    cus_bwd_gi = model_custom.quantizers["scaling_bwd"][FP8BwdTensorIdx.GRAD_INPUT1]
     assert cus_fwd_in.dtype == tex.DType.kFloat8E4M3
     assert cus_fwd_w.dtype == tex.DType.kFloat8E4M3
     assert cus_fwd_out.dtype == tex.DType.kFloat8E4M3

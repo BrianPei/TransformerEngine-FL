@@ -1,11 +1,9 @@
 /*************************************************************************
- * Copyright (c) 2022-2025, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * Copyright (c) 2022-2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
  *
  * See LICENSE for license information.
  ************************************************************************/
 #include <cuda_runtime.h>
-
-#include <iostream>
 
 #include "../extensions.h"
 #include "transformer_engine/cast.h"
