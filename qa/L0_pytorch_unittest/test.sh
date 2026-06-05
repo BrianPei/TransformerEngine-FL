@@ -138,6 +138,21 @@ run_test_step "pytest_test_attention.xml" "$TE_PATH/tests/pytorch/attention/test
 run_test_step "pytest_test_checkpoint.xml" "$TE_PATH/tests/pytorch/test_checkpoint.py" \
 "NVTE_TEST_CHECKPOINT_ARTIFACT_PATH=$TE_PATH/artifacts/tests/pytorch/test_checkpoint python3 -m pytest --tb=auto --junitxml=$XML_LOG_DIR/pytest_test_checkpoint.xml $TE_PATH/tests/pytorch/test_checkpoint.py" "test_checkpoint.py"
 
+# ==============================================================================
+# New Step: Plugin Core 
+# ==============================================================================
+
+# Step: Plugin Policy
+run_test_step "pytest_test_plugin_policy.xml" "$TE_PATH/tests/pytorch/test_plugin_policy.py" \
+"python3 -m pytest -s -v --tb=auto --junitxml=$XML_LOG_DIR/pytest_test_plugin_policy.xml $TE_PATH/tests/pytorch/test_plugin_policy.py" "test_plugin_policy.py"
+
+# Step: Plugin manager
+run_test_step "pytest_test_plugin_manager.xml" "$TE_PATH/tests/pytorch/test_plugin_manager.py" \
+"python3 -m pytest -s -v --tb=auto --junitxml=$XML_LOG_DIR/pytest_test_plugin_manager.xml $TE_PATH/tests/pytorch/test_plugin_manager.py" "test_plugin_manager.py"
+
+
+# ==============================================================================
+
 
 if [ "$FAIL" -ne 0 ]; then
     echo "Some tests failed."
