@@ -46,3 +46,5 @@ transformer_engine/plugin/core/_build_config.py
 .DS_Store
 qa/L1_pytorch_mcore_integration/output/
 *.distcp
+.coverage
+.coverage.*
