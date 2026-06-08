@@ -16,6 +16,7 @@ from transformer_engine.plugin.core.manager import (
 # Fixtures & Mock Component Factories
 # ==============================================================================
 
+
 @pytest.fixture(autouse=True)
 def clean_manager_singleton():
     """Ensure a freshly cleared manager instance before and after each test."""
@@ -30,18 +31,13 @@ def create_mock_impl(impl_id, kind, op_name="test_op", fn=None, priority=1, vend
     Ensures that VENDOR kinds satisfy internal post-init constraint validations.
     """
     mock_fn = fn or MagicMock(return_value=f"res_{impl_id}")
-    
+
     # Satisfy __post_init__ requirement: VENDOR kind must specify a vendor name
     if kind == BackendImplKind.VENDOR and not vendor:
         vendor = "nvidia"
-        
+
     impl = OpImpl(
-        op_name=op_name,
-        impl_id=impl_id,
-        kind=kind,
-        fn=mock_fn,
-        priority=priority,
-        vendor=vendor
+        op_name=op_name, impl_id=impl_id, kind=kind, fn=mock_fn, priority=priority, vendor=vendor
     )
     return impl
 
@@ -49,6 +45,7 @@ def create_mock_impl(impl_id, kind, op_name="test_op", fn=None, priority=1, vend
 # ==============================================================================
 # Part 1: Initialization, Fork Safety & Global Singleton Management
 # ==============================================================================
+
 
 def test_manager_singleton_lifecycle():
     """Verify singleton access, reset primitives, and Windows register_at_fork guards."""
@@ -66,9 +63,9 @@ def test_lazy_initialization_flow():
     """Trigger ensure_initialized, checking registry synchronization and tracking logs."""
     mock_registry = OpRegistry()
     mgr = OpManager(registry=mock_registry)
-    
+
     assert mgr.registry is mock_registry
-    
+
     mgr.ensure_initialized()
     assert mgr._state.initialized is True
     assert mgr._state.init_pid == os.getpid()
@@ -80,12 +77,12 @@ def test_process_fork_invalidation_handling():
     """Force execute _reset_after_fork to clear transient states and step up policy epochs."""
     mgr = OpManager()
     mgr.ensure_initialized()
-    
+
     mgr._dispatch_cache[("op", "fp", 0)] = lambda: None
     mgr._impl_cache["op"] = MagicMock()
-    
+
     mgr._reset_after_fork()
-    
+
     assert mgr._state.initialized is False
     assert mgr._state.init_pid == -1
     assert len(mgr._dispatch_cache) == 0
@@ -96,10 +93,11 @@ def test_process_fork_invalidation_handling():
 # Part 2: Vendor Whitelist/Blacklist Filtering Engine
 # ==============================================================================
 
+
 def test_vendor_policy_filter_matching():
     """Trigger _matches_vendor_filters evaluating valid, blocked, and non-vendor impls."""
     mgr = OpManager()
-    
+
     non_vendor_impl = create_mock_impl("ref", BackendImplKind.REFERENCE)
     nvidia_impl = create_mock_impl("nv", BackendImplKind.VENDOR, vendor="nvidia")
     amd_impl = create_mock_impl("amd", BackendImplKind.VENDOR, vendor="amd")
@@ -113,7 +111,7 @@ def test_vendor_policy_filter_matching():
             kind=BackendImplKind.VENDOR,
             fn=MagicMock(),
             priority=1,
-            vendor=None
+            vendor=None,
         )
 
     # Scenario 1: Deny List Filtering
@@ -133,14 +131,19 @@ def test_vendor_policy_filter_matching():
 # Part 3: Resolver Pipelines and Resolution Error Fallbacks
 # ==============================================================================
 
+
 def test_resolve_with_cache_and_priority():
     """Test operational resolve pathways, cache hits, priority sorting and empty states."""
     mock_registry = OpRegistry()
     mgr = OpManager(registry=mock_registry)
-    
-    impl_low = create_mock_impl("v1", BackendImplKind.VENDOR, op_name="test_op", priority=1, vendor="nvidia")
-    impl_high = create_mock_impl("v2", BackendImplKind.VENDOR, op_name="test_op", priority=10, vendor="nvidia")
-    
+
+    impl_low = create_mock_impl(
+        "v1", BackendImplKind.VENDOR, op_name="test_op", priority=1, vendor="nvidia"
+    )
+    impl_high = create_mock_impl(
+        "v2", BackendImplKind.VENDOR, op_name="test_op", priority=10, vendor="nvidia"
+    )
+
     mock_registry.register_impl(impl_low)
     mock_registry.register_impl(impl_high)
 
@@ -211,6 +214,7 @@ def test_resolution_failures_and_strict_modes():
 # Part 4: High-Level Core Dispatch Invokers (call & fallback)
 # ==============================================================================
 
+
 def test_call_with_fallback_and_invalidation():
     """Route execution patterns through standard invoke, caching, errors, and fallbacks."""
 
@@ -277,9 +281,11 @@ def test_call_with_fallback_and_invalidation():
             with pytest.raises(Exception, match="CUDA Out of Memory"):
                 strict_mgr.call("strict_op")
 
+
 # ==============================================================================
 # Part 5: Cache Stability and Helper Primitives
 # ==============================================================================
+
 
 def test_cache_validation_and_epoch_bumps():
     """Cover _is_cache_valid, _update_cache and bump_policy_epoch."""
