@@ -150,9 +150,7 @@ def trt_mxfp8_dequantize(t, scale_inv):
     x = torch.from_numpy(t).cuda()
     scale_inv_tensor = torch.from_numpy(scale_inv).cuda()
     q = te.tensor.mxfp8_tensor.MXFP8Quantizer(tex.DType.kFloat8E4M3)
-    quantizer_tensor = q.create_tensor_from_data(
-        x, scale_inv_tensor, fake_dtype=torch.float32
-    )
+    quantizer_tensor = q.create_tensor_from_data(x, scale_inv_tensor, fake_dtype=torch.float32)
     return quantizer_tensor.dequantize().cpu().numpy()
 
 
@@ -190,9 +188,7 @@ def do_export(
     with torch.inference_mode(), te.autocast(
         enabled=fp8_recipe is not None, recipe=fp8_recipe
     ), warnings.catch_warnings():
-        warnings.filterwarnings(
-            action="ignore", category=torch.jit.TracerWarning, module=r".*"
-        )
+        warnings.filterwarnings(action="ignore", category=torch.jit.TracerWarning, module=r".*")
 
         model.cuda().eval()
         os.makedirs(NVTE_TEST_ARTIFACTS_DIR, exist_ok=True)
@@ -271,9 +267,7 @@ def compare_outputs(
             print("*" * 100)
             nb_errors = len(mismatched_ids)
             nb_vals = min(nb_errors, max_errors_printed)
-            print(
-                f"Detected {nb_errors} diverging values (output shape={onnx_output.shape})"
-            )
+            print(f"Detected {nb_errors} diverging values (output shape={onnx_output.shape})")
             print(f"Showing first {nb_vals} errors (ONNX -- TE):")
             abs_err = np.abs(onnx_output - te_output)
             errors = abs_err[mismatches]
@@ -285,9 +279,7 @@ def compare_outputs(
                 )
             print(f"Max error: {np.max(errors)}")
             if nb_errors > allow_cnt_errors:
-                raise ValueError(
-                    f"Output validation of {fname} failed with {nb_errors} errors"
-                )
+                raise ValueError(f"Output validation of {fname} failed with {nb_errors} errors")
 
 
 def serialize_inputs_outputs(
@@ -304,9 +296,7 @@ def serialize_inputs_outputs(
 
     input_names = input_names or ["input"]
     output_names = output_names or ["output"]
-    inputs = (
-        inputs if isinstance(inputs, list) or isinstance(inputs, tuple) else (inputs,)
-    )
+    inputs = inputs if isinstance(inputs, list) or isinstance(inputs, tuple) else (inputs,)
     named_inputs = zip(input_names, inputs)
     input_data = [{k: v.cpu() for k, v in named_inputs if v is not None}]
     json_fname = fname[: -len(".onnx")] + "_inputs.json"
@@ -365,11 +355,7 @@ def validate_result(
         return s
 
     def create_ort_input_dict(session, inputs):
-        inputs = (
-            inputs
-            if isinstance(inputs, list) or isinstance(inputs, tuple)
-            else (inputs,)
-        )
+        inputs = inputs if isinstance(inputs, list) or isinstance(inputs, tuple) else (inputs,)
         input_names = [x.name for x in session.get_inputs()]
         inps = [to_numpy(x) for x in inputs if x is not None]
         inp_dict = dict(zip(input_names, inps))
@@ -422,9 +408,7 @@ def get_attn_mask_str(use_mask, attn_mask_type):
     attn_mask_str = "_arbitrary-no-mask"
     attn_mask_str = "_causal-mask" if attn_mask_type == "causal" else attn_mask_str
     attn_mask_str = (
-        "_arbitrary-mask"
-        if use_mask and attn_mask_type == "arbitrary"
-        else attn_mask_str
+        "_arbitrary-mask" if use_mask and attn_mask_type == "arbitrary" else attn_mask_str
     )
     return attn_mask_str
 
@@ -464,17 +448,15 @@ def _test_export_linear(
             ret = self.linear(inp)
             return ret
 
-    inp = torch.randn(
-        batch_size, hidden_size, in_features, device="cuda", dtype=precision
-    )
+    inp = torch.randn(batch_size, hidden_size, in_features, device="cuda", dtype=precision)
     fp8_str = "_fp8" if fp8_recipe is not None else ""
     bias_str = "_bias" if use_bias else ""
     high_prec_str = dtype2str(precision)
     fname = f"te.linear{fp8_str}{bias_str}{high_prec_str}.onnx"
     with te.autocast(enabled=fp8_recipe is not None, recipe=fp8_recipe):
-        model = Test_Linear(
-            in_features, out_features, use_bias, return_bias, precision
-        ).to(device="cuda")
+        model = Test_Linear(in_features, out_features, use_bias, return_bias, precision).to(
+            device="cuda"
+        )
         # dynamic shape
         bs = torch.export.Dim("bs", min=2, max=1256)
         do_export(
@@ -484,9 +466,7 @@ def _test_export_linear(
             fp8_recipe,
             dynamic_shapes={"inp": {0: bs}},
         )
-        te_outputs = te_infer(
-            model, inp, is_fp8=fp8_recipe is not None, fp8_recipe=fp8_recipe
-        )
+        te_outputs = te_infer(model, inp, is_fp8=fp8_recipe is not None, fp8_recipe=fp8_recipe)
         serialize_inputs_outputs(fname, inp, te_outputs)
 
         if precision in (torch.bfloat16,):
@@ -532,9 +512,7 @@ def _test_export_layernorm(
     out_features = 256
     hidden_size = 256
 
-    inp = torch.ones(
-        batch_size, in_features, out_features, device="cuda", dtype=precision
-    )
+    inp = torch.ones(batch_size, in_features, out_features, device="cuda", dtype=precision)
     fp8_str = "_fp8" if fp8_recipe is not None else ""
     high_prec_str = dtype2str(precision)
     fname = f"te.layernorm_linear{fp8_str}{high_prec_str}.onnx"
@@ -551,9 +529,7 @@ def _test_export_layernorm(
             # dynamic shape
             bs = torch.export.Dim("bs", min=2, max=1256)
             do_export(model, inp, fname, fp8_recipe, dynamic_shapes={"input": {0: bs}})
-            te_outputs = te_infer(
-                model, inp, is_fp8=fp8_recipe is not None, fp8_recipe=fp8_recipe
-            )
+            te_outputs = te_infer(model, inp, is_fp8=fp8_recipe is not None, fp8_recipe=fp8_recipe)
             serialize_inputs_outputs(fname, inp, te_outputs)
             if precision in (torch.bfloat16,):
                 return
@@ -625,9 +601,7 @@ def _test_export_layernorm_linear(
                 set_layer_scale(model, scale_factor, num_gemms=2)
             do_export(model, inp, fname, fp8_recipe)
 
-            te_outputs = te_infer(
-                model, inp, is_fp8=fp8_recipe is not None, fp8_recipe=fp8_recipe
-            )
+            te_outputs = te_infer(model, inp, is_fp8=fp8_recipe is not None, fp8_recipe=fp8_recipe)
             serialize_inputs_outputs(fname, inp, te_outputs)
             if precision in (torch.bfloat16,):
                 return
@@ -641,9 +615,7 @@ def _test_export_layernorm_linear(
                     # For current scaling we use Float8Quantizer in tests + amax computed by hand,
                     # which has slightly different numerics than Float8CurrentScalingQuantizer.
                     atol=(
-                        1e-3
-                        if fp8_recipe.__class__ is not recipe.Float8CurrentScaling
-                        else 2e-2
+                        1e-3 if fp8_recipe.__class__ is not recipe.Float8CurrentScaling else 2e-2
                     ),
                     is_fp8=fp8_recipe is not None,
                     te_outputs=te_outputs,
@@ -717,16 +689,12 @@ def _test_export_layernorm_mlp(
         if fp8_recipe is not None:
             set_layer_scale(model, scale_factor, num_gemms=2)
         do_export(model, inp, fname, fp8_recipe)
-        te_outputs = te_infer(
-            model, inp, is_fp8=fp8_recipe is not None, fp8_recipe=fp8_recipe
-        )
+        te_outputs = te_infer(model, inp, is_fp8=fp8_recipe is not None, fp8_recipe=fp8_recipe)
         serialize_inputs_outputs(fname, inp, te_outputs)
         if precision in (torch.bfloat16,):
             return
         atol = (
-            2e-2
-            if fp8_recipe is not None
-            else (5e-1 if activation == "swiglu" else 1e-3)
+            2e-2 if fp8_recipe is not None else (5e-1 if activation == "swiglu" else 1e-3)
         )  # TODO(pgadzinski) - check 2e-2
         validate_result(
             fname,
@@ -841,9 +809,7 @@ def test_export_core_attention(
     attention_mask = None
     if use_mask:
         # Generate a random mask with 50% probability for 0 or 1.
-        probs = 0.5 * torch.ones(
-            batch_size, 1, 1, seq_len, device="cuda", dtype=precision
-        )
+        probs = 0.5 * torch.ones(batch_size, 1, 1, seq_len, device="cuda", dtype=precision)
         attention_mask = torch.bernoulli(probs).to("cuda", dtype=torch.bool)
     inp = (query_layer, key_layer, value_layer, attention_mask)
 
@@ -942,9 +908,7 @@ def _test_export_multihead_attention(
 
     fp8_str = "_fp8" if fp8_recipe is not None else ""
     dtype_str = dtype2str(precision)
-    attn_type_str = (
-        "_self-attention" if attention_type == "self" else "_cross-attention"
-    )
+    attn_type_str = "_self-attention" if attention_type == "self" else "_cross-attention"
     fuse_qkv_str = "_fused-qkv" if fuse_qkv_params else ""
     attn_mask_str = get_attn_mask_str(use_mask, attn_mask_type)
     input_ln_str = "_input-ln" if input_layernorm else ""
@@ -979,9 +943,7 @@ def _test_export_multihead_attention(
             "encoder_output": {0: seq, 1: bs} if attention_type == "cross" else None,
         },
     )
-    te_outputs = te_infer(
-        model, inp_context, is_fp8=fp8_recipe is not None, fp8_recipe=fp8_recipe
-    )
+    te_outputs = te_infer(model, inp_context, is_fp8=fp8_recipe is not None, fp8_recipe=fp8_recipe)
     serialize_inputs_outputs(
         fname,
         inp_context,
@@ -1126,9 +1088,7 @@ def _test_export_transformer_layer(
         activation=activation,
     ).to(device="cuda")
     do_export(model, inp, fname, fp8_recipe, input_names=input_names)
-    te_outputs = te_infer(
-        model, inp, is_fp8=fp8_recipe is not None, fp8_recipe=fp8_recipe
-    )
+    te_outputs = te_infer(model, inp, is_fp8=fp8_recipe is not None, fp8_recipe=fp8_recipe)
     serialize_inputs_outputs(
         fname,
         inp,
@@ -1137,9 +1097,7 @@ def _test_export_transformer_layer(
     )
     if precision in (torch.bfloat16,):
         return
-    atol = (
-        5e-1 if fp8_recipe is not None else (5e-1 if activation == "swiglu" else 5e-3)
-    )
+    atol = 5e-1 if fp8_recipe is not None else (5e-1 if activation == "swiglu" else 5e-3)
     validate_result(
         fname,
         inp,
@@ -1233,9 +1191,7 @@ def test_export_gpt_generation(
         fp8_recipe,
         dynamic_shapes={"hidden_states": {0: seq, 1: bs}},
     )
-    te_outputs = te_infer(
-        model, inp, is_fp8=fp8_recipe is not None, fp8_recipe=fp8_recipe
-    )
+    te_outputs = te_infer(model, inp, is_fp8=fp8_recipe is not None, fp8_recipe=fp8_recipe)
     serialize_inputs_outputs(
         fname, inp, te_outputs, input_names=input_names, output_names=output_names
     )
@@ -1256,9 +1212,7 @@ def test_export_gpt_generation(
         sequence_length, batch_size, hidden_size, dtype=precision, device="cuda"
     )
     inp = (input_tensor, attention_mask)
-    te_outputs = te_infer(
-        model, inp, is_fp8=fp8_recipe is not None, fp8_recipe=fp8_recipe
-    )
+    te_outputs = te_infer(model, inp, is_fp8=fp8_recipe is not None, fp8_recipe=fp8_recipe)
     serialize_inputs_outputs(fname, inp, te_outputs, input_names=input_names)
     if precision not in (torch.bfloat16,):
         validate_result(
