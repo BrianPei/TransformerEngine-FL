@@ -29,6 +29,7 @@ import onnxruntime as ort
 import torch
 from torch import nn as nn
 from typing import Optional, Union, Tuple, List
+from unittest.mock import patch
 from onnxruntime_extensions import PyCustomOpDef, get_library_path, onnx_op
 import transformer_engine.pytorch as te
 from transformer_engine.common import recipe
@@ -1212,18 +1213,24 @@ def test_export_gpt_generation(
         sequence_length, batch_size, hidden_size, dtype=precision, device="cuda"
     )
     inp = (input_tensor, attention_mask)
-    te_outputs = te_infer(model, inp, is_fp8=fp8_recipe is not None, fp8_recipe=fp8_recipe)
+    # cuDNN <= 9.9 does not support decode-only causal attention through the fused path.
+    # Keep the context-phase export unchanged and only force the generative-phase forward
+    # through the unfused backend for the non-FP8 single-token case that hits this limit.
+    generative_env = {"NVTE_FUSED_ATTN": "0"} if fp8_recipe is None else {}
+    with patch.dict(os.environ, generative_env):
+        te_outputs = te_infer(model, inp, is_fp8=fp8_recipe is not None, fp8_recipe=fp8_recipe)
     serialize_inputs_outputs(fname, inp, te_outputs, input_names=input_names)
     if precision not in (torch.bfloat16,):
-        validate_result(
-            fname,
-            inp,
-            model,
-            atol=1e-2,
-            is_fp8=fp8_recipe is not None,
-            input_names=input_names,
-            te_outputs=te_outputs,
-        )
+        with patch.dict(os.environ, generative_env):
+            validate_result(
+                fname,
+                inp,
+                model,
+                atol=1e-2,
+                is_fp8=fp8_recipe is not None,
+                input_names=input_names,
+                te_outputs=te_outputs,
+            )
 
 
 @pytest.mark.parametrize("enabled", [True, False])
