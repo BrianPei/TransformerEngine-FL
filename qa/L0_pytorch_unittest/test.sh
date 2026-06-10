@@ -192,6 +192,16 @@ run_test_step "pytest_test_plugin_manager.xml" "$TE_PATH/tests/pytorch/test_plug
 
 
 # ==============================================================================
+# New Step: Plugin Core backend
+# ==============================================================================
+
+# Step: Backend flagos
+run_test_step "pytest_test_backend_flagos.xml" "$TE_PATH/tests/pytorch/test_backend_flagos.py" \
+"python3 -m pytest -s -v --tb=auto --junitxml=$XML_LOG_DIR/pytest_test_backend_flagos.xml $TE_PATH/tests/pytorch/test_backend_flagos.py" "test_backend_flagos.py"
+
+# Step: Backend impl fused adam
+run_test_step "pytest_test_fused_adam.xml" "$TE_PATH/tests/pytorch/test_fused_adam.py" \
+"python3 -m pytest -s -v --tb=auto --junitxml=$XML_LOG_DIR/pytest_test_fused_adam.xml $TE_PATH/tests/pytorch/test_fused_adam.py" "test_fused_adam.py"
 
 
 if [ "$FAIL" -ne 0 ]; then
