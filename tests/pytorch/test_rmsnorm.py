@@ -10,15 +10,17 @@ import torch
 mock_flag_gems = MagicMock()
 sys.modules["flag_gems"] = mock_flag_gems
 
-# 模拟 flag_gems.add 算子
+# Mock flag_gems.add operator
 mock_flag_gems.add = lambda x, y, *args, **kwargs: x + y
 
 
-# 模拟前向和反向的核心 rms_norm 算子，保证返回符合形状预期的 Tensor
+# Mock forward and backward core rms_norm operators to ensure returned Tensors match expected shapes
 def mock_rms_norm_forward(input_tensor, normalized_shape, weight, eps):
-    # 前向返回 (y, rstdevs)。特意让 rstdevs 默认多一个维度，以触发源码中的 shape != view 调整分支
+    # Forward returns (y, rstdevs). Intentionally add an extra dimension to rstdevs 
+    # to trigger the shape != view adjustment branch in the source code.
     y = input_tensor * weight
-    # 构造一个形状不匹配的 rstdevs（例如末尾多一个1维），强迫触发 .view(input.shape[:-1])
+    # Construct a mismatched rstdevs shape (e.g., adding an extra dimension at the end)
+    # to force triggering .view(input.shape[:-1])
     rstdevs_shape = list(input_tensor.shape[:-1]) + [1]
     rstdevs = torch.ones(
         rstdevs_shape, dtype=input_tensor.dtype, device=input_tensor.device
@@ -27,7 +29,7 @@ def mock_rms_norm_forward(input_tensor, normalized_shape, weight, eps):
 
 
 def mock_rms_norm_backward(dy, x, rsigma, normalized_shape, gamma, eps):
-    # 反向返回 (dx, dw)
+    # Backward returns (dx, dw)
     dx = dy * gamma
     dw = torch.ones_like(gamma)
     return dx, dw
@@ -36,7 +38,7 @@ def mock_rms_norm_backward(dy, x, rsigma, normalized_shape, gamma, eps):
 mock_flag_gems.rms_norm_forward = mock_rms_norm_forward
 mock_flag_gems.rms_norm_backward = mock_rms_norm_backward
 
-# 直接导入被测的 Python 源码函数，绕过 OpManager 的动态路由拦截
+# Directly import the implementation functions under test to bypass OpManager's dynamic routing interception
 from transformer_engine.plugin.core.backends.flagos.impl.rmsnorm import (
     rmsnorm_bwd_fl,
     rmsnorm_fwd_fl,
@@ -66,11 +68,11 @@ def test_rmsnorm_fwd_lifecycle(zero_centered_gamma, input_shape):
         zero_centered_gamma=zero_centered_gamma,
     )
 
-    # 验证输出类型和正确性
+    # Verify output types and correctness
     assert isinstance(y, torch.Tensor)
     assert isinstance(rstdevs, torch.Tensor)
 
-    # 核心覆盖检查：rstdevs 的形状必须完美契合 input.shape[:-1]
+    # Core coverage check: the shape of rstdevs must perfectly match input.shape[:-1]
     assert rstdevs.shape == inp.shape[:-1]
 
 

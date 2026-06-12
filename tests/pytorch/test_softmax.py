@@ -10,7 +10,7 @@ import torch
 mock_flag_gems = MagicMock()
 sys.modules["flag_gems"] = mock_flag_gems
 
-# 模拟 flag_gems 算子行为，确保运算和类型转换平稳返回对应的 PyTorch 基础映射
+# Mock flag_gems operator behaviors to ensure operations and type conversions return smoothly to their PyTorch counterparts
 mock_flag_gems.to_copy = lambda x, *args, **kwargs: x.to(
     kwargs.get("device", x.device)
 ).to(kwargs.get("dtype", x.dtype))
@@ -31,7 +31,7 @@ mock_flag_gems.sum_dim = lambda x, dim, keepdim, *args, **kwargs: torch.sum(
     x, dim=dim, keepdim=keepdim
 )
 
-# 直接导入被测的 Python 源码函数，绕过算子路由拦截
+# Directly import the source implementation functions under test to bypass operator routing interception
 from transformer_engine.plugin.core.backends.flagos.impl.softmax import (
     scaled_masked_softmax_backward_fl,
     scaled_masked_softmax_forward_fl,
@@ -52,11 +52,11 @@ def test_scaled_masked_softmax_fwd_matrix(
     """Walk through all forward control branches including masking types and cross-device routing."""
     device = "cuda" if torch.cuda.is_available() else "cpu"
 
-    # 构造输入张量形状
+    # Construct input tensor shape
     input_shape = (2, 2, 4, 4) if is_4d_broadcast else (4, 4)
     inp = torch.randn(input_shape, device=device)
 
-    # 构造 Mask 形状及跨设备环境
+    # Construct mask shape and handle cross-device environments
     if is_4d_broadcast:
         mask_shape = (2, 1, 4, 4)
     else:
@@ -67,14 +67,14 @@ def test_scaled_masked_softmax_fwd_matrix(
     if mask_dtype.is_floating_point:
         mask = torch.randn(mask_shape, device=mask_device, dtype=mask_dtype)
     else:
-        # 整型 Mask，模拟部分遮蔽与全遮蔽情况
+        # Integer mask, simulating both partially-masked and fully-masked scenarios
         mask = torch.ones(mask_shape, device=mask_device, dtype=mask_dtype)
         if mask_shape == input_shape:
-            mask[0, 0] = 0  # 确保包含未被屏蔽的通路
+            mask[0, 0] = 0  # Ensure at least one unmasked path is included
 
-    # 构造 Scale Factor
+    # Construct scale factor
     if scale_is_tensor:
-        scale_factor = torch.tensor(2.0, device=mask_device)  # 借用不同设备触发对应分流
+        scale_factor = torch.tensor(2.0, device=mask_device)  # Borrow different device to trigger corresponding code branch
     else:
         scale_factor = 2.0
 
@@ -114,5 +114,5 @@ def test_scaled_masked_softmax_bwd_matrix(scale_is_tensor, device_mismatch):
 
     assert isinstance(grad_input, torch.Tensor)
     assert grad_input.shape == output_grad.shape
-    # 确保稳定返回到原始计算精度
+    # Ensure stable fallback to the original computing precision
     assert grad_input.dtype == output_grad.dtype
