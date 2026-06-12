@@ -195,7 +195,7 @@ run_test_step "pytest_test_plugin_manager.xml" "$TE_PATH/tests/pytorch/test_plug
 # New Step: Plugin Core backend
 # ==============================================================================
 
-# Step: Backend flagos
+# Step: Backend flagos =========================================================
 run_test_step "pytest_test_backend_flagos.xml" "$TE_PATH/tests/pytorch/test_backend_flagos.py" \
 "python3 -m pytest -s -v --tb=auto --junitxml=$XML_LOG_DIR/pytest_test_backend_flagos.xml $TE_PATH/tests/pytorch/test_backend_flagos.py" "test_backend_flagos.py"
 
@@ -219,6 +219,10 @@ run_test_step "pytest_test_rmsnorm.xml" "$TE_PATH/tests/pytorch/test_rmsnorm.py"
 run_test_step "pytest_test_softmax.xml" "$TE_PATH/tests/pytorch/test_softmax.py" \
 "python3 -m pytest -s -v --tb=auto --junitxml=$XML_LOG_DIR/pytest_test_softmax.xml $TE_PATH/tests/pytorch/test_softmax.py" "test_softmax.py"
 
+
+# Step: Backend reference =========================================================
+run_test_step "pytest_reference.xml" "$TE_PATH/tests/pytorch/test_reference.py" \
+"python3 -m pytest -s -v --tb=auto --junitxml=$XML_LOG_DIR/pytest_reference.xml $TE_PATH/tests/pytorch/test_reference.py" "test_reference.py"
 
 if [ "$FAIL" -ne 0 ]; then
     echo "Some tests failed."

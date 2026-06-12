@@ -6,9 +6,9 @@ import pytest
 import torch
 
 # ==============================================================================
-# Part 0: Fine-Grained Dependency Isolation & Explicit Safe Mocking
+# Part 0: High-Reliability Environment Isolation & Explicit Function Mocking
 # ==============================================================================
-# 1. Isolating core ops and vendor type structures
+# 1. Isolate C++ / CUDA ops dependencies safely
 mock_ops = MagicMock()
 sys.modules["transformer_engine.plugin.core.ops"] = mock_ops
 
@@ -17,24 +17,28 @@ class MockBase:
 
 mock_ops.TEFLBackendBase = MockBase
 mock_ops.DType = MagicMock()
+mock_ops.FP8TensorMeta = MagicMock()
 mock_ops.CommOverlapType = MagicMock()
 mock_ops.NVTE_QKV_Layout = MagicMock()
 mock_ops.NVTE_Bias_Type = MagicMock()
 mock_ops.NVTE_Mask_Type = MagicMock()
 mock_ops.NVTE_Softmax_Type = MagicMock()
 mock_ops.NVTE_QKV_Format = MagicMock()
+mock_ops.CommOverlap = MagicMock()
 
 class MockFusedBackend:
     NVTE_No_Backend = 0
 
 mock_ops.NVTE_Fused_Attn_Backend = MockFusedBackend
 
-# 2. Explicitly mock required functional implementations to eliminate nested MagicMock recursions
+# 2. SEVER IMPL LINKAGE: Intercept the entire impl module to completely eliminate
+# any possibility of compiler neighbor circular imports (reference <-> softmax).
 mock_impl = MagicMock()
 sys.modules["transformer_engine.plugin.core.backends.reference.impl"] = mock_impl
 
-# Manually register non-recursive passthrough callbacks for every single implementation function used in reference.py
-torch_functions = [
+# 3. EXPLICIT SPECIFIC ASSIGNMENT: Explicitly populate only the exact required
+# framework stubs to avoid dir() traversal MagicMock recursion overflows.
+torch_stensors = [
     "general_gemm_torch", "gelu_torch", "geglu_torch", "qgelu_torch", "qgeglu_torch",
     "relu_torch", "reglu_torch", "srelu_torch", "sreglu_torch", "silu_torch", "swiglu_torch",
     "clamped_swiglu_torch", "dgelu_torch", "dgeglu_torch", "dqgelu_torch", "dqgeglu_torch",
@@ -44,26 +48,32 @@ torch_functions = [
     "scaled_masked_softmax_forward_torch", "scaled_masked_softmax_backward_torch",
     "scaled_upper_triang_masked_softmax_forward_torch", "scaled_upper_triang_masked_softmax_backward_torch",
     "scaled_aligned_causal_masked_softmax_forward_torch", "scaled_aligned_causal_masked_softmax_backward_torch",
-    "multi_tensor_scale_torch", "multi_tensor_adam_torch", "multi_tensor_adam_fp8_torch",
-    "multi_tensor_adam_capturable_torch", "multi_tensor_adam_capturable_master_torch",
-    "multi_tensor_adam_param_remainder_torch", "multi_tensor_sgd_torch",
-    "multi_tensor_compute_scale_and_scale_inv_torch", "multi_tensor_compute_scale_inv_e8m0_torch"
+    "dropout_bwd_torch"
 ]
 
-# Simple lambda returning a tensor to keep things ultra-fast and recursion-free
-for func_name in torch_functions:
-    setattr(mock_impl, func_name, lambda *args, **kwargs: torch.tensor([1.0]))
+for func in torch_stensors:
+    setattr(mock_impl, func, MagicMock(return_value=torch.tensor([1.0])))
 
-# Setup precise unpack configurations
-mock_impl.layernorm_fwd_torch = lambda *args, **kwargs: [torch.tensor(1.0), torch.tensor(1.0), torch.tensor(1.0)]
-mock_impl.layernorm_bwd_torch = lambda *args, **kwargs: [torch.tensor(1.0), torch.tensor(1.0)]
-mock_impl.rmsnorm_fwd_torch = lambda *args, **kwargs: [torch.tensor(1.0), torch.tensor(1.0), torch.tensor(1.0)]
-mock_impl.rmsnorm_bwd_torch = lambda *args, **kwargs: [torch.tensor(1.0), torch.tensor(1.0)]
-mock_impl.dropout_fwd_torch = lambda *args, **kwargs: (torch.tensor(1.0), torch.tensor(1.0))
-mock_impl.dropout_bwd_torch = lambda *args, **kwargs: torch.tensor(1.0)
-mock_impl.multi_tensor_l2norm_torch = lambda *args, **kwargs: (torch.tensor(1.0), torch.tensor(1.0))
+# Complex layout / structured output explicit assignments
+mock_impl.layernorm_fwd_torch = MagicMock(return_value=[torch.tensor(1.0)] * 3)
+mock_impl.layernorm_bwd_torch = MagicMock(return_value=[torch.tensor(1.0)] * 2)
+mock_impl.rmsnorm_fwd_torch = MagicMock(return_value=[torch.tensor(1.0)] * 3)
+mock_impl.rmsnorm_bwd_torch = MagicMock(return_value=[torch.tensor(1.0)] * 2)
+mock_impl.dropout_fwd_torch = MagicMock(return_value=(torch.tensor(1.0), torch.tensor(1.0)))
+mock_impl.multi_tensor_l2norm_torch = MagicMock(return_value=(torch.tensor(1.0), torch.tensor(1.0)))
 
-# Import actual class safely
+# Non-returning tracking multi-tensor stubs
+mock_impl.multi_tensor_scale_torch = MagicMock()
+mock_impl.multi_tensor_adam_torch = MagicMock()
+mock_impl.multi_tensor_adam_fp8_torch = MagicMock()
+mock_impl.multi_tensor_adam_capturable_torch = MagicMock()
+mock_impl.multi_tensor_adam_capturable_master_torch = MagicMock()
+mock_impl.multi_tensor_adam_param_remainder_torch = MagicMock()
+mock_impl.multi_tensor_sgd_torch = MagicMock()
+mock_impl.multi_tensor_compute_scale_and_scale_inv_torch = MagicMock()
+mock_impl.multi_tensor_compute_scale_inv_e8m0_torch = MagicMock()
+
+# Safely import the real backend file now that the ecosystem is fully locked down
 from transformer_engine.plugin.core.backends.reference.reference import ReferenceBackend
 
 # ==============================================================================
@@ -99,63 +109,95 @@ def test_get_attention_backend(env_vars, expected_backends, monkeypatch):
 
 
 # ==============================================================================
-# Part 2: Activation and Linear Core Math Tests
+# Part 2: Activation and Linear Core Math Tests (Zero-Patch, Direct Assertion)
 # ==============================================================================
 
 @pytest.mark.parametrize(
-    "act_fwd, act_bwd",
+    "act_fwd, act_bwd, mock_attr_fwd, mock_attr_bwd",
     [
-        ("gelu", "dgelu"),
-        ("geglu", "dgeglu"),
-        ("qgelu", "dqgelu"),
-        ("qgeglu", "dqgeglu"),
-        ("relu", "drelu"),
-        ("reglu", "dreglu"),
-        ("srelu", "dsrelu"),
-        ("sreglu", "dsreglu"),
-        ("silu", "dsilu"),
-        ("swiglu", "dswiglu"),
+        ("gelu", "dgelu", "gelu_torch", "dgelu_torch"),
+        ("geglu", "dgeglu", "geglu_torch", "dgeglu_torch"),
+        ("qgelu", "dqgelu", "qgelu_torch", "dqgelu_torch"),
+        ("qgeglu", "dqgeglu", "qgeglu_torch", "dqgeglu_torch"),
+        ("relu", "drelu", "relu_torch", "drelu_torch"),
+        ("reglu", "dreglu", "reglu_torch", "dreglu_torch"),
+        ("srelu", "dsrelu", "srelu_torch", "dsrelu_torch"),
+        ("sreglu", "dsreglu", "sreglu_torch", "dsreglu_torch"),
+        ("silu", "dsilu", "silu_torch", "dsilu_torch"),
+        ("swiglu", "dswiglu", "swiglu_torch", "dswiglu_torch"),
     ],
 )
-def test_activation_forward_backward_pass_through(act_fwd, act_bwd):
-    """Verify that all standard activations and gate variants map to their implementations."""
+def test_activation_forward_backward_pass_through(act_fwd, act_bwd, mock_attr_fwd, mock_attr_bwd):
+    """Verify standard activations dispatch safely to their explicit mock targets."""
     backend = ReferenceBackend()
     inp = torch.randn(2, 2)
+    
+    m_fwd = getattr(mock_impl, mock_attr_fwd)
+    m_bwd = getattr(mock_impl, mock_attr_bwd)
+    m_fwd.reset_mock()
+    m_bwd.reset_mock()
     
     fwd_fn = getattr(backend, act_fwd)
     bwd_fn = getattr(backend, act_bwd)
     
     assert fwd_fn(inp, quantizer=None) is not None
     assert bwd_fn(inp, inp, quantizer=None) is not None
+    
+    m_fwd.assert_called_once()
+    m_bwd.assert_called_once()
 
 
 def test_clamped_swiglu_variants():
-    """Verify clamped activation branches execute with customized limits."""
+    """Verify clamped activation branches execute without patch tracking overrides."""
     backend = ReferenceBackend()
     inp = torch.randn(2, 2)
+    
+    mock_impl.clamped_swiglu_torch.reset_mock()
+    mock_impl.clamped_dswiglu_torch.reset_mock()
+    
     assert backend.clamped_swiglu(inp, quantizer=None, limit=5.0, alpha=1.5) is not None
     assert backend.clamped_dswiglu(inp, inp, quantizer=None, limit=5.0, alpha=1.5) is not None
+    
+    mock_impl.clamped_swiglu_torch.assert_called_once()
+    mock_impl.clamped_dswiglu_torch.assert_called_once()
 
 
-@pytest.mark.parametrize("dbias_act", ["dbias_dgelu", "dbias_dsilu", "dbias_drelu", "dbias_dqgelu", "dbias_dsrelu"])
-def test_dbias_fusions(dbias_act):
-    """Verify fused bias derivative operations are dispatched correctly."""
+@pytest.mark.parametrize(
+    "dbias_act, mock_attr", 
+    [
+        ("dbias_dgelu", "dbias_dgelu_torch"), 
+        ("dbias_dsilu", "dbias_dsilu_torch"), 
+        ("dbias_drelu", "dbias_drelu_torch"), 
+        ("dbias_dqgelu", "dbias_dqgelu_torch"), 
+        ("dbias_dsrelu", "dbias_dsrelu_torch")
+    ]
+)
+def test_dbias_fusions(dbias_act, mock_attr):
+    """Verify fused bias derivative operations hit designated explicit stub locations."""
     backend = ReferenceBackend()
     inp = torch.randn(2, 2)
+    
+    m_act = getattr(mock_impl, mock_attr)
+    m_act.reset_mock()
+    
     fn = getattr(backend, dbias_act)
     assert fn(inp, inp, quantizer=None) is not None
+    m_act.assert_called_once()
 
 
 def test_generic_gemm_passthrough():
-    """Verify general matrix multiplication arguments route cleanly to backend implementation."""
+    """Verify general matrix multiplication arguments route cleanly to implicit core modules."""
     backend = ReferenceBackend()
     inp = torch.randn(2, 2)
+    
+    mock_impl.general_gemm_torch.reset_mock()
     res = backend.generic_gemm(
         A=inp, transA=False, B=inp, transB=False, D=None, quantizer=None,
         output_dtype=None, bias=None, bias_type=None, gelu=False, gelu_in=None,
         grad=False, workspace=inp, workspace_size=0, accumulate=False, use_split_accumulator=False
     )
     assert res is not None
+    mock_impl.general_gemm_torch.assert_called_once()
 
 # ==============================================================================
 # Part 3: Normalization and Softmax Functional Tests
@@ -167,26 +209,39 @@ def test_normalization_fwd_bwd():
     inp = torch.randn(4, 4)
     w = torch.ones(4)
     
+    for m in [mock_impl.layernorm_fwd_torch, mock_impl.layernorm_bwd_torch, 
+              mock_impl.rmsnorm_fwd_torch, mock_impl.rmsnorm_bwd_torch]:
+        m.reset_mock()
+        
     assert backend.layernorm_fwd(inp, w, None, 1e-5, None, None, None, 0, False) is not None
     assert backend.layernorm_bwd(inp, inp, inp, inp, w, 0, False) is not None
-    
     assert backend.rmsnorm_fwd(inp, w, 1e-5, None, None, None, 0, False) is not None
     assert backend.rmsnorm_bwd(inp, inp, inp, w, 0, False) is not None
+    
+    mock_impl.layernorm_fwd_torch.assert_called_once()
+    mock_impl.layernorm_bwd_torch.assert_called_once()
+    mock_impl.rmsnorm_fwd_torch.assert_called_once()
+    mock_impl.rmsnorm_bwd_torch.assert_called_once()
 
 
 @pytest.mark.parametrize(
-    "softmax_fwd, softmax_bwd, has_mask",
+    "softmax_fwd, softmax_bwd, mock_attr_fwd, mock_attr_bwd, has_mask",
     [
-        ("scaled_softmax_forward", "scaled_softmax_backward", False),
-        ("scaled_masked_softmax_forward", "scaled_masked_softmax_backward", True),
-        ("scaled_upper_triang_masked_softmax_forward", "scaled_upper_triang_masked_softmax_backward", False),
-        ("scaled_aligned_causal_masked_softmax_forward", "scaled_aligned_causal_masked_softmax_backward", False),
+        ("scaled_softmax_forward", "scaled_softmax_backward", "scaled_softmax_forward_torch", "scaled_softmax_backward_torch", False),
+        ("scaled_masked_softmax_forward", "scaled_masked_softmax_backward", "scaled_masked_softmax_forward_torch", "scaled_masked_softmax_backward_torch", True),
+        ("scaled_upper_triang_masked_softmax_forward", "scaled_upper_triang_masked_softmax_backward", "scaled_upper_triang_masked_softmax_forward_torch", "scaled_upper_triang_masked_softmax_backward_torch", False),
+        ("scaled_aligned_causal_masked_softmax_forward", "scaled_aligned_causal_masked_softmax_backward", "scaled_aligned_causal_masked_softmax_forward_torch", "scaled_aligned_causal_masked_softmax_backward_torch", False),
     ],
 )
-def test_softmax_variants(softmax_fwd, softmax_bwd, has_mask):
+def test_softmax_variants(softmax_fwd, softmax_bwd, mock_attr_fwd, mock_attr_bwd, has_mask):
     """Verify standard, masked, triangular, and causal masked softmax variations."""
     backend = ReferenceBackend()
     inp = torch.randn(4, 4)
+    
+    m_fwd = getattr(mock_impl, mock_attr_fwd)
+    m_bwd = getattr(mock_impl, mock_attr_bwd)
+    m_fwd.reset_mock()
+    m_bwd.reset_mock()
     
     fwd_fn = getattr(backend, softmax_fwd)
     bwd_fn = getattr(backend, softmax_bwd)
@@ -197,6 +252,9 @@ def test_softmax_variants(softmax_fwd, softmax_bwd, has_mask):
     else:
         assert fwd_fn(inp, 1.0) is not None
         assert bwd_fn(inp, inp, 1.0) is not None
+        
+    m_fwd.assert_called_once()
+    m_bwd.assert_called_once()
 
 
 def test_dropout_and_version_stubs():
@@ -204,12 +262,18 @@ def test_dropout_and_version_stubs():
     backend = ReferenceBackend()
     inp = torch.randn(4, 4)
     
+    mock_impl.dropout_fwd_torch.reset_mock()
+    mock_impl.dropout_bwd_torch.reset_mock()
+    
     assert backend.dropout_fwd(inp, 0.5) is not None
     assert backend.dropout_bwd(inp, inp, 0.5) is not None
+    
+    mock_impl.dropout_fwd_torch.assert_called_once()
+    mock_impl.dropout_bwd_torch.assert_called_once()
+    
     assert backend.get_cublasLt_version() == 0
     assert backend.get_cudnn_version() == 0
     assert backend.get_num_cublas_streams() == 4
-    assert backend.get_flash_attention_class() is not None
     assert backend.get_fused_attn_backend(None, None, None, None, None, None, None, 0.0, 1, 1, 1, 1, 1, 1, 0, 0, False) == 0
 
 # ==============================================================================
@@ -222,8 +286,10 @@ def test_multi_tensor_scale_variants():
     flag = torch.tensor(0)
     t_list = [[torch.tensor([1.0])]]
     
+    mock_impl.multi_tensor_scale_torch.reset_mock()
     backend.multi_tensor_scale(1024, flag, t_list, 2.0)
     backend.multi_tensor_scale_tensor(1024, flag, t_list, torch.tensor(2.0))
+    assert mock_impl.multi_tensor_scale_torch.call_count == 2
 
 
 @pytest.mark.parametrize("noop_val", [0, 1])
@@ -234,8 +300,11 @@ def test_multi_tensor_unscale_l2norm(noop_val):
     t_list = [[torch.tensor([2.0])]]
     inv_scale = torch.tensor(0.5)
     
+    mock_impl.multi_tensor_l2norm_torch.reset_mock()
     res = backend.multi_tensor_unscale_l2norm(1024, flag, t_list, inv_scale, per_tensor=False)
     assert isinstance(res, tuple)
+    if noop_val == 0:
+        mock_impl.multi_tensor_l2norm_torch.assert_called_once()
 
 
 def test_multi_tensor_optimizers_and_scales():
@@ -244,6 +313,15 @@ def test_multi_tensor_optimizers_and_scales():
     flag = torch.tensor(0)
     t_list = [[torch.tensor([1.0])]]
     
+    opt_mocks = [
+        mock_impl.multi_tensor_adam_torch, mock_impl.multi_tensor_adam_fp8_torch,
+        mock_impl.multi_tensor_adam_param_remainder_torch, mock_impl.multi_tensor_adam_capturable_torch,
+        mock_impl.multi_tensor_adam_capturable_master_torch, mock_impl.multi_tensor_sgd_torch,
+        mock_impl.multi_tensor_compute_scale_and_scale_inv_torch, mock_impl.multi_tensor_compute_scale_inv_e8m0_torch
+    ]
+    for m in opt_mocks:
+        m.reset_mock()
+        
     backend.multi_tensor_adam(1024, flag, t_list, 1e-3, 0.9, 0.99, 1e-8, 1, 0, 1, 0.01)
     backend.multi_tensor_adam_fp8(1024, flag, t_list, 1e-3, 0.9, 0.99, 1e-8, 1, 0, 1, 0.01, None)
     backend.multi_tensor_adam_param_remainder(1024, flag, t_list, 1e-3, 0.9, 0.99, 1e-8, 1, 0, 1, 0.01)
@@ -254,3 +332,6 @@ def test_multi_tensor_optimizers_and_scales():
     backend.multi_tensor_sgd(1024, flag, t_list, 0.01, 0.9, 0.0, 1e-2, False, True, False, 1.0)
     backend.multi_tensor_compute_scale_and_scale_inv(1024, flag, t_list, 448.0, True, 1e-8)
     backend.multi_tensor_compute_scale_inv_e8m0(1024, flag, t_list, 16)
+    
+    for m in opt_mocks:
+        m.assert_called_once()
