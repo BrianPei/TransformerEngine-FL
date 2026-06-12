@@ -207,15 +207,15 @@ run_test_step "pytest_test_fused_adam.xml" "$TE_PATH/tests/pytorch/test_fused_ad
 run_test_step "pytest_test_gemm.xml" "$TE_PATH/tests/pytorch/test_gemm.py" \
 "python3 -m pytest -s -v --tb=auto --junitxml=$XML_LOG_DIR/pytest_test_gemm.xml $TE_PATH/tests/pytorch/test_gemm.py" "test_gemm.py"
 
-# Step: Backend impl 
+# Step: Backend impl
 run_test_step "pytest_test_multi_tensor_unit.xml" "$TE_PATH/tests/pytorch/test_multi_tensor_unit.py" \
 "python3 -m pytest -s -v --tb=auto --junitxml=$XML_LOG_DIR/pytest_test_multi_tensor_unit.xml $TE_PATH/tests/pytorch/test_multi_tensor_unit.py" "test_multi_tensor_unit.py"
 
-# Step: Backend impl 
+# Step: Backend impl
 run_test_step "pytest_test_rmsnorm.xml" "$TE_PATH/tests/pytorch/test_rmsnorm.py" \
 "python3 -m pytest -s -v --tb=auto --junitxml=$XML_LOG_DIR/pytest_test_rmsnorm.xml $TE_PATH/tests/pytorch/test_rmsnorm.py" "test_rmsnorm.py"
 
-# Step: Backend impl 
+# Step: Backend impl
 run_test_step "pytest_test_softmax.xml" "$TE_PATH/tests/pytorch/test_softmax.py" \
 "python3 -m pytest -s -v --tb=auto --junitxml=$XML_LOG_DIR/pytest_test_softmax.xml $TE_PATH/tests/pytorch/test_softmax.py" "test_softmax.py"
 
