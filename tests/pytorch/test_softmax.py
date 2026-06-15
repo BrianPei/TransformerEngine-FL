@@ -11,9 +11,9 @@ mock_flag_gems = MagicMock()
 sys.modules["flag_gems"] = mock_flag_gems
 
 # Mock flag_gems operator behaviors to ensure operations and type conversions return smoothly to their PyTorch counterparts
-mock_flag_gems.to_copy = lambda x, *args, **kwargs: x.to(
-    kwargs.get("device", x.device)
-).to(kwargs.get("dtype", x.dtype))
+mock_flag_gems.to_copy = lambda x, *args, **kwargs: x.to(kwargs.get("device", x.device)).to(
+    kwargs.get("dtype", x.dtype)
+)
 mock_flag_gems.mul = lambda x, y, *args, **kwargs: x * (
     y.to(x.device) if isinstance(y, torch.Tensor) else y
 )
@@ -74,13 +74,13 @@ def test_scaled_masked_softmax_fwd_matrix(
 
     # Construct scale factor
     if scale_is_tensor:
-        scale_factor = torch.tensor(2.0, device=mask_device)  # Borrow different device to trigger corresponding code branch
+        scale_factor = torch.tensor(
+            2.0, device=mask_device
+        )  # Borrow different device to trigger corresponding code branch
     else:
         scale_factor = 2.0
 
-    out = scaled_masked_softmax_forward_fl(
-        input=inp, mask=mask, scale_factor=scale_factor
-    )
+    out = scaled_masked_softmax_forward_fl(input=inp, mask=mask, scale_factor=scale_factor)
 
     assert isinstance(out, torch.Tensor)
     assert out.shape == inp.shape

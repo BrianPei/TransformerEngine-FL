@@ -16,15 +16,13 @@ mock_flag_gems.add = lambda x, y, *args, **kwargs: x + y
 
 # Mock forward and backward core rms_norm operators to ensure returned Tensors match expected shapes
 def mock_rms_norm_forward(input_tensor, normalized_shape, weight, eps):
-    # Forward returns (y, rstdevs). Intentionally add an extra dimension to rstdevs 
+    # Forward returns (y, rstdevs). Intentionally add an extra dimension to rstdevs
     # to trigger the shape != view adjustment branch in the source code.
     y = input_tensor * weight
     # Construct a mismatched rstdevs shape (e.g., adding an extra dimension at the end)
     # to force triggering .view(input.shape[:-1])
     rstdevs_shape = list(input_tensor.shape[:-1]) + [1]
-    rstdevs = torch.ones(
-        rstdevs_shape, dtype=input_tensor.dtype, device=input_tensor.device
-    )
+    rstdevs = torch.ones(rstdevs_shape, dtype=input_tensor.dtype, device=input_tensor.device)
     return y, rstdevs
 
 

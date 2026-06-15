@@ -63,9 +63,7 @@ def test_l2_norm_standard_lifecycle(per_tensor):
 def test_l2_norm_noop_shortcircuit():
     """Verify that execution drops out instantly when noop_flag is active."""
     noop_flag = torch.tensor(1, dtype=torch.int32)
-    total_norm, per_tensor_res = multi_tensor_l2_norm_fl(
-        1024, noop_flag, [], per_tensor=False
-    )
+    total_norm, per_tensor_res = multi_tensor_l2_norm_fl(1024, noop_flag, [], per_tensor=False)
     assert total_norm.item() == 0.0
 
 

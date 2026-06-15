@@ -93,9 +93,7 @@ def test_attention_backend_env_matrix(
         mock_enum.NVTE_No_Backend = 0
         results = backend.get_attention_backend(attention_params=None)
 
-        use_flash, flash_ver, use_fused, fused_backend, use_unfused, avail_list = (
-            results
-        )
+        use_flash, flash_ver, use_fused, fused_backend, use_unfused, avail_list = results
 
         assert use_flash == int(env_flash)
         assert use_fused == int(env_fused)
@@ -120,9 +118,7 @@ def test_get_flash_attention_class_reflection():
         sys.modules[
             "transformer_engine.plugin.core.backends.flagos.attention.dot_product_attention.backends"
         ] = MagicMock()
-        with patch.object(
-            backend, "get_flash_attention_class", return_value=mock_class
-        ):
+        with patch.object(backend, "get_flash_attention_class", return_value=mock_class):
             resolved_class = backend.get_flash_attention_class()
             assert resolved_class == mock_class
 
@@ -275,9 +271,7 @@ def test_multi_tensor_fused_adam_optimizers():
         "transformer_engine.plugin.core.backends.flagos.flagos.multi_tensor_adam_param_remainder_fl",
         create=True,
     ) as mock_rem:
-        backend.multi_tensor_adam(
-            256, "flag", [["w"]], 0.001, 0.9, 0.99, 1e-8, 1, 0, 1, 0.01
-        )
+        backend.multi_tensor_adam(256, "flag", [["w"]], 0.001, 0.9, 0.99, 1e-8, 1, 0, 1, 0.01)
         assert mock_adam.called
 
         backend.multi_tensor_adam_param_remainder(

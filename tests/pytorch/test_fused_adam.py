@@ -49,9 +49,7 @@ def test_multi_tensor_adam_lifecycle(num_lists, mode, bias_correction):
     # Mock inputs: A structure of 4 or 5 tensor lists [g, p, m, v, (p_master)]
     tensor_lists = []
     for _ in range(num_lists):
-        tensor_lists.append(
-            [torch.randn(shape, dtype=torch.float32) for _ in range(num_tensors)]
-        )
+        tensor_lists.append([torch.randn(shape, dtype=torch.float32) for _ in range(num_tensors)])
 
     noop_flag = torch.tensor(0, dtype=torch.int32)
 
@@ -93,9 +91,7 @@ def test_multi_tensor_adam_exceptions():
 
     # Assert exception when no tensors are provided inside the structural lists
     with pytest.raises(AssertionError, match="No tensors provided"):
-        multi_tensor_adam_fl(
-            1024, noop_flag, [[], [], [], []], 0.01, 0.9, 0.99, 1e-8, 1, 0, 1, 0.0
-        )
+        multi_tensor_adam_fl(1024, noop_flag, [[], [], [], []], 0.01, 0.9, 0.99, 1e-8, 1, 0, 1, 0.0)
 
     # Assert exception when internal list lengths are inconsistent
     with pytest.raises(AssertionError, match="List 1 has 1 tensors, expected 2"):
@@ -105,9 +101,7 @@ def test_multi_tensor_adam_exceptions():
             [torch.randn(2)],
             [torch.randn(2)],
         ]
-        multi_tensor_adam_fl(
-            1024, noop_flag, tensor_lists, 0.01, 0.9, 0.99, 1e-8, 1, 0, 1, 0.0
-        )
+        multi_tensor_adam_fl(1024, noop_flag, tensor_lists, 0.01, 0.9, 0.99, 1e-8, 1, 0, 1, 0.0)
 
 
 # ==============================================================================

@@ -27,9 +27,7 @@ mock_flag_gems.mm = mock_mm_op
 mock_flag_gems.addmm = mock_mm_op
 mock_flag_gems.add_ = mock_inplace_op
 mock_flag_gems.copy_ = mock_inplace_op
-mock_flag_gems.sum_dim = lambda x, dim, *args, **kwargs: torch.zeros(
-    (x.shape[1],), dtype=x.dtype
-)
+mock_flag_gems.sum_dim = lambda x, dim, *args, **kwargs: torch.zeros((x.shape[1],), dtype=x.dtype)
 mock_flag_gems.zeros = lambda shape, *args, **kwargs: torch.zeros(shape)
 mock_flag_gems.gelu = lambda x, *args, **kwargs: x
 mock_flag_gems.gelu_backward = lambda x, y, *args, **kwargs: x
@@ -193,9 +191,7 @@ def test_generic_gemm_unsupported_features():
 
 def test_grouped_gemm_single_output_validation():
     """Verify assertion trigger when single_output is enabled without D allocated."""
-    with pytest.raises(
-        ValueError, match="D should be allocated for single output case."
-    ):
+    with pytest.raises(ValueError, match="D should be allocated for single output case."):
         te_general_grouped_gemm_fl(
             B=[],
             transb=False,
