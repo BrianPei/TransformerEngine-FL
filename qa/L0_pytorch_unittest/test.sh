@@ -224,6 +224,15 @@ run_test_step "pytest_test_softmax.xml" "$TE_PATH/tests/pytorch/test_softmax.py"
 run_test_step "pytest_reference.xml" "$TE_PATH/tests/pytorch/test_reference.py" \
 "python3 -m pytest -s -v --tb=auto --junitxml=$XML_LOG_DIR/pytest_reference.xml $TE_PATH/tests/pytorch/test_reference.py" "test_reference.py"
 
+run_test_step "pytest_reference_activation.xml" "$TE_PATH/tests/pytorch/test_reference_activation.py" \
+"python3 -m pytest -s -v --tb=auto --junitxml=$XML_LOG_DIR/pytest_reference_activation.xml $TE_PATH/tests/pytorch/test_reference_activation.py" "test_reference_activation.py"
+
+run_test_step "pytest_reference_dropout.xml" "$TE_PATH/tests/pytorch/test_reference_dropout.py" \
+"python3 -m pytest -s -v --tb=auto --junitxml=$XML_LOG_DIR/pytest_reference_dropout.xml $TE_PATH/tests/pytorch/test_reference_dropout.py" "test_reference_dropout.py"
+
+run_test_step "pytest_reference_gemm.xml" "$TE_PATH/tests/pytorch/test_reference_gemm.py" \
+"python3 -m pytest -s -v --tb=auto --junitxml=$XML_LOG_DIR/pytest_reference_gemm.xml $TE_PATH/tests/pytorch/test_reference_gemm.py" "test_reference_gemm.py"
+
 if [ "$FAIL" -ne 0 ]; then
     echo "Some tests failed."
     exit 1
