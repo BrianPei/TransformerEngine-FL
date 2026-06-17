@@ -50,3 +50,4 @@ qa/L1_pytorch_mcore_integration/output/
 *.distcp
 .coverage
 .coverage.*
+.coverage
