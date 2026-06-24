@@ -102,8 +102,6 @@ def test_dropout_bwd_standard_probability():
 
     # Case B: Computation directly assigned into preallocated grad_input targets
     grad_input_buffer = torch.empty_like(grad_out)
-    grad_in = dropout_bwd_torch(
-        grad_out, mask, dropout_probability=p, grad_input=grad_input_buffer
-    )
+    grad_in = dropout_bwd_torch(grad_out, mask, dropout_probability=p, grad_input=grad_input_buffer)
     assert torch.equal(grad_in, grad_input_buffer)
     assert torch.allclose(grad_input_buffer, expected_grad)

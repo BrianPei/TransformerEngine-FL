@@ -53,12 +53,8 @@ def test_gemm_standard_and_device_mismatch():
     # Since out = torch.mm(B_comp, A_comp), shapes are:
     # B_comp: (M, K) = (2, 3) -> B is (2, 3) with transB=False
     # A_comp: (K, N) = (3, 2) -> A is (2, 3) with transA=True
-    A = torch.tensor(
-        [[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]], dtype=torch.float32
-    )  # Shape (2, 3)
-    B = torch.tensor(
-        [[1.0, 0.0, 1.0], [0.0, 2.0, 1.0]], dtype=torch.float32
-    )  # Shape (2, 3)
+    A = torch.tensor([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]], dtype=torch.float32)  # Shape (2, 3)
+    B = torch.tensor([[1.0, 0.0, 1.0], [0.0, 2.0, 1.0]], dtype=torch.float32)  # Shape (2, 3)
 
     # Intentionally trigger Device Mismatch path (A on CPU, but B explicitly bound to CPU)
     # This fully exercises: if A.device != target_device: A = A.to(target_device)
@@ -152,12 +148,8 @@ def test_gemm_fp8_precision_downcast():
 
 def test_gemm_fusions_and_scaling():
     """Verify alpha scaling, bias broadcast addition, and dtype downcasting pipelines."""
-    A = torch.tensor(
-        [[2.0], [2.0]], dtype=torch.float32
-    )  # (2, 1) -> transA=False -> A_comp=(2, 1)
-    B = torch.tensor(
-        [[3.0, 4.0]], dtype=torch.float32
-    )  # (1, 2) -> transB=False -> B_comp=(1, 2)
+    A = torch.tensor([[2.0], [2.0]], dtype=torch.float32)  # (2, 1) -> transA=False -> A_comp=(2, 1)
+    B = torch.tensor([[3.0, 4.0]], dtype=torch.float32)  # (1, 2) -> transB=False -> B_comp=(1, 2)
     # torch.mm(B_comp, A_comp) -> (1, 2) x (2, 1) -> (1, 1) matrix [[14.0]]
 
     bias = torch.tensor([[1.0]], dtype=torch.float32)

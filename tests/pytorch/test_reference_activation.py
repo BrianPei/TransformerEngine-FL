@@ -40,16 +40,12 @@ from transformer_engine.plugin.core.backends.reference.impl.activation import (
 @pytest.fixture
 def standard_input():
     # Shape (2, 4) ensures .chunk(2, dim=-1) splits it into two (2, 2) tensors cleanly
-    return torch.tensor(
-        [[-1.0, 2.0, -3.0, 4.0], [5.0, -6.0, 7.0, -8.0]], dtype=torch.float32
-    )
+    return torch.tensor([[-1.0, 2.0, -3.0, 4.0], [5.0, -6.0, 7.0, -8.0]], dtype=torch.float32)
 
 
 @pytest.fixture
 def standard_grad():
-    return torch.tensor(
-        [[0.5, 1.5, 2.5, 3.5], [4.5, 5.5, 6.5, 7.5]], dtype=torch.float32
-    )
+    return torch.tensor([[0.5, 1.5, 2.5, 3.5], [4.5, 5.5, 6.5, 7.5]], dtype=torch.float32)
 
 
 # ==============================================================================
@@ -68,9 +64,7 @@ def test_basic_forwards(standard_input):
 
     # 2. GeGLU
     a, b = standard_input.chunk(2, dim=-1)
-    assert torch.allclose(
-        geglu_torch(standard_input, quantizer), F.gelu(a, approximate="tanh") * b
-    )
+    assert torch.allclose(geglu_torch(standard_input, quantizer), F.gelu(a, approximate="tanh") * b)
 
     # 3. Quick-GeLU (qgelu)
     assert torch.allclose(
@@ -79,9 +73,7 @@ def test_basic_forwards(standard_input):
     )
 
     # 4. Quick-GeGLU (qgeglu)
-    assert torch.allclose(
-        qgeglu_torch(standard_input, quantizer), a * torch.sigmoid(1.702 * a) * b
-    )
+    assert torch.allclose(qgeglu_torch(standard_input, quantizer), a * torch.sigmoid(1.702 * a) * b)
 
     # 5. ReLU & ReGLU
     assert torch.allclose(relu_torch(standard_input, quantizer), F.relu(standard_input))
@@ -91,9 +83,7 @@ def test_basic_forwards(standard_input):
     assert torch.allclose(
         srelu_torch(standard_input, quantizer), torch.square(F.relu(standard_input))
     )
-    assert torch.allclose(
-        sreglu_torch(standard_input, quantizer), torch.square(F.relu(a)) * b
-    )
+    assert torch.allclose(sreglu_torch(standard_input, quantizer), torch.square(F.relu(a)) * b)
 
     # 7. SiLU & SwiGLU
     assert torch.allclose(silu_torch(standard_input, quantizer), F.silu(standard_input))
@@ -140,40 +130,28 @@ def test_basic_backwards(standard_grad, standard_input):
     )
 
     # 3. dqgelu & dqgeglu
-    assert (
-        dqgelu_torch(standard_grad, standard_input, quantizer).shape
-        == standard_input.shape
-    )
+    assert dqgelu_torch(standard_grad, standard_input, quantizer).shape == standard_input.shape
     assert (
         dqgeglu_torch(standard_grad[..., :2], standard_input, quantizer).shape
         == standard_input.shape
     )
 
     # 4. drelu & dreglu
-    assert (
-        drelu_torch(standard_grad, standard_input, quantizer).shape
-        == standard_input.shape
-    )
+    assert drelu_torch(standard_grad, standard_input, quantizer).shape == standard_input.shape
     assert (
         dreglu_torch(standard_grad[..., :2], standard_input, quantizer).shape
         == standard_input.shape
     )
 
     # 5. dsrelu & dsreglu
-    assert (
-        dsrelu_torch(standard_grad, standard_input, quantizer).shape
-        == standard_input.shape
-    )
+    assert dsrelu_torch(standard_grad, standard_input, quantizer).shape == standard_input.shape
     assert (
         dsreglu_torch(standard_grad[..., :2], standard_input, quantizer).shape
         == standard_input.shape
     )
 
     # 6. dsilu & dswiglu
-    assert (
-        dsilu_torch(standard_grad, standard_input, quantizer).shape
-        == standard_input.shape
-    )
+    assert dsilu_torch(standard_grad, standard_input, quantizer).shape == standard_input.shape
     assert (
         dswiglu_torch(standard_grad[..., :2], standard_input, quantizer).shape
         == standard_input.shape
