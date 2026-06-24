@@ -2,6 +2,9 @@
 #
 # See LICENSE for license information.
 
+import os
+
+import pytest
 import torch
 from transformer_engine.pytorch import Float8Tensor, Float8Quantizer
 
@@ -13,6 +16,12 @@ try:
 except (ImportError, ModuleNotFoundError):
     print("Could not find TransformerEngine package.")
     exit(1)
+
+
+_skip_metax_quantize = pytest.mark.skipif(
+    os.environ.get("PLATFORM") == "metax",
+    reason="FP8 quantize requires NVRTC CUDA headers that are unavailable on MetaX CI",
+)
 
 
 def test_transformer_engine_no_config(feature_dirs):
@@ -222,6 +231,7 @@ def test_fake_quant(configs_dir, feature_dirs):
         debug_api.end_debug()
 
 
+@_skip_metax_quantize
 def test_statistics_collection(configs_dir, feature_dirs):
     try:
         debug_api.initialize(
@@ -347,6 +357,7 @@ def test_statistics_collection(configs_dir, feature_dirs):
         debug_api.end_debug()
 
 
+@_skip_metax_quantize
 def test_statistics_multi_run(configs_dir, feature_dirs):
     try:
         debug_api.initialize(

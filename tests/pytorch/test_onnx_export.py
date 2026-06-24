@@ -67,6 +67,11 @@ TESTS_DIR = os.path.dirname(os.path.abspath(__file__))
 
 fp8_available, reason_for_no_fp8 = te.is_fp8_available(return_reason=True)
 mxfp8_available, reason_for_no_mxfp8 = te.is_mxfp8_available(return_reason=True)
+_is_metax = os.environ.get("PLATFORM") == "metax"
+_skip_metax_onnx_baddbmm = pytest.mark.skipif(
+    _is_metax,
+    reason="MetaX mcPytorch ONNX exporter cannot decompose aten.baddbmm with symbolic dims",
+)
 
 fp8_recipes = []
 if mxfp8_available:
@@ -445,8 +450,8 @@ def _test_export_linear(
                 params_dtype=precision,
             )
 
-        def forward(self, inp):
-            ret = self.linear(inp)
+        def forward(self, input):
+            ret = self.linear(input)
             return ret
 
     inp = torch.randn(batch_size, hidden_size, in_features, device="cuda", dtype=precision)
@@ -465,7 +470,7 @@ def _test_export_linear(
             inp,
             fname,
             fp8_recipe,
-            dynamic_shapes={"inp": {0: bs}},
+            dynamic_shapes={"input": {0: bs}},
         )
         te_outputs = te_infer(model, inp, is_fp8=fp8_recipe is not None, fp8_recipe=fp8_recipe)
         serialize_inputs_outputs(fname, inp, te_outputs)
@@ -1016,22 +1021,27 @@ def _test_export_multihead_attention(
 
 @pytest.mark.parametrize("fp8_recipe", fp8_recipes)
 @pytest.mark.parametrize("precision", [torch.float32, torch.float16, torch.bfloat16])
+@_skip_metax_onnx_baddbmm
 def test_export_multihead_attention_recipe(fp8_recipe, precision):
     _test_export_multihead_attention(fp8_recipe=fp8_recipe, precision=precision)
 
 
+@_skip_metax_onnx_baddbmm
 def test_export_multihead_attention_no_mask():
     _test_export_multihead_attention(use_mask=False)
 
 
+@_skip_metax_onnx_baddbmm
 def test_export_multihead_attention_no_input_layernorm():
     _test_export_multihead_attention(input_layernorm=False)
 
 
+@_skip_metax_onnx_baddbmm
 def test_export_multihead_attention_cross_attn():
     _test_export_multihead_attention(attention_type="cross")
 
 
+@_skip_metax_onnx_baddbmm
 def test_export_multihead_attention_unfused_qkv_params():
     _test_export_multihead_attention(fuse_qkv_params=False)
 
@@ -1139,6 +1149,7 @@ def test_export_transformer_layer_activation(activation):
 
 @pytest.mark.parametrize("fp8_recipe", fp8_recipes)
 @pytest.mark.parametrize("precision", [torch.float16, torch.bfloat16])
+@_skip_metax_onnx_baddbmm
 def test_export_gpt_generation(
     fp8_recipe: recipe.Recipe,
     precision: torch.dtype,
