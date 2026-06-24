@@ -12,6 +12,7 @@ from transformer_engine.plugin.core.backends.reference.impl.gemm import (
 # Part 1: Internal Helper & Data Type Converter Tests
 # ==============================================================================
 
+
 def test_convert_dtype_variants():
     """Verify all internal _convert_dtype dictionary mappings and fallback paths."""
     # Test None input
@@ -41,6 +42,7 @@ def test_convert_dtype_variants():
 # ==============================================================================
 # Part 2: Matrix Multiplication (GEMM) Core & Shape Transformation Tests
 # ==============================================================================
+
 
 def test_gemm_standard_and_device_mismatch():
     """Test standard 2D GEMM execution along with implicit device synchronization."""
@@ -146,6 +148,7 @@ def test_gemm_fp8_precision_downcast():
 # ==============================================================================
 # Part 3: Math Fusions, Output Conversions & Buffers Tests
 # ==============================================================================
+
 
 def test_gemm_fusions_and_scaling():
     """Verify alpha scaling, bias broadcast addition, and dtype downcasting pipelines."""

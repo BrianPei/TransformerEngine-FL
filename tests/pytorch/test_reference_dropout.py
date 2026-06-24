@@ -11,6 +11,7 @@ from transformer_engine.plugin.core.backends.reference.impl.dropout import (
 # Part 1: Forward Dropout Tests (Checking Probabilities and Out In-place Buffers)
 # ==============================================================================
 
+
 def test_dropout_fwd_zero_probability():
     """Verify forward pass logic when dropout probability is exactly 0.0."""
     inp = torch.tensor([[1.0, 2.0], [3.0, 4.0]], dtype=torch.float32)
@@ -34,7 +35,9 @@ def test_dropout_fwd_zero_probability():
 
 def test_dropout_fwd_standard_probability():
     """Verify bernoulli masking, global scale, and out-buffer copy under active dropout."""
-    inp = torch.ones((10, 10), dtype=torch.float32)  # Larger tensor to ensure statistical robustness
+    inp = torch.ones(
+        (10, 10), dtype=torch.float32
+    )  # Larger tensor to ensure statistical robustness
     p = 0.2
     expected_scale = 1.0 / (1.0 - p)
 
@@ -60,6 +63,7 @@ def test_dropout_fwd_standard_probability():
 # Part 2: Backward Dropout Tests (Verifying Gradients and In-place Buffers)
 # ==============================================================================
 
+
 def test_dropout_bwd_zero_probability():
     """Verify backward gradient scaling rules when dropout probability is 0.0."""
     grad_out = torch.tensor([[0.5, 1.5], [2.5, 3.5]], dtype=torch.float32)
@@ -80,6 +84,7 @@ def test_dropout_bwd_zero_probability():
         grad_input_buffer, torch.zeros_like(grad_out)
     )  # Remains zeros due to operator implementation detail
 
+
 def test_dropout_bwd_standard_probability():
     """Verify backward gradient routes scale factors based on forward masks."""
     grad_out = torch.tensor([[2.0, 4.0], [6.0, 8.0]], dtype=torch.float32)
@@ -97,6 +102,8 @@ def test_dropout_bwd_standard_probability():
 
     # Case B: Computation directly assigned into preallocated grad_input targets
     grad_input_buffer = torch.empty_like(grad_out)
-    grad_in = dropout_bwd_torch(grad_out, mask, dropout_probability=p, grad_input=grad_input_buffer)
+    grad_in = dropout_bwd_torch(
+        grad_out, mask, dropout_probability=p, grad_input=grad_input_buffer
+    )
     assert torch.equal(grad_in, grad_input_buffer)
     assert torch.allclose(grad_input_buffer, expected_grad)

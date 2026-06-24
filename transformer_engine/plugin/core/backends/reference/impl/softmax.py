@@ -33,12 +33,11 @@ def scaled_softmax_backward_torch(
     softmax_output_f32 = softmax_output.float()
 
     grad_softmax = softmax_output_f32 * (
-        output_grad_f32 - (softmax_output_f32 * output_grad_f32).sum(dim=-1, keepdim=True)
+        output_grad_f32
+        - (softmax_output_f32 * output_grad_f32).sum(dim=-1, keepdim=True)
     )
 
     return (grad_softmax * scale).to(orig_dtype)
-
-
 
 
 def scaled_masked_softmax_forward_torch(
@@ -88,7 +87,8 @@ def scaled_masked_softmax_backward_torch(
     softmax_output_f32 = softmax_output.float()
 
     grad_softmax = softmax_output_f32 * (
-        output_grad_f32 - (softmax_output_f32 * output_grad_f32).sum(dim=-1, keepdim=True)
+        output_grad_f32
+        - (softmax_output_f32 * output_grad_f32).sum(dim=-1, keepdim=True)
     )
 
     return (grad_softmax * scale).to(orig_dtype)
@@ -101,7 +101,9 @@ def scaled_upper_triang_masked_softmax_forward_torch(
     seq_len = input.size(-1)
 
     causal_mask = torch.triu(
-        torch.full((seq_len, seq_len), float("-inf"), device=input.device, dtype=input.dtype),
+        torch.full(
+            (seq_len, seq_len), float("-inf"), device=input.device, dtype=input.dtype
+        ),
         diagonal=1,
     )
 
@@ -121,7 +123,8 @@ def scaled_upper_triang_masked_softmax_backward_torch(
     softmax_output_f32 = softmax_output.float()
 
     grad_softmax = softmax_output_f32 * (
-        output_grad_f32 - (softmax_output_f32 * output_grad_f32).sum(dim=-1, keepdim=True)
+        output_grad_f32
+        - (softmax_output_f32 * output_grad_f32).sum(dim=-1, keepdim=True)
     )
 
     return (grad_softmax * scale).to(orig_dtype)
@@ -145,7 +148,8 @@ def scaled_aligned_causal_masked_softmax_backward_torch(
     softmax_output_f32 = softmax_output.float()
 
     grad_softmax = softmax_output_f32 * (
-        output_grad_f32 - (softmax_output_f32 * output_grad_f32).sum(dim=-1, keepdim=True)
+        output_grad_f32
+        - (softmax_output_f32 * output_grad_f32).sum(dim=-1, keepdim=True)
     )
 
     return (grad_softmax * scale).to(orig_dtype)

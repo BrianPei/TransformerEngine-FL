@@ -33,6 +33,7 @@ from transformer_engine.plugin.core.backends.reference.impl.activation import (
     dbias_dsrelu_torch,
 )
 
+
 # ==============================================================================
 # Helper / General Fixtures
 # ==============================================================================
@@ -54,6 +55,7 @@ def standard_grad():
 # ==============================================================================
 # Part 1: Forward Activation Tests (Using Real Math Verification)
 # ==============================================================================
+
 
 def test_basic_forwards(standard_input):
     quantizer = None
@@ -89,7 +91,9 @@ def test_basic_forwards(standard_input):
     assert torch.allclose(
         srelu_torch(standard_input, quantizer), torch.square(F.relu(standard_input))
     )
-    assert torch.allclose(sreglu_torch(standard_input, quantizer), torch.square(F.relu(a)) * b)
+    assert torch.allclose(
+        sreglu_torch(standard_input, quantizer), torch.square(F.relu(a)) * b
+    )
 
     # 7. SiLU & SwiGLU
     assert torch.allclose(silu_torch(standard_input, quantizer), F.silu(standard_input))
@@ -116,9 +120,11 @@ def test_clamped_swiglu_forward_boundaries():
     # Assert with matching shapes, both are now (2, 1)
     assert torch.allclose(res, expected_out)
 
+
 # ==============================================================================
 # Part 2: Backward Gradient Tests (Autograd Consistency Verification)
 # ==============================================================================
+
 
 def test_basic_backwards(standard_grad, standard_input):
     quantizer = None
@@ -134,28 +140,40 @@ def test_basic_backwards(standard_grad, standard_input):
     )
 
     # 3. dqgelu & dqgeglu
-    assert dqgelu_torch(standard_grad, standard_input, quantizer).shape == standard_input.shape
+    assert (
+        dqgelu_torch(standard_grad, standard_input, quantizer).shape
+        == standard_input.shape
+    )
     assert (
         dqgeglu_torch(standard_grad[..., :2], standard_input, quantizer).shape
         == standard_input.shape
     )
 
     # 4. drelu & dreglu
-    assert drelu_torch(standard_grad, standard_input, quantizer).shape == standard_input.shape
+    assert (
+        drelu_torch(standard_grad, standard_input, quantizer).shape
+        == standard_input.shape
+    )
     assert (
         dreglu_torch(standard_grad[..., :2], standard_input, quantizer).shape
         == standard_input.shape
     )
 
     # 5. dsrelu & dsreglu
-    assert dsrelu_torch(standard_grad, standard_input, quantizer).shape == standard_input.shape
+    assert (
+        dsrelu_torch(standard_grad, standard_input, quantizer).shape
+        == standard_input.shape
+    )
     assert (
         dsreglu_torch(standard_grad[..., :2], standard_input, quantizer).shape
         == standard_input.shape
     )
 
     # 6. dsilu & dswiglu
-    assert dsilu_torch(standard_grad, standard_input, quantizer).shape == standard_input.shape
+    assert (
+        dsilu_torch(standard_grad, standard_input, quantizer).shape
+        == standard_input.shape
+    )
     assert (
         dswiglu_torch(standard_grad[..., :2], standard_input, quantizer).shape
         == standard_input.shape
@@ -182,6 +200,7 @@ def test_clamped_dswiglu_backward_branches():
 # ==============================================================================
 # Part 3: Fused Bias Derivative Tests (dbias_* Variants)
 # ==============================================================================
+
 
 @pytest.mark.parametrize(
     "dbias_fn",
