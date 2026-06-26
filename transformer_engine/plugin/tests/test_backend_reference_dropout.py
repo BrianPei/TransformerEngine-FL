@@ -1,4 +1,4 @@
-# tests/pytorch/test_reference_dropout.py
+# transformer_engine/plugin/tests/test_backend_reference_dropout.py
 import pytest
 import torch
 

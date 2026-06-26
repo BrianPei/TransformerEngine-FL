@@ -1,4 +1,4 @@
-# tests/pytorch/test_reference_activation.py
+# transformer_engine/plugin/tests/test_backend_reference_activation.py
 import pytest
 import torch
 import torch.nn.functional as F

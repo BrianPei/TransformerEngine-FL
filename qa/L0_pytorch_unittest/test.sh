@@ -181,14 +181,15 @@ run_test_step "pytest_test_checkpoint.xml" "$TE_PATH/tests/pytorch/test_checkpoi
 # ==============================================================================
 # New Step: Plugin Core
 # ==============================================================================
+PLUGIN_TEST_ROOT="$TE_PATH/transformer_engine/plugin/tests"
 
 # Step: Plugin Policy
-run_test_step "pytest_test_plugin_policy.xml" "$TE_PATH/tests/pytorch/test_plugin_policy.py" \
-"python3 -m pytest -s -v --tb=auto --junitxml=$XML_LOG_DIR/pytest_test_plugin_policy.xml $TE_PATH/tests/pytorch/test_plugin_policy.py" "test_plugin_policy.py"
+run_test_step "pytest_test_plugin_policy.xml" "$PLUGIN_TEST_ROOT/test_plugin_policy.py" \
+"python3 -m pytest -s -v --tb=auto --junitxml=$XML_LOG_DIR/pytest_test_plugin_policy.xml $PLUGIN_TEST_ROOT/test_plugin_policy.py" "test_plugin_policy.py"
 
 # Step: Plugin manager
-run_test_step "pytest_test_plugin_manager.xml" "$TE_PATH/tests/pytorch/test_plugin_manager.py" \
-"python3 -m pytest -s -v --tb=auto --junitxml=$XML_LOG_DIR/pytest_test_plugin_manager.xml $TE_PATH/tests/pytorch/test_plugin_manager.py" "test_plugin_manager.py"
+run_test_step "pytest_test_plugin_manager.xml" "$PLUGIN_TEST_ROOT/test_plugin_manager.py" \
+"python3 -m pytest -s -v --tb=auto --junitxml=$XML_LOG_DIR/pytest_test_plugin_manager.xml $PLUGIN_TEST_ROOT/test_plugin_manager.py" "test_plugin_manager.py"
 
 
 # ==============================================================================
@@ -196,42 +197,42 @@ run_test_step "pytest_test_plugin_manager.xml" "$TE_PATH/tests/pytorch/test_plug
 # ==============================================================================
 
 # Step: Backend flagos =========================================================
-run_test_step "pytest_test_backend_flagos.xml" "$TE_PATH/tests/pytorch/test_backend_flagos.py" \
-"python3 -m pytest -s -v --tb=auto --junitxml=$XML_LOG_DIR/pytest_test_backend_flagos.xml $TE_PATH/tests/pytorch/test_backend_flagos.py" "test_backend_flagos.py"
+run_test_step "pytest_test_backend_flagos.xml" "$PLUGIN_TEST_ROOT/test_backend_flagos.py" \
+"python3 -m pytest -s -v --tb=auto --junitxml=$XML_LOG_DIR/pytest_test_backend_flagos.xml $PLUGIN_TEST_ROOT/test_backend_flagos.py" "test_backend_flagos.py"
 
 # Step: Backend impl fused adam
-run_test_step "pytest_test_fused_adam.xml" "$TE_PATH/tests/pytorch/test_fused_adam.py" \
-"python3 -m pytest -s -v --tb=auto --junitxml=$XML_LOG_DIR/pytest_test_fused_adam.xml $TE_PATH/tests/pytorch/test_fused_adam.py" "test_fused_adam.py"
+run_test_step "pytest_test_backend_flagos_fused_adam.xml" "$PLUGIN_TEST_ROOT/test_backend_flagos_fused_adam.py" \
+"python3 -m pytest -s -v --tb=auto --junitxml=$XML_LOG_DIR/pytest_test_backend_flagos_fused_adam.xml $PLUGIN_TEST_ROOT/test_backend_flagos_fused_adam.py" "test_backend_flagos_fused_adam.py"
 
 # Step: Backend impl gemm
-run_test_step "pytest_test_gemm.xml" "$TE_PATH/tests/pytorch/test_gemm.py" \
-"python3 -m pytest -s -v --tb=auto --junitxml=$XML_LOG_DIR/pytest_test_gemm.xml $TE_PATH/tests/pytorch/test_gemm.py" "test_gemm.py"
+run_test_step "pytest_test_backend_flagos_gemm.xml" "$PLUGIN_TEST_ROOT/test_backend_flagos_gemm.py" \
+"python3 -m pytest -s -v --tb=auto --junitxml=$XML_LOG_DIR/pytest_test_backend_flagos_gemm.xml $PLUGIN_TEST_ROOT/test_backend_flagos_gemm.py" "test_backend_flagos_gemm.py"
 
 # Step: Backend impl multi_tensor
-run_test_step "pytest_test_multi_tensor_unit.xml" "$TE_PATH/tests/pytorch/test_multi_tensor_unit.py" \
-"python3 -m pytest -s -v --tb=auto --junitxml=$XML_LOG_DIR/pytest_test_multi_tensor_unit.xml $TE_PATH/tests/pytorch/test_multi_tensor_unit.py" "test_multi_tensor_unit.py"
+run_test_step "pytest_test_backend_flagos_multi_tensor.xml" "$PLUGIN_TEST_ROOT/test_backend_flagos_multi_tensor.py" \
+"python3 -m pytest -s -v --tb=auto --junitxml=$XML_LOG_DIR/pytest_test_backend_flagos_multi_tensor.xml $PLUGIN_TEST_ROOT/test_backend_flagos_multi_tensor.py" "test_backend_flagos_multi_tensor.py"
 
 # Step: Backend impl rmsnorm
-run_test_step "pytest_test_rmsnorm.xml" "$TE_PATH/tests/pytorch/test_rmsnorm.py" \
-"python3 -m pytest -s -v --tb=auto --junitxml=$XML_LOG_DIR/pytest_test_rmsnorm.xml $TE_PATH/tests/pytorch/test_rmsnorm.py" "test_rmsnorm.py"
+run_test_step "pytest_test_backend_flagos_rmsnorm.xml" "$PLUGIN_TEST_ROOT/test_backend_flagos_rmsnorm.py" \
+"python3 -m pytest -s -v --tb=auto --junitxml=$XML_LOG_DIR/pytest_test_backend_flagos_rmsnorm.xml $PLUGIN_TEST_ROOT/test_backend_flagos_rmsnorm.py" "test_backend_flagos_rmsnorm.py"
 
 # Step: Backend impl softmax
-run_test_step "pytest_test_softmax.xml" "$TE_PATH/tests/pytorch/test_softmax.py" \
-"python3 -m pytest -s -v --tb=auto --junitxml=$XML_LOG_DIR/pytest_test_softmax.xml $TE_PATH/tests/pytorch/test_softmax.py" "test_softmax.py"
+run_test_step "pytest_test_backend_flagos_softmax.xml" "$PLUGIN_TEST_ROOT/test_backend_flagos_softmax.py" \
+"python3 -m pytest -s -v --tb=auto --junitxml=$XML_LOG_DIR/pytest_test_backend_flagos_softmax.xml $PLUGIN_TEST_ROOT/test_backend_flagos_softmax.py" "test_backend_flagos_softmax.py"
 
 
 # Step: Backend reference =========================================================
-run_test_step "pytest_reference.xml" "$TE_PATH/tests/pytorch/test_reference.py" \
-"python3 -m pytest -s -v --tb=auto --junitxml=$XML_LOG_DIR/pytest_reference.xml $TE_PATH/tests/pytorch/test_reference.py" "test_reference.py"
+run_test_step "pytest_test_backend_reference.xml" "$PLUGIN_TEST_ROOT/test_backend_reference.py" \
+"python3 -m pytest -s -v --tb=auto --junitxml=$XML_LOG_DIR/pytest_test_backend_reference.xml $PLUGIN_TEST_ROOT/test_backend_reference.py" "test_backend_reference.py"
 
-run_test_step "pytest_reference_activation.xml" "$TE_PATH/tests/pytorch/test_reference_activation.py" \
-"python3 -m pytest -s -v --tb=auto --junitxml=$XML_LOG_DIR/pytest_reference_activation.xml $TE_PATH/tests/pytorch/test_reference_activation.py" "test_reference_activation.py"
+run_test_step "pytest_test_backend_reference_activation.xml" "$PLUGIN_TEST_ROOT/test_backend_reference_activation.py" \
+"python3 -m pytest -s -v --tb=auto --junitxml=$XML_LOG_DIR/pytest_test_backend_reference_activation.xml $PLUGIN_TEST_ROOT/test_backend_reference_activation.py" "test_backend_reference_activation.py"
 
-run_test_step "pytest_reference_dropout.xml" "$TE_PATH/tests/pytorch/test_reference_dropout.py" \
-"python3 -m pytest -s -v --tb=auto --junitxml=$XML_LOG_DIR/pytest_reference_dropout.xml $TE_PATH/tests/pytorch/test_reference_dropout.py" "test_reference_dropout.py"
+run_test_step "pytest_test_backend_reference_dropout.xml" "$PLUGIN_TEST_ROOT/test_backend_reference_dropout.py" \
+"python3 -m pytest -s -v --tb=auto --junitxml=$XML_LOG_DIR/pytest_test_backend_reference_dropout.xml $PLUGIN_TEST_ROOT/test_backend_reference_dropout.py" "test_backend_reference_dropout.py"
 
-run_test_step "pytest_reference_gemm.xml" "$TE_PATH/tests/pytorch/test_reference_gemm.py" \
-"python3 -m pytest -s -v --tb=auto --junitxml=$XML_LOG_DIR/pytest_reference_gemm.xml $TE_PATH/tests/pytorch/test_reference_gemm.py" "test_reference_gemm.py"
+run_test_step "pytest_test_backend_reference_gemm.xml" "$PLUGIN_TEST_ROOT/test_backend_reference_gemm.py" \
+"python3 -m pytest -s -v --tb=auto --junitxml=$XML_LOG_DIR/pytest_test_backend_reference_gemm.xml $PLUGIN_TEST_ROOT/test_backend_reference_gemm.py" "test_backend_reference_gemm.py"
 
 if [ "$FAIL" -ne 0 ]; then
     echo "Some tests failed."
