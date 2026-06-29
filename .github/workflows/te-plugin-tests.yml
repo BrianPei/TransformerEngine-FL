@@ -101,7 +101,12 @@ jobs:
           source /opt/miniconda3/etc/profile.d/conda.sh
           conda activate flagscale-train
 
-          # Execute tests (optimized parameters with enhanced output and error capture)
-          torchrun --nproc_per_node=8 -m pytest -q -x -p no:warnings transformer_engine/plugin/tests
+          # Execute each plugin test file in a fresh Python process. Several plugin tests
+          # install MagicMock modules into sys.modules, so a single pytest process can leak
+          # mocked dependencies across files and produce order-dependent failures.
+          for test_file in transformer_engine/plugin/tests/test_*.py; do
+            echo "=== Running ${test_file} ==="
+            python3 -m pytest -q -x -p no:warnings "${test_file}"
+          done
 
           echo "=== All Plugin Tests Completed Successfully ==="

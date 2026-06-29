@@ -33,6 +33,7 @@ run_test_step() {
             *"test_gqa.py" | \
             *"test_fused_optimizer.py" | \
             *"test_multi_tensor.py" | \
+            *"test_backend_reference.py" | \
             *"test_cpu_offloading.py" | \
             *"test_cpu_offloading_v1.py" | \
             *"test_attention.py" | \
