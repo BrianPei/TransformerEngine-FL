@@ -5,6 +5,51 @@ from unittest.mock import MagicMock
 import pytest
 import torch
 
+_MISSING = object()
+_MOCKED_MODULE_NAMES = (
+    "transformer_engine.plugin.core.ops",
+    "transformer_engine.plugin.core.backends.reference.impl",
+    "transformer_engine.plugin.core.backends.reference.reference",
+    "transformer_engine.plugin.core.backends.reference",
+)
+
+
+def _get_parent_attr(module_name):
+    parent_name, _, attr_name = module_name.rpartition(".")
+    parent_module = sys.modules.get(parent_name)
+    if parent_module is None:
+        return None
+    return parent_module, attr_name, getattr(parent_module, attr_name, _MISSING)
+
+
+_SAVED_MODULES = {
+    module_name: sys.modules.get(module_name, _MISSING) for module_name in _MOCKED_MODULE_NAMES
+}
+_SAVED_PARENT_ATTRS = {
+    module_name: _get_parent_attr(module_name) for module_name in _MOCKED_MODULE_NAMES
+}
+
+for module_name in _MOCKED_MODULE_NAMES:
+    sys.modules.pop(module_name, None)
+
+
+def _restore_import_state():
+    for module_name, module in _SAVED_MODULES.items():
+        if module is _MISSING:
+            sys.modules.pop(module_name, None)
+        else:
+            sys.modules[module_name] = module
+
+    for saved_attr in _SAVED_PARENT_ATTRS.values():
+        if saved_attr is None:
+            continue
+        parent_module, attr_name, attr_value = saved_attr
+        if attr_value is _MISSING:
+            if hasattr(parent_module, attr_name):
+                delattr(parent_module, attr_name)
+        else:
+            setattr(parent_module, attr_name, attr_value)
+
 # ==============================================================================
 # Part 0: High-Reliability Environment Isolation & Explicit Function Mocking
 # ==============================================================================
@@ -105,7 +150,10 @@ mock_impl.multi_tensor_compute_scale_and_scale_inv_torch = MagicMock()
 mock_impl.multi_tensor_compute_scale_inv_e8m0_torch = MagicMock()
 
 # Safely import the real backend file now that the ecosystem is fully locked down
-from transformer_engine.plugin.core.backends.reference.reference import ReferenceBackend
+try:
+    from transformer_engine.plugin.core.backends.reference.reference import ReferenceBackend
+finally:
+    _restore_import_state()
 
 # ==============================================================================
 # Part 1: Availability and Attention Routing Tests
