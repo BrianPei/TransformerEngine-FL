@@ -24,6 +24,14 @@ try:
 except Exception as e:
     pass
 
+# Apply NPU (VENDOR) Patches, such as torch.cuda.device -> torch_npu.npu.device
+try:
+    from .plugin.core.backends.vendor.npu.patches import apply_patch as _npu_apply_patch
+
+    _npu_apply_patch()
+except Exception as e:
+    pass
+
 
 def te_device_type(default: str = "cuda") -> str:
     try:
