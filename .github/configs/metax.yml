@@ -29,14 +29,14 @@ container_volumes:
 
 # Container options
 container_options: >-
-  --uts=host
+  --hostname=te_cicd
   --ipc=host
   --privileged=true
-  --group-add video
   --shm-size=100gb
   --ulimit memlock=-1
   --user root
   --ulimit nofile=65535:65535
+  --group-add video
   -e PLATFORM=metax
   -e TORCH_DISTRIBUTED_BACKEND=mccl
   -e LD_LIBRARY_PATH=/opt/maca/lib:/usr/local/lib:$LD_LIBRARY_PATH

@@ -2,10 +2,9 @@
 #
 # See LICENSE for license information.
 
-function error_exit() {
-    echo "Error: $1"
-    exit 1
-}
+
+pip3 install onnxruntime
+pip3 install onnxruntime_extensions
 
 : ${TE_PATH:=/opt/transformerengine}
 : ${XML_LOG_DIR:=/logs}

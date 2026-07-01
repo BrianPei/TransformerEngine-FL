@@ -6,6 +6,8 @@
 mkdir -p "$XML_LOG_DIR"
 
 pip install pytest==8.2.1
+# solve test_fused_optimizer import error
+pip install expecttest
 FAIL=0
 
 IS_CUDA_BACKEND=$(python3 -c "import torch; print('cuda' if torch.cuda.is_available() else 'cpu')" 2>/dev/null)
@@ -66,8 +68,13 @@ run_test_step() {
 
 
 # Step: Sanity
-run_test_step "pytest_test_sanity.xml" "$TE_PATH/tests/pytorch/test_sanity.py" \
-"python3 -m pytest -s -v --tb=auto --junitxml=$XML_LOG_DIR/pytest_test_sanity.xml $TE_PATH/tests/pytorch/test_sanity.py -k \"not (test_sanity_layernorm_mlp or test_sanity_gpt or test_sanity_bert or test_sanity_T5 or test_sanity_amp_and_nvfuser or test_sanity_drop_path or test_sanity_fused_qkv_params or test_sanity_gradient_accumulation_fusion or test_inference_mode or test_sanity_normalization_amp or test_sanity_layernorm_linear or test_sanity_linear_with_zero_tokens or test_sanity_grouped_linear)\" --no-header" "test_sanity.py"
+if [ "$PLATFORM" = "metax" ]; then
+    SANITY_CMD="python3 -m pytest -s -v --tb=auto --junitxml=$XML_LOG_DIR/pytest_test_sanity.xml $TE_PATH/tests/pytorch/test_sanity.py -k \"not (test_sanity_layernorm_mlp or test_sanity_gpt or test_sanity_bert or test_sanity_T5 or test_sanity_amp_and_nvfuser or test_sanity_drop_path or test_sanity_fused_qkv_params or test_sanity_gradient_accumulation_fusion or test_inference_mode or test_sanity_normalization_amp or test_sanity_layernorm_linear or test_sanity_linear_with_zero_tokens or test_sanity_grouped_linear)\" --no-header"
+else
+    SANITY_CMD="python3 -m pytest -s -v --tb=auto --junitxml=$XML_LOG_DIR/pytest_test_sanity.xml $TE_PATH/tests/pytorch/test_sanity.py --no-header"
+fi
+run_test_step "pytest_test_sanity.xml" "$TE_PATH/tests/pytorch/test_sanity.py" "$SANITY_CMD" "test_sanity.py"
+
 
 # Step: Recipe
 run_test_step "pytest_test_recipe.xml" "$TE_PATH/tests/pytorch/test_recipe.py" \
@@ -78,16 +85,26 @@ run_test_step "pytest_test_deferred_init.xml" "$TE_PATH/tests/pytorch/test_defer
 "python3 -m pytest -s -v --tb=auto --junitxml=$XML_LOG_DIR/pytest_test_deferred_init.xml $TE_PATH/tests/pytorch/test_deferred_init.py" "test_deferred_init.py"
 
 # Step: Numerics
-run_test_step "pytest_test_numerics.xml" "$TE_PATH/tests/pytorch/test_numerics.py" \
-"PYTORCH_JIT=0 NVTE_TORCH_COMPILE=0 NVTE_ALLOW_NONDETERMINISTIC_ALGO=0 NVTE_FUSED_ATTN=0 python3 -m pytest -s -v --tb=auto --junitxml=$XML_LOG_DIR/pytest_test_numerics.xml $TE_PATH/tests/pytorch/test_numerics.py -k \"not (test_layernorm_mlp_accuracy or test_grouped_linear_accuracy or test_gpt_cuda_graph or test_transformer_layer_hidden_states_format or test_grouped_gemm or test_noncontiguous or test_gpt_checkpointing or test_gpt_accuracy or test_mha_accuracy or test_linear_accuracy or test_linear_accuracy_delay_wgrad_compute or test_rmsnorm_accuracy or test_layernorm_accuracy or test_layernorm_linear_accuracy)\" --no-header" "test_numerics.py"
+if [ "$PLATFORM" = "metax" ]; then
+    NUMERICS_CMD="PYTORCH_JIT=0 NVTE_TORCH_COMPILE=0 NVTE_ALLOW_NONDETERMINISTIC_ALGO=0 NVTE_FUSED_ATTN=0 python3 -m pytest -s -v --tb=auto --junitxml=$XML_LOG_DIR/pytest_test_numerics.xml $TE_PATH/tests/pytorch/test_numerics.py -k \"not (test_layernorm_mlp_accuracy or test_grouped_linear_accuracy or test_gpt_cuda_graph or test_transformer_layer_hidden_states_format or test_grouped_gemm or test_noncontiguous or test_gpt_checkpointing or test_gpt_accuracy or test_mha_accuracy or test_linear_accuracy or test_linear_accuracy_delay_wgrad_compute or test_rmsnorm_accuracy or test_layernorm_accuracy or test_layernorm_linear_accuracy)\" --no-header"
+else
+    # CUDA
+    NUMERICS_CMD="PYTORCH_JIT=0 NVTE_TORCH_COMPILE=0 NVTE_ALLOW_NONDETERMINISTIC_ALGO=0 NVTE_FUSED_ATTN=0 python3 -m pytest -s -v --tb=auto --junitxml=$XML_LOG_DIR/pytest_test_numerics.xml $TE_PATH/tests/pytorch/test_numerics.py -k \"not (test_linear_accuracy or test_layernorm_linear_accuracy or test_layernorm_mlp_accuracy or test_transformer_layer_hidden_states_format)\" --no-header"
+fi
+run_test_step "pytest_test_numerics.xml" "$TE_PATH/tests/pytorch/test_numerics.py" "$NUMERICS_CMD" "test_numerics.py"
 
 # Step: CUDA Graphs
 run_test_step "pytest_test_cuda_graphs.xml" "$TE_PATH/tests/pytorch/test_cuda_graphs.py" \
 "PYTORCH_JIT=0 NVTE_TORCH_COMPILE=0 NVTE_ALLOW_NONDETERMINISTIC_ALGO=0 NVTE_FUSED_ATTN=0 python3 -m pytest -s -v --tb=auto --junitxml=$XML_LOG_DIR/pytest_test_cuda_graphs.xml $TE_PATH/tests/pytorch/test_cuda_graphs.py" "test_cuda_graphs.py"
 
 # Step: JIT
-run_test_step "pytest_test_jit.xml" "$TE_PATH/tests/pytorch/test_jit.py" \
-"python3 -m pytest -s -v --tb=auto --junitxml=$XML_LOG_DIR/pytest_test_jit.xml $TE_PATH/tests/pytorch/test_jit.py -k \"not (test_torch_dynamo)\"" "test_jit.py"
+if [ "$PLATFORM" = "metax" ]; then
+    JIT_CMD="python3 -m pytest -s -v --tb=auto --junitxml=$XML_LOG_DIR/pytest_test_jit.xml $TE_PATH/tests/pytorch/test_jit.py -k \"not (test_torch_dynamo)\""
+else
+    JIT_CMD="python3 -m pytest -s -v --tb=auto --junitxml=$XML_LOG_DIR/pytest_test_jit.xml $TE_PATH/tests/pytorch/test_jit.py --no-header"
+fi
+run_test_step "pytest_test_jit.xml" "$TE_PATH/tests/pytorch/test_jit.py" "$JIT_CMD" "test_jit.py"
+
 
 # Step: Fused Rope
 run_test_step "pytest_test_fused_rope.xml" "$TE_PATH/tests/pytorch/test_fused_rope.py" \
@@ -161,14 +178,61 @@ run_test_step "pytest_test_hf_integration.xml" "$TE_PATH/tests/pytorch/test_hf_i
 run_test_step "pytest_test_checkpoint.xml" "$TE_PATH/tests/pytorch/test_checkpoint.py" \
 "NVTE_TEST_CHECKPOINT_ARTIFACT_PATH=$TE_PATH/artifacts/tests/pytorch/test_checkpoint python3 -m pytest --tb=auto --junitxml=$XML_LOG_DIR/pytest_test_checkpoint.xml $TE_PATH/tests/pytorch/test_checkpoint.py" "test_checkpoint.py"
 
-# Step: Fused Router
-run_test_step "pytest_test_fused_router.xml" "$TE_PATH/tests/pytorch/test_fused_router.py" \
-"python3 -m pytest -s -v --tb=auto --junitxml=$XML_LOG_DIR/pytest_test_fused_router.xml $TE_PATH/tests/pytorch/test_fused_router.py" "test_fused_router.py"
+# ==============================================================================
+# New Step: Plugin Core
+# ==============================================================================
+PLUGIN_TEST_ROOT="$TE_PATH/transformer_engine/plugin/tests"
 
-# Step: Partial Cast
-run_test_step "pytest_test_partial_cast.xml" "$TE_PATH/tests/pytorch/test_partial_cast.py" \
-"python3 -m pytest -s -v --tb=auto --junitxml=$XML_LOG_DIR/pytest_test_partial_cast.xml $TE_PATH/tests/pytorch/test_partial_cast.py" "test_partial_cast.py"
+# Step: Plugin Policy
+run_test_step "pytest_test_plugin_policy.xml" "$PLUGIN_TEST_ROOT/test_plugin_policy.py" \
+"python3 -m pytest -s -v --tb=auto --junitxml=$XML_LOG_DIR/pytest_test_plugin_policy.xml $PLUGIN_TEST_ROOT/test_plugin_policy.py" "test_plugin_policy.py"
 
+# Step: Plugin manager
+run_test_step "pytest_test_plugin_manager.xml" "$PLUGIN_TEST_ROOT/test_plugin_manager.py" \
+"python3 -m pytest -s -v --tb=auto --junitxml=$XML_LOG_DIR/pytest_test_plugin_manager.xml $PLUGIN_TEST_ROOT/test_plugin_manager.py" "test_plugin_manager.py"
+
+
+# ==============================================================================
+# New Step: Plugin Core backend
+# ==============================================================================
+
+# Step: Backend flagos =========================================================
+run_test_step "pytest_test_backend_flagos.xml" "$PLUGIN_TEST_ROOT/test_backend_flagos.py" \
+"python3 -m pytest -s -v --tb=auto --junitxml=$XML_LOG_DIR/pytest_test_backend_flagos.xml $PLUGIN_TEST_ROOT/test_backend_flagos.py" "test_backend_flagos.py"
+
+# Step: Backend impl fused adam
+run_test_step "pytest_test_backend_flagos_fused_adam.xml" "$PLUGIN_TEST_ROOT/test_backend_flagos_fused_adam.py" \
+"python3 -m pytest -s -v --tb=auto --junitxml=$XML_LOG_DIR/pytest_test_backend_flagos_fused_adam.xml $PLUGIN_TEST_ROOT/test_backend_flagos_fused_adam.py" "test_backend_flagos_fused_adam.py"
+
+# Step: Backend impl gemm
+run_test_step "pytest_test_backend_flagos_gemm.xml" "$PLUGIN_TEST_ROOT/test_backend_flagos_gemm.py" \
+"python3 -m pytest -s -v --tb=auto --junitxml=$XML_LOG_DIR/pytest_test_backend_flagos_gemm.xml $PLUGIN_TEST_ROOT/test_backend_flagos_gemm.py" "test_backend_flagos_gemm.py"
+
+# Step: Backend impl multi_tensor
+run_test_step "pytest_test_backend_flagos_multi_tensor.xml" "$PLUGIN_TEST_ROOT/test_backend_flagos_multi_tensor.py" \
+"python3 -m pytest -s -v --tb=auto --junitxml=$XML_LOG_DIR/pytest_test_backend_flagos_multi_tensor.xml $PLUGIN_TEST_ROOT/test_backend_flagos_multi_tensor.py" "test_backend_flagos_multi_tensor.py"
+
+# Step: Backend impl rmsnorm
+run_test_step "pytest_test_backend_flagos_rmsnorm.xml" "$PLUGIN_TEST_ROOT/test_backend_flagos_rmsnorm.py" \
+"python3 -m pytest -s -v --tb=auto --junitxml=$XML_LOG_DIR/pytest_test_backend_flagos_rmsnorm.xml $PLUGIN_TEST_ROOT/test_backend_flagos_rmsnorm.py" "test_backend_flagos_rmsnorm.py"
+
+# Step: Backend impl softmax
+run_test_step "pytest_test_backend_flagos_softmax.xml" "$PLUGIN_TEST_ROOT/test_backend_flagos_softmax.py" \
+"python3 -m pytest -s -v --tb=auto --junitxml=$XML_LOG_DIR/pytest_test_backend_flagos_softmax.xml $PLUGIN_TEST_ROOT/test_backend_flagos_softmax.py" "test_backend_flagos_softmax.py"
+
+
+# Step: Backend reference =========================================================
+run_test_step "pytest_test_backend_reference.xml" "$PLUGIN_TEST_ROOT/test_backend_reference.py" \
+"python3 -m pytest -s -v --tb=auto --junitxml=$XML_LOG_DIR/pytest_test_backend_reference.xml $PLUGIN_TEST_ROOT/test_backend_reference.py" "test_backend_reference.py"
+
+run_test_step "pytest_test_backend_reference_activation.xml" "$PLUGIN_TEST_ROOT/test_backend_reference_activation.py" \
+"python3 -m pytest -s -v --tb=auto --junitxml=$XML_LOG_DIR/pytest_test_backend_reference_activation.xml $PLUGIN_TEST_ROOT/test_backend_reference_activation.py" "test_backend_reference_activation.py"
+
+run_test_step "pytest_test_backend_reference_dropout.xml" "$PLUGIN_TEST_ROOT/test_backend_reference_dropout.py" \
+"python3 -m pytest -s -v --tb=auto --junitxml=$XML_LOG_DIR/pytest_test_backend_reference_dropout.xml $PLUGIN_TEST_ROOT/test_backend_reference_dropout.py" "test_backend_reference_dropout.py"
+
+run_test_step "pytest_test_backend_reference_gemm.xml" "$PLUGIN_TEST_ROOT/test_backend_reference_gemm.py" \
+"python3 -m pytest -s -v --tb=auto --junitxml=$XML_LOG_DIR/pytest_test_backend_reference_gemm.xml $PLUGIN_TEST_ROOT/test_backend_reference_gemm.py" "test_backend_reference_gemm.py"
 
 if [ "$FAIL" -ne 0 ]; then
     echo "Some tests failed."

@@ -2,6 +2,9 @@
 #
 # See LICENSE for license information.
 
+import os
+
+import pytest
 import torch
 from transformer_engine.pytorch import Float8Tensor, Float8Quantizer
 
@@ -13,6 +16,12 @@ try:
 except (ImportError, ModuleNotFoundError):
     print("Could not find TransformerEngine package.")
     exit(1)
+
+
+_skip_metax_quantize = pytest.mark.skipif(
+    os.environ.get("PLATFORM") == "metax",
+    reason="FP8 quantize requires NVRTC CUDA headers that are unavailable on MetaX CI",
+)
 
 
 def test_transformer_engine_no_config(feature_dirs):
@@ -145,7 +154,7 @@ def test_per_tensor_scaling(configs_dir, feature_dirs):
             tensor=tensor,
         )
         assert type(output1) == Float8Tensor
-        assert output1._fp8_dtype == tex.DType.kFloat8E4M3
+        assert output1._fp8_dtype.value == tex.DType.kFloat8E4M3.value
 
         output2 = debug_api.transformer_engine.modify_tensor(
             "decoder.1.mlp.fc1",
@@ -156,7 +165,7 @@ def test_per_tensor_scaling(configs_dir, feature_dirs):
             iteration=0,
         )
         assert type(output2) == Float8Tensor
-        assert output2._fp8_dtype == tex.DType.kFloat8E5M2
+        assert output2._fp8_dtype.value == tex.DType.kFloat8E5M2.value
 
         assert not debug_api.transformer_engine.modify_tensor_enabled(
             "decoder.1.mlp.fc1",
@@ -222,6 +231,7 @@ def test_fake_quant(configs_dir, feature_dirs):
         debug_api.end_debug()
 
 
+@_skip_metax_quantize
 def test_statistics_collection(configs_dir, feature_dirs):
     try:
         debug_api.initialize(
@@ -239,7 +249,9 @@ def test_statistics_collection(configs_dir, feature_dirs):
         tensor_fp8 = quantizer(tensor)
 
         def log():
-            from transformer_engine.debug.features.utils.stats_buffer import STATS_BUFFERS
+            from transformer_engine.debug.features.utils.stats_buffer import (
+                STATS_BUFFERS,
+            )
 
             return STATS_BUFFERS.log_stats()
 
@@ -291,7 +303,8 @@ def test_statistics_collection(configs_dir, feature_dirs):
         )
         stats = log()
         torch.testing.assert_close(
-            stats[("decoder.1.mlp.fc1", "gradient", "underflows%", 200)], expected_underflows
+            stats[("decoder.1.mlp.fc1", "gradient", "underflows%", 200)],
+            expected_underflows,
         )
 
         assert not debug_api.transformer_engine.inspect_tensor_enabled(
@@ -344,6 +357,7 @@ def test_statistics_collection(configs_dir, feature_dirs):
         debug_api.end_debug()
 
 
+@_skip_metax_quantize
 def test_statistics_multi_run(configs_dir, feature_dirs):
     try:
         debug_api.initialize(
@@ -365,7 +379,9 @@ def test_statistics_multi_run(configs_dir, feature_dirs):
             )
 
         def log_stats():
-            from transformer_engine.debug.features.utils.stats_buffer import STATS_BUFFERS
+            from transformer_engine.debug.features.utils.stats_buffer import (
+                STATS_BUFFERS,
+            )
 
             return STATS_BUFFERS.log_stats()
 
