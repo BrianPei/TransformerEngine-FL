@@ -11,27 +11,14 @@ try:
 except ImportError:
     pass
 
-from types import SimpleNamespace
 
 
 def _noop(*args, **kwargs):
     return None
 
 
-def get_npu_device_properties(device=None):
-    return SimpleNamespace(
-        name="Fake NPU",
-        total_memory=16 * 1024**3,
-        major=9,
-        minor=0,
-        multi_processor_count=80,
-        uuid="fake-uuid-12345",
-    )
-
-
 _PATCH_CALLS: list[tuple[object, str, Callable[..., object]]] = [
     # We do not recommend replace is_available, due to its device-related behavior.
-    (torch.cuda, "get_device_properties", get_npu_device_properties),
     (torch.cuda, "device", torch_npu.npu.device),
     (torch.cuda, "current_device", torch_npu.npu.current_device),
     (torch.cuda, "synchronize", torch_npu.npu.synchronize),
