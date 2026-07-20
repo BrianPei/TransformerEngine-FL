@@ -99,7 +99,15 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      
+
+      # Ascend installs the Python/plugin layer and does not need CUDA submodules
+      - name: Checkout Source Code on Ascend
+        if: inputs.platform == 'ascend'
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          set-safe-directory: true
+
       - name: Environment Setup
         if: inputs.setup_script != ''
         run: |
@@ -131,4 +139,3 @@ jobs:
 
           bash ${{ matrix.test_group.path }}
         timeout-minutes: 30
-        
