@@ -8,7 +8,6 @@ set -euo pipefail
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 REPO_ROOT=$(cd "$SCRIPT_DIR/../.." && pwd)
 : "${TE_PATH:=$REPO_ROOT}"
-
 : "${XML_LOG_DIR:=$TE_PATH/logs/L0_pytorch_debug_unittest-ascend}"
 : "${PYTHON_BIN:=python3}"
 

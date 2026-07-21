@@ -62,5 +62,4 @@ then
     exit 1
 fi
 
-
 echo "Ascend Python wheel build and isolated NPU import test passed: $wheel_path"

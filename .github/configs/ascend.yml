@@ -9,8 +9,7 @@ ci_image: ascend-infer:ubuntu18.04
 
 # Runner labels for the self-hosted Ascend node
 runner_labels:
-  - npu
-  - ascend
+  - hw-8g-cicd-te
 
 # Container volumes
 container_volumes:
