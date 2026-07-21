@@ -23,7 +23,7 @@ jobs:
     name: checkout_and_config
     defaults:
       run:
-        shell:  
+        shell: bash
     runs-on: ubuntu-latest
     outputs:
       ci_image: ${{ steps.config.outputs.ci_image }}
