@@ -22,7 +22,7 @@ class grouped_gemmTests(TestCase):
             "\n test te_general_grouped_gemm"
             f" grad:{grad} has_bias:{has_bias},has_pre_gelu:{has_pre_gelu},single_output:{single_output}"
         )
-        import transformer_engine_torch as tex
+        import transformer_engine_torch_nv as tex
 
         num_gemms = 2
         m, k, n = 128, 32, 64

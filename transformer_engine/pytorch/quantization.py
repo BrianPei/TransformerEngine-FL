@@ -49,9 +49,6 @@ __all__ = [
 @functools.lru_cache(maxsize=None)
 def check_fp8_support() -> Tuple[bool, str]:
     """Return if fp8 support is available"""
-    device_type = te_device_type()
-    if device_type != "cuda":
-        return False, f"FP8 execution is not supported on {device_type}."
     if get_device_compute_capability() >= (9, 0):  # hopper and above
         return True, ""
     if get_device_compute_capability() < (8, 9):  # pre-ada
@@ -66,10 +63,6 @@ def check_fp8_support() -> Tuple[bool, str]:
 @functools.lru_cache(maxsize=None)
 def check_mxfp8_support() -> Tuple[bool, str]:
     """Return if fp8 support is available"""
-    device_type = te_device_type()
-    if device_type != "cuda":
-        return False, f"MXFP8 execution is not supported on {device_type}."
-
     if get_device_compute_capability() >= (12, 0):
         return False, "MXFP8 (for all gemm layouts) is not supported on 12.0+ architectures yet."
     if get_device_compute_capability() >= (10, 0):  # blackwell and above
@@ -80,10 +73,6 @@ def check_mxfp8_support() -> Tuple[bool, str]:
 @functools.lru_cache(maxsize=None)
 def check_nvfp4_support() -> Tuple[bool, str]:
     """Return if nvfp4 support is available"""
-    device_type = te_device_type()
-    if device_type != "cuda":
-        return False, f"NVFP4 execution is not supported on {device_type}."
-
     if get_device_compute_capability() >= (10, 0):  # blackwell and above
         return True, ""
     return False, "Device compute capability 10.0 or higher required for NVFP4 execution."
@@ -92,10 +81,6 @@ def check_nvfp4_support() -> Tuple[bool, str]:
 @functools.lru_cache(maxsize=None)
 def check_fp8_block_scaling_support() -> Tuple[bool, str]:
     """Return if fp8 block scaling support is available"""
-    device_type = te_device_type()
-    if device_type != "cuda":
-        return False, f"FP8 block scaling is not supported on {device_type}."
-
     if get_device_compute_capability() >= (9, 0) and float(torch.version.cuda) >= 12.9:
         return True, ""
     return (

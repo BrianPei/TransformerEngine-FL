@@ -10,8 +10,6 @@ import torch
 from ...ops import *
 
 from .impl import (
-    layernorm_fwd_fl,
-    layernorm_bwd_fl,
     rmsnorm_fwd_fl,
     rmsnorm_bwd_fl,
     multi_tensor_scale_fl,
@@ -22,10 +20,6 @@ from .impl import (
     scaled_masked_softmax_forward_fl,
     scaled_masked_softmax_backward_fl,
     te_general_grouped_gemm_fl,
-    fused_rope_forward_fl,
-    fused_rope_backward_fl,
-    fused_qkv_rope_forward_fl,
-    fused_qkv_rope_backward_fl,
 )
 
 
@@ -166,50 +160,6 @@ class FlagOSBackend(TEFLBackendBase):
         )
 
     # Other granular functions
-    def layernorm_fwd(
-        self,
-        input: torch.Tensor,
-        weight: torch.Tensor,
-        bias: Optional[torch.Tensor],
-        eps: float,
-        ln_out: Any,
-        quantizer: Any,
-        otype: DType,
-        sm_margin: int,
-        zero_centered_gamma: bool,
-    ) -> List[Any]:
-        return layernorm_fwd_fl(
-            input=input,
-            weight=weight,
-            bias=bias,
-            eps=eps,
-            ln_out=ln_out,
-            quantizer=quantizer,
-            odtype=otype,
-            sm_margin=sm_margin,
-            zero_centered_gamma=zero_centered_gamma,
-        )
-
-    def layernorm_bwd(
-        self,
-        dz: torch.Tensor,
-        x: torch.Tensor,
-        mu: torch.Tensor,
-        rsigma: torch.Tensor,
-        gamma: torch.Tensor,
-        sm_margin: int,
-        zero_centered_gamma: bool,
-    ) -> List[Any]:
-        return layernorm_bwd_fl(
-            dy=dz,
-            x=x,
-            mu=mu,
-            rsigma=rsigma,
-            gamma=gamma,
-            sm_margin=sm_margin,
-            zero_centered_gamma=zero_centered_gamma,
-        )
-
     def rmsnorm_fwd(
         self,
         input: Any,
@@ -354,101 +304,6 @@ class FlagOSBackend(TEFLBackendBase):
             mode,
             bias_correction,
             weight_decay,
-        )
-
-    # fused apply rope
-    def fused_rope_forward(
-        self,
-        input: torch.Tensor,
-        freqs: torch.Tensor,
-        start_positions: Optional[torch.Tensor],
-        qkv_format: NVTE_QKV_Format,
-        interleaved: bool,
-        cu_seqlens: Optional[torch.Tensor],
-        cp_size: int,
-        cp_rank: int,
-    ) -> torch.Tensor:
-        return fused_rope_forward_fl(
-            input,
-            freqs,
-            start_positions,
-            qkv_format,
-            interleaved,
-            cu_seqlens,
-            cp_size,
-            cp_rank,
-        )
-
-    def fused_rope_backward(
-        self,
-        output_grads: torch.Tensor,
-        freqs: torch.Tensor,
-        start_positions: Optional[torch.Tensor],
-        qkv_format: NVTE_QKV_Format,
-        interleaved: bool,
-        cu_seqlens: Optional[torch.Tensor],
-        cp_size: int,
-        cp_rank: int,
-    ) -> torch.Tensor:
-        return fused_rope_backward_fl(
-            output_grads,
-            freqs,
-            start_positions,
-            qkv_format,
-            interleaved,
-            cu_seqlens,
-            cp_size,
-            cp_rank,
-        )
-
-    def fused_qkv_rope_forward(
-        self,
-        qkv_input: torch.Tensor,
-        q_freqs: torch.Tensor,
-        k_freqs: torch.Tensor,
-        start_positions: Optional[torch.Tensor],
-        qkv_split_arg_list: List[int],
-        qkv_format: NVTE_QKV_Format,
-        interleaved: bool,
-        cp_size: int,
-        cp_rank: int,
-    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-        return fused_qkv_rope_forward_fl(
-            qkv_input,
-            q_freqs,
-            k_freqs,
-            start_positions,
-            qkv_split_arg_list,
-            qkv_format,
-            interleaved,
-            cp_size,
-            cp_rank,
-        )
-
-    def fused_qkv_rope_backward(
-        self,
-        q_grad_out: torch.Tensor,
-        k_grad_out: torch.Tensor,
-        v_grad_out: torch.Tensor,
-        q_freqs: torch.Tensor,
-        k_freqs: torch.Tensor,
-        qkv_split_arg_list: List[int],
-        qkv_format: NVTE_QKV_Format,
-        interleaved: bool,
-        cp_size: int,
-        cp_rank: int,
-    ) -> torch.Tensor:
-        return fused_qkv_rope_backward_fl(
-            q_grad_out,
-            k_grad_out,
-            v_grad_out,
-            q_freqs,
-            k_freqs,
-            qkv_split_arg_list,
-            qkv_format,
-            interleaved,
-            cp_size,
-            cp_rank,
         )
 
     # Misc

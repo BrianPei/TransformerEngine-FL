@@ -37,16 +37,7 @@ def _load_hygon_libs():
         hygon_spec = importlib.util.find_spec("transformer_engine_hygon")
         if hygon_spec is None:
             return False
-        if hygon_spec.origin is not None:
-            hygon_path = Path(hygon_spec.origin).parent
-        elif hygon_spec.submodule_search_locations:
-            hygon_path = Path(hygon_spec.submodule_search_locations[0])
-        else:
-            print(
-                "[ERROR _load_hygon_libs] cannot determine package path, origin is None and"
-                " submodule_search_locations is empty"
-            )
-            return False
+        hygon_path = Path(hygon_spec.origin).parent
         for file_path in hygon_path.iterdir():
             if file_path.name.startswith(common_prefix) and file_path.suffix == ext:
                 common_files.append(file_path)
@@ -1637,11 +1628,8 @@ class HygonBackend(TEFLBackendBase):
         tensor_lists: List[List[torch.Tensor]],
         scale: torch.Tensor,
     ) -> None:
-        # transform_engine_hygon does not support multi_tensor_scale_tensor
-        # (from upstream Nvidia TE v2.14). Use multi_tensor_scale as a workaround.
         tex = self._get_tex()
-        scale_value = scale.item()
-        return tex.multi_tensor_scale(chunk_size, noop_flag, tensor_lists, scale_value)
+        return tex.multi_tensor_scale_tensor(chunk_size, noop_flag, tensor_lists, scale)
 
     def multi_tensor_l2norm(
         self,

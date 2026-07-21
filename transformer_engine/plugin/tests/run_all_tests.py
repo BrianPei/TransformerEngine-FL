@@ -10,9 +10,6 @@ from test_operations import OperationsTests
 from test_softmax import SoftmaxTests
 from test_optimizer import OptimizerTests
 from test_flash_attention import FlashAttentionTests
-from test_te_general_grouped import grouped_gemmTests
-from test_fused_rope import FusedRoPETests
-from test_policy import run_all_tests
 
 
 def main():
@@ -30,8 +27,6 @@ def main():
         SoftmaxTests(device=device),
         OptimizerTests(device=device),
         FlashAttentionTests(device=device),
-        grouped_gemmTests(device=device),
-        FusedRoPETests(device=device),
     ]
 
     results = []
@@ -53,8 +48,6 @@ def main():
     print("=" * 70)
     print(f"Total: {total_passed}/{total_tests} test suites passed")
     print("=" * 70)
-
-    run_all_tests()
 
     return 0 if all(success for _, success in results) else 1
 

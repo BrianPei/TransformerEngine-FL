@@ -31,7 +31,6 @@ Environment Variables:
 """
 
 import hashlib
-import inspect
 import os
 import warnings
 from typing import Any, Callable, Mapping
@@ -315,13 +314,11 @@ def compile_triton(
         if const_name in signature_with_constexpr:
             signature_with_constexpr[const_name] = "constexpr"
 
-    ast_source_kwargs = {
-        "fn": kernel_fn,
-        "signature": signature_with_constexpr,
-    }
-    if "constexprs" in inspect.signature(tc.ASTSource).parameters:
-        ast_source_kwargs["constexprs"] = constants
-    src = tc.ASTSource(**ast_source_kwargs)
+    src = tc.ASTSource(
+        fn=kernel_fn,
+        constexprs=constants,
+        signature=signature_with_constexpr,
+    )
 
     compiled = tc.compile(
         src,

@@ -35,10 +35,6 @@ _NUM_MAX_UB_STREAMS = 3
 
 def get_cublas_workspace_size_bytes() -> None:
     """Return 32 MiB if using hopper, 4 MiB for all other architectures."""
-    device_type = te_device_type()
-    if device_type != "cuda":
-        return 4_194_304
-
     if torch.cuda.get_device_properties(torch.cuda.current_device()).major >= 9:
         # 32 MiB for NVFP4 GEMM, plus additional 1024 B for alignment and misc scales
         return 32 * 1024 * 1024 + 1024

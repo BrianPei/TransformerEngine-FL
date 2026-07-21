@@ -43,22 +43,6 @@ def register_builtins(registry) -> None:
 
     impls = [
         OpImpl(
-            op_name="layernorm_fwd",
-            impl_id="default.flagos",
-            kind=BackendImplKind.DEFAULT,
-            fn=_bind_is_available(backend.layernorm_fwd, is_avail),
-            vendor=None,
-            priority=150,
-        ),
-        OpImpl(
-            op_name="layernorm_bwd",
-            impl_id="default.flagos",
-            kind=BackendImplKind.DEFAULT,
-            fn=_bind_is_available(backend.layernorm_bwd, is_avail),
-            vendor=None,
-            priority=150,
-        ),
-        OpImpl(
             op_name="rmsnorm_fwd",
             impl_id="default.flagos",
             kind=BackendImplKind.DEFAULT,
@@ -177,39 +161,6 @@ def register_builtins(registry) -> None:
             impl_id="default.flagos",
             kind=BackendImplKind.DEFAULT,
             fn=_bind_is_available(backend.scaled_masked_softmax_backward, is_avail),
-            vendor=None,
-            priority=150,
-        ),
-        # RoPE (Rotary Position Embedding)
-        OpImpl(
-            op_name="fused_rope_forward",
-            impl_id="default.flagos",
-            kind=BackendImplKind.DEFAULT,
-            fn=_bind_is_available(backend.fused_rope_forward, is_avail),
-            vendor=None,
-            priority=150,
-        ),
-        OpImpl(
-            op_name="fused_rope_backward",
-            impl_id="default.flagos",
-            kind=BackendImplKind.DEFAULT,
-            fn=_bind_is_available(backend.fused_rope_backward, is_avail),
-            vendor=None,
-            priority=150,
-        ),
-        OpImpl(
-            op_name="fused_qkv_rope_forward",
-            impl_id="default.flagos",
-            kind=BackendImplKind.DEFAULT,
-            fn=_bind_is_available(backend.fused_qkv_rope_forward, is_avail),
-            vendor=None,
-            priority=150,
-        ),
-        OpImpl(
-            op_name="fused_qkv_rope_backward",
-            impl_id="default.flagos",
-            kind=BackendImplKind.DEFAULT,
-            fn=_bind_is_available(backend.fused_qkv_rope_backward, is_avail),
             vendor=None,
             priority=150,
         ),
