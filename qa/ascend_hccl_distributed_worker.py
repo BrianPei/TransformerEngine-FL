@@ -40,18 +40,33 @@ def main() -> None:
         assert transformer_engine.te_device_type() == "npu"
         torch.manual_seed(2026)
         layer = te.Linear(64, 32, bias=True, device="npu", params_dtype=torch.float32)
-        inputs = torch.randn(8, 64, device="npu", dtype=torch.float32, requires_grad=True)
+        inputs = torch.randn(8, 64, device="npu", dtype=torch.float32)
+        inputs = (inputs + rank * 0.125).requires_grad_(True)
         loss = layer(inputs).square().mean()
         loss.backward()
 
+        local_weight_grad = layer.weight.grad.detach().clone()
+        local_bias_grad = layer.bias.grad.detach().clone()
+        gathered_weight_grads = [torch.empty_like(local_weight_grad) for _ in range(world_size)]
+        gathered_bias_grads = [torch.empty_like(local_bias_grad) for _ in range(world_size)]
+        dist.all_gather(gathered_weight_grads, local_weight_grad)
+        dist.all_gather(gathered_bias_grads, local_bias_grad)
+        expected_weight_grad = torch.stack(gathered_weight_grads).mean(dim=0)
+        expected_bias_grad = torch.stack(gathered_bias_grads).mean(dim=0)
+
         dist.all_reduce(layer.weight.grad)
         layer.weight.grad.div_(world_size)
+        dist.all_reduce(layer.bias.grad)
+        layer.bias.grad.div_(world_size)
         torch.npu.synchronize()
 
         assert inputs.grad is not None
         assert torch.isfinite(loss).item()
         assert torch.isfinite(inputs.grad).all().item()
         assert torch.isfinite(layer.weight.grad).all().item()
+        assert torch.isfinite(layer.bias.grad).all().item()
+        torch.testing.assert_close(layer.weight.grad, expected_weight_grad)
+        torch.testing.assert_close(layer.bias.grad, expected_bias_grad)
         dist.barrier()
         if rank == 0:
             print(f"ASCEND_HCCL_TE_OK world_size={world_size}")
