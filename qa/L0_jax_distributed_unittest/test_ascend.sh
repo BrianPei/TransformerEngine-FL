@@ -11,6 +11,8 @@ REPO_ROOT=$(cd "$SCRIPT_DIR/../.." && pwd)
 : "${XML_LOG_DIR:=$TE_PATH/logs/L0_jax_distributed_unittest-ascend}"
 : "${PYTHON_BIN:=python3}"
 
+mkdir -p "$XML_LOG_DIR"
+
 reason="JAX distributed tests require a supported JAX Ascend runtime; this environment only provides Torch-NPU."
 "$PYTHON_BIN" "$TE_PATH/qa/ascend_write_junit_skip.py" \
     --output "$XML_LOG_DIR/pytest_jax_distributed_ascend.xml" \

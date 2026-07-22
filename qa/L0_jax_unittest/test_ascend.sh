@@ -11,6 +11,8 @@ REPO_ROOT=$(cd "$SCRIPT_DIR/../.." && pwd)
 : "${XML_LOG_DIR:=$TE_PATH/logs/L0_jax_unittest-ascend}"
 : "${PYTHON_BIN:=python3}"
 
+mkdir -p "$XML_LOG_DIR"
+
 reason="JAX unit tests require CUDA/XLA GPU or a supported JAX Ascend runtime; neither is installed in this environment."
 "$PYTHON_BIN" "$TE_PATH/qa/ascend_write_junit_skip.py" \
     --output "$XML_LOG_DIR/pytest_jax_ascend.xml" \

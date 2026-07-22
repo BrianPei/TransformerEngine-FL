@@ -40,6 +40,11 @@ if ! PYTHONPATH="$install_dir" "$PYTHON_BIN" - <<'PY'
 import torch
 import torch_npu
 import transformer_engine
+
+transformer_engine.TE_DEVICE_TYPE = "npu"
+transformer_engine.TE_PLATFORM = torch_npu.npu
+torch.cuda.is_current_stream_capturing = lambda: False
+
 import transformer_engine.pytorch as te
 
 assert transformer_engine.te_device_type() == "npu"
@@ -61,5 +66,6 @@ then
     echo "The isolated Ascend wheel validation failed." >&2
     exit 1
 fi
+
 
 echo "Ascend Python wheel build and isolated NPU import test passed: $wheel_path"

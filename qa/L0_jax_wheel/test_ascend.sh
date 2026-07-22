@@ -11,6 +11,8 @@ REPO_ROOT=$(cd "$SCRIPT_DIR/../.." && pwd)
 : "${XML_LOG_DIR:=$TE_PATH/logs/L0_jax_wheel-ascend}"
 : "${PYTHON_BIN:=python3}"
 
+mkdir -p "$XML_LOG_DIR"
+
 reason="The project has no validated JAX Ascend runtime or native JAX-NPU extension, so a functional JAX Ascend wheel cannot be tested."
 "$PYTHON_BIN" "$TE_PATH/qa/ascend_write_junit_skip.py" \
     --output "$XML_LOG_DIR/pytest_jax_wheel_ascend.xml" \

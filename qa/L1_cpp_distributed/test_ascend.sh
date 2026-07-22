@@ -15,7 +15,14 @@ mkdir -p "$XML_LOG_DIR"
 export TE_FL_SKIP_CUDA=1
 export NVTE_FRAMEWORK=pytorch
 
-echo "[INFO] CUDA C++ comm_gemm has no Ascend build; running the real two-NPU HCCL/TE equivalent."
+reason="CUDA C++ comm_gemm has no Ascend C++ build in this repository; the Ascend path runs the real two-NPU HCCL/TE smoke instead."
+"$PYTHON_BIN" "$TE_PATH/qa/ascend_write_junit_skip.py" \
+    --output "$XML_LOG_DIR/ctest_cpp_distributed.xml" \
+    --suite "L1_cpp_distributed_ascend.cuda_comm_gemm" \
+    --reason "$reason"
+echo "[SKIP] $reason"
+
+echo "[INFO] Running the real two-NPU HCCL/TE equivalent."
 "$PYTHON_BIN" -m pytest -v -s \
     --junitxml="$XML_LOG_DIR/pytest_hccl_te.xml" \
     "$TE_PATH/qa/test_ascend_hccl_distributed.py"

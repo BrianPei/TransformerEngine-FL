@@ -16,6 +16,13 @@ mkdir -p "$XML_LOG_DIR"
 
 export TE_FL_SKIP_CUDA=1
 export NVTE_FRAMEWORK=pytorch
+TE_LIB_PATH=$("$PYTHON_BIN" - <<'PY'
+import site
+
+print(site.getsitepackages()[0])
+PY
+)
+export LD_LIBRARY_PATH="$TE_LIB_PATH${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
 
 "$PYTHON_BIN" - <<'PY'
 import torch
@@ -35,27 +42,26 @@ if ! "$PYTHON_BIN" -c "import pytest" >/dev/null 2>&1; then
     "$PYTHON_BIN" -m pip install pytest==8.2.1
 fi
 
-# tests/cpp is implemented with CUDA source files and the CUDA TE ABI. The
-# Ascend backend lives in the FlagOS plugin layer, so this entry point runs the
-# applicable plugin tests plus a smoke test against the real NPU backend.
-test_files=(
-    "$TE_PATH/transformer_engine/plugin/tests/test_backend_ascend_smoke.py"
-    "$TE_PATH/transformer_engine/plugin/tests/test_backend_flagos.py"
-    "$TE_PATH/transformer_engine/plugin/tests/test_backend_reference.py"
-    "$TE_PATH/transformer_engine/plugin/tests/test_backend_reference_activation.py"
-    "$TE_PATH/transformer_engine/plugin/tests/test_backend_reference_dropout.py"
-    "$TE_PATH/transformer_engine/plugin/tests/test_backend_reference_gemm.py"
-    "$TE_PATH/transformer_engine/plugin/tests/test_plugin_manager.py"
-    "$TE_PATH/transformer_engine/plugin/tests/test_plugin_policy.py"
-    "$TE_PATH/transformer_engine/plugin/tests/test_policy.py"
-)
-
 failed=0
-for test_file in "${test_files[@]}"; do
+
+skip_test_point() {
+    local label=$1
+    local reason=$2
+
+    echo "-------------------------------------------------------"
+    echo "[SKIP] $label"
+    echo "       $reason"
+}
+
+run_pytest_file() {
+    local test_file=$1
+    local test_name
+    local pytest_exit
+
     if [ ! -f "$test_file" ]; then
         echo "Required Ascend test file not found: $test_file" >&2
         failed=1
-        continue
+        return
     fi
 
     test_name=$(basename "$test_file" .py)
@@ -104,6 +110,46 @@ PY
         echo "[FAIL] $test_name exited with status $pytest_exit." >&2
         failed=1
     fi
+}
+
+skip_test_point \
+    "$TE_PATH/tests/cpp ctest" \
+    "tests/cpp is CUDA C++/TE ABI based; the Ascend path validates the corresponding plugin backend instead."
+
+ascend_test_files=(
+    "$TE_PATH/transformer_engine/plugin/tests/test_backend_ascend_smoke.py"
+    "$TE_PATH/transformer_engine/plugin/tests/test_backend_flagos.py"
+    "$TE_PATH/transformer_engine/plugin/tests/test_backend_reference.py"
+    "$TE_PATH/transformer_engine/plugin/tests/test_backend_reference_activation.py"
+    "$TE_PATH/transformer_engine/plugin/tests/test_backend_reference_dropout.py"
+    "$TE_PATH/transformer_engine/plugin/tests/test_backend_reference_gemm.py"
+    "$TE_PATH/transformer_engine/plugin/tests/test_plugin_manager.py"
+    "$TE_PATH/transformer_engine/plugin/tests/test_plugin_policy.py"
+    "$TE_PATH/transformer_engine/plugin/tests/test_policy.py"
+)
+
+skipped_plugin_tests=(
+    "transformer_engine/plugin/tests/test_activations.py:no pytest cases collected in this file"
+    "transformer_engine/plugin/tests/test_backend_flagos_fused_adam.py:test inputs are CPU tensors but FlagGems launches Ascend Triton kernels"
+    "transformer_engine/plugin/tests/test_backend_flagos_gemm.py:test matrix includes CPU tensor paths that are invalid for Ascend Triton kernels"
+    "transformer_engine/plugin/tests/test_backend_flagos_multi_tensor.py:test inputs are CPU tensors but FlagGems launches Ascend Triton kernels"
+    "transformer_engine/plugin/tests/test_backend_flagos_rmsnorm.py:test inputs are CPU tensors but FlagGems launches Ascend Triton kernels"
+    "transformer_engine/plugin/tests/test_backend_flagos_softmax.py:test inputs are CPU tensors but FlagGems launches Ascend Triton kernels"
+    "transformer_engine/plugin/tests/test_flash_attention.py:no pytest cases collected in this file"
+    "transformer_engine/plugin/tests/test_fused_rope.py:no pytest cases collected in this file"
+    "transformer_engine/plugin/tests/test_normalization.py:no pytest cases collected in this file"
+    "transformer_engine/plugin/tests/test_operations.py:no pytest cases collected in this file"
+    "transformer_engine/plugin/tests/test_optimizer.py:no pytest cases collected in this file"
+    "transformer_engine/plugin/tests/test_softmax.py:no pytest cases collected in this file"
+    "transformer_engine/plugin/tests/test_te_general_grouped.py:no pytest cases collected in this file"
+)
+
+for test_file in "${ascend_test_files[@]}"; do
+    run_pytest_file "$test_file"
+done
+
+for entry in "${skipped_plugin_tests[@]}"; do
+    skip_test_point "${entry%%:*}" "${entry#*:}"
 done
 
 if [ "$failed" -ne 0 ]; then
