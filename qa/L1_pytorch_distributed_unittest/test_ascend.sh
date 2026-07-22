@@ -15,7 +15,15 @@ mkdir -p "$XML_LOG_DIR"
 export TE_FL_SKIP_CUDA=1
 export NVTE_FRAMEWORK=pytorch
 
-result_xml="$XML_LOG_DIR/pytest_hccl_te.xml"
+FAIL=0
+
 "$PYTHON_BIN" "$TE_PATH/qa/ascend_run_pytest.py" -v -s \
-    --junitxml="$result_xml" \
-    "$TE_PATH/qa/test_ascend_hccl_distributed.py"
+    --junitxml="$XML_LOG_DIR/pytest_hccl_te.xml" \
+    "$TE_PATH/qa/test_ascend_hccl_distributed.py" || FAIL=1
+
+# MetaX runs this platform-independent Context Parallel utility suite as well.
+"$PYTHON_BIN" -m pytest -v -s \
+    --junitxml="$XML_LOG_DIR/pytest_test_cp_utils.xml" \
+    "$TE_PATH/tests/pytorch/attention/test_cp_utils.py" || FAIL=1
+
+exit "$FAIL"
