@@ -72,11 +72,13 @@ test_file = sys.argv[1]
 junit_xml = sys.argv[2]
 
 try:
+    import torch
     import torch_npu  # noqa: F401
     import transformer_engine
 
     transformer_engine.TE_DEVICE_TYPE = "npu"
     transformer_engine.TE_PLATFORM = torch_npu.npu
+    torch.cuda.is_current_stream_capturing = lambda: False
 except Exception as exc:
     print(f"[WARN] Failed to set NPU device type before pytest: {exc}", file=sys.stderr)
 

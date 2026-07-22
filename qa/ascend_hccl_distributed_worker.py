@@ -31,6 +31,7 @@ def main() -> None:
         # torchrun starts independent Python workers, so set the TE device in each rank.
         transformer_engine.TE_DEVICE_TYPE = "npu"
         transformer_engine.TE_PLATFORM = torch_npu.npu
+        torch.cuda.is_current_stream_capturing = lambda: False
 
         import transformer_engine.pytorch as te
 
