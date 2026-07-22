@@ -10,7 +10,7 @@ REPO_ROOT=$(cd "$SCRIPT_DIR/.." && pwd)
 : "${TE_PATH:=$REPO_ROOT}"
 
 all_suites=(
-    L0_cppunittest
+    # No native Ascend TE C++ backend exists; do not substitute Python plugin tests here.
     L0_jax_distributed_unittest
     L0_jax_lint
     L0_jax_unittest
