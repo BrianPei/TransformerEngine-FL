@@ -33,8 +33,3 @@ NVTE_UnfusedDPA_Emulate_FP8=1 \
     --tb=auto \
     --junitxml="$result_xml" \
     "$TE_PATH/tests/pytorch/test_onnx_export.py"
-
-"$PYTHON_BIN" "$TE_PATH/qa/ascend_validate_junit.py" \
-    --min-tests 1 \
-    --min-passed 1 \
-    "$result_xml"

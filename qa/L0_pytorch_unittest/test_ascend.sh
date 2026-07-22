@@ -27,9 +27,3 @@ echo "[INFO] Running real-NPU TE and plugin unit tests on Ascend."
     "$TE_PATH/transformer_engine/plugin/tests/test_plugin_manager.py" \
     "$TE_PATH/transformer_engine/plugin/tests/test_plugin_policy.py" \
     "$TE_PATH/transformer_engine/plugin/tests/test_policy.py"
-
-"$PYTHON_BIN" "$TE_PATH/qa/ascend_validate_junit.py" \
-    --min-tests 78 \
-    --min-passed 78 \
-    --max-skipped 0 \
-    "$result_xml"

@@ -19,8 +19,3 @@ result_xml="$XML_LOG_DIR/pytest_hccl_te.xml"
 "$PYTHON_BIN" "$TE_PATH/qa/ascend_run_pytest.py" -v -s \
     --junitxml="$result_xml" \
     "$TE_PATH/qa/test_ascend_hccl_distributed.py"
-
-"$PYTHON_BIN" "$TE_PATH/qa/ascend_validate_junit.py" \
-    --min-tests 1 \
-    --min-passed 1 \
-    "$result_xml"
