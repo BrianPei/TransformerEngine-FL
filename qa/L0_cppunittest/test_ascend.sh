@@ -63,12 +63,37 @@ for test_file in "${test_files[@]}"; do
     echo "[RUN] $test_name"
 
     set +e
-    "$PYTHON_BIN" -m pytest \
-        -q \
-        -x \
-        -p no:warnings \
-        --junitxml="$XML_LOG_DIR/pytest_ascend_${test_name}.xml" \
-        "$test_file"
+    "$PYTHON_BIN" - "$test_file" "$XML_LOG_DIR/pytest_ascend_${test_name}.xml" <<'PY'
+import sys
+
+import pytest
+
+test_file = sys.argv[1]
+junit_xml = sys.argv[2]
+
+try:
+    import torch_npu  # noqa: F401
+    from transformer_engine.plugin.core.backends.vendor.npu.patches import (
+        apply_patch as _apply_npu_patch,
+    )
+
+    _apply_npu_patch()
+except Exception as exc:
+    print(f"[WARN] Failed to apply NPU patch before pytest: {exc}", file=sys.stderr)
+
+raise SystemExit(
+    pytest.main(
+        [
+            "-q",
+            "-x",
+            "-p",
+            "no:warnings",
+            f"--junitxml={junit_xml}",
+            test_file,
+        ]
+    )
+)
+PY
     pytest_exit=$?
     set -e
 
