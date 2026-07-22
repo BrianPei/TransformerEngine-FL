@@ -101,3 +101,91 @@ def test_transformer_engine_normalization_forward_backward(module_name):
     torch.testing.assert_close(layer.weight.grad, ref_weight.grad, rtol=2e-3, atol=2e-3)
     if module_name == "LayerNorm":
         torch.testing.assert_close(layer.bias.grad, ref_bias_grad, rtol=2e-3, atol=2e-3)
+
+
+@pytest.mark.parametrize("normalization", ["LayerNorm", "RMSNorm"])
+@pytest.mark.parametrize("zero_centered_gamma", [False, True])
+def test_transformer_engine_layernorm_linear_matches_torch_npu(
+    normalization,
+    zero_centered_gamma,
+):
+    """TE LayerNormLinear should match an eager Torch-NPU composition."""
+    import transformer_engine.pytorch as te
+
+    eps = 1e-5
+    layer = te.LayerNormLinear(
+        32,
+        24,
+        eps=eps,
+        normalization=normalization,
+        zero_centered_gamma=zero_centered_gamma,
+        bias=True,
+        device="npu",
+        params_dtype=torch.float32,
+    )
+    inputs = torch.randn(4, 32, device="npu", dtype=torch.float32, requires_grad=True)
+    output_grad = torch.randn(4, 24, device="npu", dtype=torch.float32)
+
+    output = layer(inputs)
+    output.backward(output_grad)
+
+    ref_inputs = inputs.detach().clone().requires_grad_(True)
+    ref_norm_weight = layer.layer_norm_weight.detach().clone().requires_grad_(True)
+    effective_weight = 1 + ref_norm_weight if zero_centered_gamma else ref_norm_weight
+    if normalization == "LayerNorm":
+        ref_norm_bias = layer.layer_norm_bias.detach().clone().requires_grad_(True)
+        normalized = torch.nn.functional.layer_norm(
+            ref_inputs,
+            (32,),
+            effective_weight,
+            ref_norm_bias,
+            eps,
+        )
+    else:
+        ref_norm_bias = None
+        normalized = ref_inputs * torch.rsqrt(
+            ref_inputs.square().mean(dim=-1, keepdim=True) + eps
+        )
+        normalized = normalized * effective_weight
+
+    ref_weight = layer.weight.detach().clone().requires_grad_(True)
+    ref_bias = layer.bias.detach().clone().requires_grad_(True)
+    ref_output = torch.nn.functional.linear(normalized, ref_weight, ref_bias)
+    ref_output.backward(output_grad)
+
+    torch.npu.synchronize()
+    torch.testing.assert_close(output, ref_output, rtol=2e-3, atol=2e-3)
+    torch.testing.assert_close(inputs.grad, ref_inputs.grad, rtol=2e-3, atol=2e-3)
+    torch.testing.assert_close(
+        layer.layer_norm_weight.grad,
+        ref_norm_weight.grad,
+        rtol=2e-3,
+        atol=2e-3,
+    )
+    if normalization == "LayerNorm":
+        torch.testing.assert_close(
+            layer.layer_norm_bias.grad,
+            ref_norm_bias.grad,
+            rtol=2e-3,
+            atol=2e-3,
+        )
+    torch.testing.assert_close(layer.weight.grad, ref_weight.grad, rtol=2e-3, atol=2e-3)
+    torch.testing.assert_close(layer.bias.grad, ref_bias.grad, rtol=2e-3, atol=2e-3)
+
+
+def test_ascend_backend_dispatch_selection():
+    """Ascend should select FlagOS ops and use reference only for missing ops."""
+    from transformer_engine.plugin.core import get_manager
+
+    manager = get_manager()
+    expected_impls = {
+        "generic_gemm": "default.flagos",
+        "rmsnorm_fwd": "default.flagos",
+        "rmsnorm_bwd": "default.flagos",
+        "layernorm_fwd": "reference.torch",
+        "layernorm_bwd": "reference.torch",
+    }
+    selected_impls = {
+        op_name: manager.get_selected_impl_id(op_name) for op_name in expected_impls
+    }
+    assert selected_impls == expected_impls
