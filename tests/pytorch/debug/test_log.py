@@ -3,6 +3,7 @@
 # See LICENSE for license information.
 
 import nvdlfw_inspect.api as debug_api
+from transformer_engine import te_device_type
 import transformer_engine.debug
 import transformer_engine.pytorch as te
 import torch
@@ -68,14 +69,11 @@ all_stats = []
 for r in recipes:
     for stat in bare_stats:
         for columnwise_postfix in ["", "_columnwise"]:
-            if (
-                r in ["fp8_current_scaling", "fp8_block_scaling"]
-                and torch.cuda.get_device_capability()[0] < 9
-            ):
-                # hopper is needed for current-scaling, block-scaling
+            if r == "fp8_current_scaling" and not fp8_available:
                 continue
-            if r == "mxfp8" and torch.cuda.get_device_capability()[0] < 10:
-                # blackwell is needed for mxfp8
+            if r == "fp8_block_scaling" and not fp8_block_scaling_available:
+                continue
+            if r == "mxfp8" and not mxfp8_available:
                 continue
             if (
                 r in ["fp8_delayed_scaling", "fp8_current_scaling"]

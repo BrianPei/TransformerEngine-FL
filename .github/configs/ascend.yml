@@ -5,7 +5,7 @@ hardware_name: ascend
 display_name: 'Huawei Ascend NPU'
 
 # CI image for the Ascend environment
-ci_image: ascend-infer:ubuntu18.04
+ci_image: harbor.baai.ac.cn/transformerengine-fl/flagscale:te-fl-triton311
 
 # Runner labels for the self-hosted Ascend node
 runner_labels:
