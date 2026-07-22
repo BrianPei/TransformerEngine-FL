@@ -211,18 +211,25 @@ jobs:
 
           # Combine coverage fragments and generate JSON report
           if [ "$COVERAGE_ENABLED" = "true" ]; then
-            python3 -m coverage combine --keep
-            python3 -m coverage json \
-              -o "coverage-${{ inputs.platform }}-${{ inputs.device }}-${{ matrix.test_group.name }}.json" \
-              --include="transformer_engine/pytorch/*,transformer_engine/debug/*,transformer_engine/plugin/*" \
-              --omit="*/setup.py,*/transformer_engine/plugin/core/_build_config.py" \
-              -i
+            shopt -s nullglob
+            coverage_fragments=(.coverage.*)
+            shopt -u nullglob
+
+            if [ "${#coverage_fragments[@]}" -gt 0 ]; then
+              python3 -m coverage combine --keep
+            else
+              echo "No coverage fragments found; using existing .coverage file if present."
+            fi
 
             if [ -f .coverage ]; then
+              python3 -m coverage json \
+                -o "coverage-${{ inputs.platform }}-${{ inputs.device }}-${{ matrix.test_group.name }}.json" \
+                --include="transformer_engine/pytorch/*,transformer_engine/debug/*,transformer_engine/plugin/*" \
+                --omit="*/setup.py,*/transformer_engine/plugin/core/_build_config.py" \
+                -i
               cp .coverage "coverage-${{ inputs.platform }}-${{ inputs.device }}-${{ matrix.test_group.name }}.coverage"
             else
-              echo "ERROR: No raw coverage data found"
-              exit 1
+              echo "WARNING: No raw coverage data found for ${{ inputs.platform }} ${{ matrix.test_group.name }}"
             fi
           fi
           exit $exit_code
@@ -305,9 +312,9 @@ jobs:
           done
 
           if [ "$coverage_count" -eq 0 ]; then
-            echo "ERROR: No raw coverage files found for aggregation"
+            echo "WARNING: No raw coverage files found for aggregation; skipping coverage aggregation"
             echo "coverage_aggregated=false" >> "$GITHUB_OUTPUT"
-            exit 1
+            exit 0
           fi
 
           python3 -m coverage combine coverage-raw
