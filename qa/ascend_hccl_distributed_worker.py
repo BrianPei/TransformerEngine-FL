@@ -26,8 +26,15 @@ def main() -> None:
         expected = world_size * (world_size + 1) / 2
         torch.testing.assert_close(collective.cpu(), torch.tensor([expected]))
 
+        ##import transformer_engine
+        ##import transformer_engine.pytorch as te
+        #让每个torchrun子进程自己启动NPU patch，避免在主进程中启动NPU patch导致子进程无法使用NPU
         import transformer_engine
+        from transformer_engine.plugin.core.backends.vendor.npu.patches import apply_patch as _apply_npu_patch
+        _apply_npu_patch()
+
         import transformer_engine.pytorch as te
+        #####
 
         assert transformer_engine.te_device_type() == "npu"
         torch.manual_seed(2026)
