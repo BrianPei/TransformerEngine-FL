@@ -181,9 +181,14 @@ jobs:
           # Ensure log directory exists regardless of volume mount state
           mkdir -p /logs
 
-          # Coverage setup: install once + configure collection via PYTEST_ADDOPTS
+          # Coverage setup: Ascend unit jobs must always produce raw coverage.
           COVERAGE_ENABLED=false
-          if pip3 install coverage pytest-cov --quiet 2>/dev/null; then
+          if [ "${{ inputs.platform }}" = "ascend" ]; then
+            python3 -m pip install --quiet --no-cache-dir coverage pytest-cov
+            python3 -c "import importlib.metadata as m; import coverage, pytest_cov; print('[coverage] coverage', m.version('coverage'), 'pytest-cov', m.version('pytest-cov'))"
+            export PYTEST_ADDOPTS="--cov=transformer_engine/pytorch --cov=transformer_engine/debug --cov=transformer_engine/plugin --cov-append --cov-report="
+            COVERAGE_ENABLED=true
+          elif python3 -m pip install --quiet coverage pytest-cov 2>/dev/null; then
             export PYTEST_ADDOPTS="--cov=transformer_engine/pytorch --cov=transformer_engine/debug --cov=transformer_engine/plugin --cov-append --cov-report="
             COVERAGE_ENABLED=true
           else
@@ -230,12 +235,26 @@ jobs:
               cp .coverage "coverage-${{ inputs.platform }}-${{ inputs.device }}-${{ matrix.test_group.name }}.coverage"
             else
               echo "WARNING: No raw coverage data found for ${{ inputs.platform }} ${{ matrix.test_group.name }}"
+              if [ "${{ inputs.platform }}" = "ascend" ]; then
+                exit 1
+              fi
             fi
           fi
           exit $exit_code
         timeout-minutes: 60
 
+      - name: Upload Ascend Coverage Artifact
+        if: inputs.platform == 'ascend'
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-${{ inputs.platform }}-${{ inputs.device }}-${{ matrix.test_group.name }}
+          path: |
+            coverage-${{ inputs.platform }}-${{ inputs.device }}-${{ matrix.test_group.name }}.json
+            coverage-${{ inputs.platform }}-${{ inputs.device }}-${{ matrix.test_group.name }}.coverage
+          if-no-files-found: error
+
       - name: Upload Coverage Artifact
+        if: inputs.platform != 'ascend'
         uses: actions/upload-artifact@v4
         continue-on-error: true
         with:
@@ -301,7 +320,7 @@ jobs:
               ;;
           esac
 
-          python3 -m pip install coverage --quiet
+          python3 -m pip install --quiet --no-cache-dir coverage
 
           mkdir -p coverage-raw
           coverage_count=0

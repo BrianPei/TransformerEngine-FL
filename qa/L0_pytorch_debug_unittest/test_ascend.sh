@@ -58,4 +58,14 @@ run_test_step "test_perf.xml" "$TE_PATH/tests/pytorch/debug/test_perf.py" \
     --feature_dirs="$NVTE_TEST_NVINSPECT_FEATURE_DIRS" \
     --configs_dir="$NVTE_TEST_NVINSPECT_CONFIGS_DIR"
 
+"$PYTHON_BIN" "$TE_PATH/qa/ascend_validate_junit.py" \
+    --min-tests 6 \
+    --min-passed 6 \
+    "$XML_LOG_DIR/test_sanity.xml" \
+    "$XML_LOG_DIR/test_config.xml" \
+    "$XML_LOG_DIR/test_numerics.xml" \
+    "$XML_LOG_DIR/test_log.xml" \
+    "$XML_LOG_DIR/test_api_features.xml" \
+    "$XML_LOG_DIR/test_perf.xml"
+
 exit "$FAIL"

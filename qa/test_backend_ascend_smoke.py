@@ -58,3 +58,46 @@ def test_transformer_engine_linear_forward_backward():
     assert torch.isfinite(output).all().item()
     assert torch.isfinite(inputs.grad).all().item()
     assert torch.isfinite(layer.weight.grad).all().item()
+
+
+@pytest.mark.parametrize("module_name", ["RMSNorm", "LayerNorm"])
+def test_transformer_engine_normalization_forward_backward(module_name):
+    """TE normalization modules should match eager Torch-NPU autograd."""
+    import transformer_engine.pytorch as te
+
+    eps = 1e-5
+    layer_class = getattr(te, module_name)
+    layer = layer_class(32, eps=eps, device="npu", dtype=torch.float32)
+    inputs = torch.randn(4, 32, device="npu", dtype=torch.float32, requires_grad=True)
+    output_grad = torch.randn_like(inputs)
+
+    output = layer(inputs)
+    output.backward(output_grad)
+
+    ref_inputs = inputs.detach().clone().requires_grad_(True)
+    ref_weight = layer.weight.detach().clone().requires_grad_(True)
+    if module_name == "RMSNorm":
+        ref_output = ref_inputs * torch.rsqrt(
+            ref_inputs.square().mean(dim=-1, keepdim=True) + eps
+        )
+        ref_output = ref_output * ref_weight
+        ref_output.backward(output_grad)
+        ref_bias_grad = None
+    else:
+        ref_bias = layer.bias.detach().clone().requires_grad_(True)
+        ref_output = torch.nn.functional.layer_norm(
+            ref_inputs,
+            (32,),
+            ref_weight,
+            ref_bias,
+            eps,
+        )
+        ref_output.backward(output_grad)
+        ref_bias_grad = ref_bias.grad
+
+    torch.npu.synchronize()
+    torch.testing.assert_close(output, ref_output, rtol=2e-3, atol=2e-3)
+    torch.testing.assert_close(inputs.grad, ref_inputs.grad, rtol=2e-3, atol=2e-3)
+    torch.testing.assert_close(layer.weight.grad, ref_weight.grad, rtol=2e-3, atol=2e-3)
+    if module_name == "LayerNorm":
+        torch.testing.assert_close(layer.bias.grad, ref_bias_grad, rtol=2e-3, atol=2e-3)

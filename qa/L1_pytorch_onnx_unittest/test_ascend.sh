@@ -12,6 +12,7 @@ REPO_ROOT=$(cd "$SCRIPT_DIR/../.." && pwd)
 : "${PYTHON_BIN:=python3}"
 
 mkdir -p "$XML_LOG_DIR"
+result_xml="$XML_LOG_DIR/test_onnx_export.xml"
 
 "$PYTHON_BIN" - <<'PY'
 missing = []
@@ -30,5 +31,10 @@ NVTE_UnfusedDPA_Emulate_FP8=1 \
 "$PYTHON_BIN" "$TE_PATH/qa/ascend_run_pytest.py" \
     -v -s \
     --tb=auto \
-    --junitxml="$XML_LOG_DIR/test_onnx_export.xml" \
+    --junitxml="$result_xml" \
     "$TE_PATH/tests/pytorch/test_onnx_export.py"
+
+"$PYTHON_BIN" "$TE_PATH/qa/ascend_validate_junit.py" \
+    --min-tests 1 \
+    --min-passed 1 \
+    "$result_xml"
