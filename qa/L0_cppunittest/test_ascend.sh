@@ -78,13 +78,13 @@ test_file = sys.argv[1]
 junit_xml = sys.argv[2]
 
 try:
-    import torch
-    import torch_npu  # noqa: F401
-    import transformer_engine
+    import os
+    import sys
 
-    transformer_engine.TE_DEVICE_TYPE = "npu"
-    transformer_engine.TE_PLATFORM = torch_npu.npu
-    torch.cuda.is_current_stream_capturing = lambda: False
+    sys.path.insert(0, os.path.join(os.environ["TE_PATH"], "qa"))
+    from ascend_npu_patch import apply_ascend_npu_patch
+
+    apply_ascend_npu_patch()
 except Exception as exc:
     print(f"[WARN] Failed to set NPU device type before pytest: {exc}", file=sys.stderr)
 
@@ -117,7 +117,7 @@ skip_test_point \
     "tests/cpp is CUDA C++/TE ABI based; the Ascend path validates the corresponding plugin backend instead."
 
 ascend_test_files=(
-    "$TE_PATH/transformer_engine/plugin/tests/test_backend_ascend_smoke.py"
+    "$TE_PATH/qa/test_backend_ascend_smoke.py"
     "$TE_PATH/transformer_engine/plugin/tests/test_backend_flagos.py"
     "$TE_PATH/transformer_engine/plugin/tests/test_backend_reference.py"
     "$TE_PATH/transformer_engine/plugin/tests/test_backend_reference_activation.py"
@@ -136,7 +136,7 @@ skipped_plugin_tests=(
     "transformer_engine/plugin/tests/test_backend_flagos_rmsnorm.py:test inputs are CPU tensors but FlagGems launches Ascend Triton kernels"
     "transformer_engine/plugin/tests/test_backend_flagos_softmax.py:test inputs are CPU tensors but FlagGems launches Ascend Triton kernels"
     "transformer_engine/plugin/tests/test_flash_attention.py:no pytest cases collected in this file"
-    "transformer_engine/plugin/tests/test_fused_rope.py:no pytest cases collected in this file"
+    "qa/test_fused_rope.py:no pytest cases collected in this file"
     "transformer_engine/plugin/tests/test_normalization.py:no pytest cases collected in this file"
     "transformer_engine/plugin/tests/test_operations.py:no pytest cases collected in this file"
     "transformer_engine/plugin/tests/test_optimizer.py:no pytest cases collected in this file"

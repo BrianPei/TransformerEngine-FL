@@ -7,10 +7,15 @@
 from __future__ import annotations
 
 import os
+from pathlib import Path
+import sys
 
 import torch
 import torch.distributed as dist
 import torch_npu  # noqa: F401
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from ascend_npu_patch import apply_ascend_npu_patch
 
 
 def main() -> None:
@@ -26,12 +31,9 @@ def main() -> None:
         expected = world_size * (world_size + 1) / 2
         torch.testing.assert_close(collective.cpu(), torch.tensor([expected]))
 
-        import transformer_engine
+        apply_ascend_npu_patch()
 
-        # torchrun starts independent Python workers, so set the TE device in each rank.
-        transformer_engine.TE_DEVICE_TYPE = "npu"
-        transformer_engine.TE_PLATFORM = torch_npu.npu
-        torch.cuda.is_current_stream_capturing = lambda: False
+        import transformer_engine
 
         import transformer_engine.pytorch as te
 

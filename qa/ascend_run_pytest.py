@@ -9,22 +9,16 @@ import os
 import sys
 
 os.environ.setdefault("PLATFORM", "ascend")
+os.environ.setdefault("TE_FL_SKIP_CUDA", "1")
+os.environ.setdefault("NVTE_FRAMEWORK", "pytorch")
 os.environ.setdefault("TORCHDYNAMO_DISABLE", "1")
 
-import torch
+from ascend_npu_patch import apply_ascend_npu_patch
 
 try:
-    import torch_npu
-except ModuleNotFoundError as exc:
-    raise SystemExit(f"torch_npu is required for Ascend pytest: {exc}") from exc
-
-import transformer_engine
-
-transformer_engine.TE_DEVICE_TYPE = "npu"
-transformer_engine.TE_PLATFORM = torch_npu.npu
-
-# Some TE PyTorch paths call this single CUDA graph query unconditionally.
-torch.cuda.is_current_stream_capturing = lambda: False
+    apply_ascend_npu_patch()
+except RuntimeError as exc:
+    raise SystemExit(str(exc)) from exc
 
 import pytest
 

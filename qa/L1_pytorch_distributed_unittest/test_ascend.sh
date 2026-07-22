@@ -15,7 +15,7 @@ mkdir -p "$XML_LOG_DIR"
 export TE_FL_SKIP_CUDA=1
 export NVTE_FRAMEWORK=pytorch
 
-"$PYTHON_BIN" -m pytest -v -s \
+"$PYTHON_BIN" "$TE_PATH/qa/ascend_run_pytest.py" -v -s \
     --junitxml="$XML_LOG_DIR/pytest_hccl_te.xml" \
     "$TE_PATH/qa/test_ascend_hccl_distributed.py"
 

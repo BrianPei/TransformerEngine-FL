@@ -36,15 +36,14 @@ trap 'rm -rf "$install_dir"' EXIT
 "$PYTHON_BIN" -m pip install --no-deps --target "$install_dir" "$wheel_path"
 
 cd /tmp
-if ! PYTHONPATH="$install_dir" "$PYTHON_BIN" - <<'PY'
+if ! PYTHONPATH="$TE_PATH/qa:$install_dir" "$PYTHON_BIN" - <<'PY'
 import torch
-import torch_npu
+
+from ascend_npu_patch import apply_ascend_npu_patch
+
+apply_ascend_npu_patch()
+
 import transformer_engine
-
-transformer_engine.TE_DEVICE_TYPE = "npu"
-transformer_engine.TE_PLATFORM = torch_npu.npu
-torch.cuda.is_current_stream_capturing = lambda: False
-
 import transformer_engine.pytorch as te
 
 assert transformer_engine.te_device_type() == "npu"
