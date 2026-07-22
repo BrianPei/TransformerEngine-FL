@@ -13,9 +13,22 @@ REPO_ROOT=$(cd "$SCRIPT_DIR/../.." && pwd)
 
 mkdir -p "$XML_LOG_DIR"
 
-reason="The ONNX suite hardcodes CUDA tensors and CUDA custom operators, while ONNX Runtime in this environment has no Ascend execution provider."
-"$PYTHON_BIN" "$TE_PATH/qa/ascend_write_junit_skip.py" \
-    --output "$XML_LOG_DIR/test_onnx_export.xml" \
-    --suite "L1_pytorch_onnx_unittest_ascend" \
-    --reason "$reason"
-echo "[SKIP] $reason"
+"$PYTHON_BIN" - <<'PY'
+missing = []
+for module in ("onnxruntime", "onnxruntime_extensions"):
+    try:
+        __import__(module)
+    except ModuleNotFoundError:
+        missing.append(module)
+if missing:
+    raise SystemExit(
+        "Missing ONNX test dependencies in the CI image: " + ", ".join(missing)
+    )
+PY
+
+NVTE_UnfusedDPA_Emulate_FP8=1 \
+"$PYTHON_BIN" "$TE_PATH/qa/ascend_run_pytest.py" \
+    -v -s \
+    --tb=auto \
+    --junitxml="$XML_LOG_DIR/test_onnx_export.xml" \
+    "$TE_PATH/tests/pytorch/test_onnx_export.py"

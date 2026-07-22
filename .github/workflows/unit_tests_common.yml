@@ -211,16 +211,18 @@ jobs:
 
           # Combine coverage fragments and generate JSON report
           if [ "$COVERAGE_ENABLED" = "true" ]; then
-            python3 -m coverage combine --keep 2>/dev/null || true
+            python3 -m coverage combine --keep
             python3 -m coverage json \
               -o "coverage-${{ inputs.platform }}-${{ inputs.device }}-${{ matrix.test_group.name }}.json" \
               --include="transformer_engine/pytorch/*,transformer_engine/debug/*,transformer_engine/plugin/*" \
               --omit="*/setup.py,*/transformer_engine/plugin/core/_build_config.py" \
-              -i 2>/dev/null \
-              || echo "WARNING: No coverage data found"
+              -i
 
             if [ -f .coverage ]; then
               cp .coverage "coverage-${{ inputs.platform }}-${{ inputs.device }}-${{ matrix.test_group.name }}.coverage"
+            else
+              echo "ERROR: No raw coverage data found"
+              exit 1
             fi
           fi
           exit $exit_code
@@ -303,9 +305,9 @@ jobs:
           done
 
           if [ "$coverage_count" -eq 0 ]; then
-            echo "WARNING: No raw coverage files found for aggregation"
+            echo "ERROR: No raw coverage files found for aggregation"
             echo "coverage_aggregated=false" >> "$GITHUB_OUTPUT"
-            exit 0
+            exit 1
           fi
 
           python3 -m coverage combine coverage-raw
