@@ -312,8 +312,12 @@ jobs:
           done
 
           if [ "$coverage_count" -eq 0 ]; then
-            echo "WARNING: No raw coverage files found for aggregation; skipping coverage aggregation"
+            echo "WARNING: No raw coverage files found for aggregation"
             echo "coverage_aggregated=false" >> "$GITHUB_OUTPUT"
+            if [ "${{ inputs.platform }}" = "ascend" ]; then
+              echo "Ascend Unit jobs must produce real coverage data" >&2
+              exit 1
+            fi
             exit 0
           fi
 
