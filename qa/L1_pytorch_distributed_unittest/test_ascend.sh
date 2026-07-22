@@ -14,8 +14,6 @@ REPO_ROOT=$(cd "$SCRIPT_DIR/../.." && pwd)
 mkdir -p "$XML_LOG_DIR"
 export TE_FL_SKIP_CUDA=1
 export NVTE_FRAMEWORK=pytorch
-export PLATFORM=ascend
-export NVTE_DEVICE_TYPE=npu
 
 "$PYTHON_BIN" "$TE_PATH/qa/ascend_run_pytest.py" -v -s \
     --junitxml="$XML_LOG_DIR/pytest_hccl_te.xml" \

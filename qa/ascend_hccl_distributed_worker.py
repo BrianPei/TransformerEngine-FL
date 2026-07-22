@@ -7,10 +7,15 @@
 from __future__ import annotations
 
 import os
+from pathlib import Path
+import sys
 
 import torch
 import torch.distributed as dist
 import torch_npu  # noqa: F401
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from ascend_npu_patch import apply_ascend_npu_patch
 
 
 def main() -> None:
@@ -25,6 +30,8 @@ def main() -> None:
         dist.all_reduce(collective)
         expected = world_size * (world_size + 1) / 2
         torch.testing.assert_close(collective.cpu(), torch.tensor([expected]))
+
+        apply_ascend_npu_patch()
 
         import transformer_engine
 

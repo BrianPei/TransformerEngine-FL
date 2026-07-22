@@ -16,8 +16,6 @@ mkdir -p "$XML_LOG_DIR"
 
 export TE_FL_SKIP_CUDA=1
 export NVTE_FRAMEWORK=pytorch
-export PLATFORM=ascend
-export NVTE_DEVICE_TYPE=npu
 TE_LIB_PATH=$("$PYTHON_BIN" - <<'PY'
 import site
 
@@ -79,10 +77,16 @@ import pytest
 test_file = sys.argv[1]
 junit_xml = sys.argv[2]
 
-import transformer_engine
+try:
+    import os
+    import sys
 
-if transformer_engine.te_device_type() != "npu":
-    raise SystemExit("Transformer Engine did not select the NPU runtime")
+    sys.path.insert(0, os.path.join(os.environ["TE_PATH"], "qa"))
+    from ascend_npu_patch import apply_ascend_npu_patch
+
+    apply_ascend_npu_patch()
+except Exception as exc:
+    print(f"[WARN] Failed to set NPU device type before pytest: {exc}", file=sys.stderr)
 
 raise SystemExit(
     pytest.main(

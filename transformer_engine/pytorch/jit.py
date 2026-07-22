@@ -38,21 +38,13 @@ def lazy_compile(func):
 
 
 jit_fuser = lambda func: func
-if (
-    te_device_type() == "cuda"
-    and torch_version() >= (2, 0, 0)
-    and bool(int(os.getenv("NVTE_TORCH_COMPILE", "1")))
-):
+if torch_version() >= (2, 0, 0) and bool(int(os.getenv("NVTE_TORCH_COMPILE", "1"))):
     jit_fuser = lazy_compile
 
 
 # See: https://github.com/NVIDIA/TransformerEngine/issues/597
 dropout_fuser = torch.jit.script
-if (
-    te_device_type() == "cuda"
-    and torch_version() >= (2, 2, 0)
-    and bool(int(os.getenv("NVTE_TORCH_COMPILE", "1")))
-):
+if torch_version() >= (2, 2, 0) and bool(int(os.getenv("NVTE_TORCH_COMPILE", "1"))):
     dropout_fuser = lazy_compile
 
 

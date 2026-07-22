@@ -13,8 +13,6 @@ REPO_ROOT=$(cd "$SCRIPT_DIR/../.." && pwd)
 
 export TE_FL_SKIP_CUDA=1
 export NVTE_FRAMEWORK=pytorch
-export PLATFORM=ascend
-export NVTE_DEVICE_TYPE=npu
 
 "$PYTHON_BIN" -m pip install wheel
 mkdir -p "$WHEEL_DIR"
@@ -38,8 +36,12 @@ trap 'rm -rf "$install_dir"' EXIT
 "$PYTHON_BIN" -m pip install --no-deps --target "$install_dir" "$wheel_path"
 
 cd /tmp
-if ! PYTHONPATH="$install_dir" "$PYTHON_BIN" - <<'PY'
+if ! PYTHONPATH="$TE_PATH/qa:$install_dir" "$PYTHON_BIN" - <<'PY'
 import torch
+
+from ascend_npu_patch import apply_ascend_npu_patch
+
+apply_ascend_npu_patch()
 
 import transformer_engine
 import transformer_engine.pytorch as te

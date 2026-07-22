@@ -38,7 +38,6 @@ setup_script: .github/scripts/setup_ascend.sh
 # Build environment variables
 build_env:
   PLATFORM: ascend
-  NVTE_DEVICE_TYPE: npu
   TE_FL_SKIP_CUDA: '1'
   NVTE_FRAMEWORK: pytorch
   NVTE_WITH_CUDA: '0'

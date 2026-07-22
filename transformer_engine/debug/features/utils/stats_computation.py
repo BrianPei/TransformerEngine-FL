@@ -7,21 +7,12 @@ Mathematical functions used to tensor statistics computation.
 """
 
 import math
-import os
 from collections import namedtuple
 
 import torch
 import torch.nn.functional as F
 import transformer_engine_torch as tex
-from transformer_engine import te_device_type
 from transformer_engine.common.recipe import Format
-
-
-def _compile_stats(func):
-    """Compile CUDA statistics while keeping unsupported accelerators in eager mode."""
-    if te_device_type() == "cuda" and bool(int(os.getenv("NVTE_TORCH_COMPILE", "1"))):
-        return torch.compile(func)
-    return func
 
 
 class BlockwiseDynamicRangeStat(
@@ -35,7 +26,7 @@ class BlockwiseDynamicRangeStat(
         return f"max_blockwise_dynamic_range_block_size_{self.block_size}_dims_{self.dims}{suffix}"
 
 
-@_compile_stats
+@torch.compile
 def _compute_dynamic_range_top(tensor):
     """Computes the log2 of the amax of the tensor"""
     tensor_abs = tensor.abs()
@@ -48,7 +39,7 @@ def _compute_dynamic_range_top(tensor):
     return torch.log2(amax)
 
 
-@_compile_stats
+@torch.compile
 def _compute_dynamic_range_bottom(tensor):
     """Computes the log2 of the amin of the tensor"""
     tensor_abs = tensor.abs()
@@ -129,7 +120,7 @@ def compute_max_blockwise_dynamic_range(tensor, stat_config):
     return _compute_for_one_orientation(tensor_2d)
 
 
-@_compile_stats
+@torch.compile
 def compute_variance(variances, numels, sums):
     """Welford algorithm is used for numerically stable distributed variance computation."""
     mean = torch.sum(sums) / torch.sum(numels)
@@ -138,7 +129,7 @@ def compute_variance(variances, numels, sums):
     return var
 
 
-@_compile_stats
+@torch.compile
 def compute_std(variances, numels, sums):
     """Computates standard deviation."""
     return torch.sqrt(compute_variance(variances, numels, sums))

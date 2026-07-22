@@ -11,7 +11,7 @@ import functools
 import torch
 import transformer_engine_torch as tex
 
-from transformer_engine import te_device_type, te_platform
+from transformer_engine import te_device_type
 
 from ..constants import TE_DType
 from ..utils import get_sm_count, _empty_tensor
@@ -35,9 +35,7 @@ _NUM_MAX_UB_STREAMS = 3
 
 def get_cublas_workspace_size_bytes() -> None:
     """Return 32 MiB if using hopper, 4 MiB for all other architectures."""
-    if te_device_type() == "cuda" and torch.cuda.get_device_properties(
-        torch.cuda.current_device()
-    ).major >= 9:
+    if torch.cuda.get_device_properties(torch.cuda.current_device()).major >= 9:
         # 32 MiB for NVFP4 GEMM, plus additional 1024 B for alignment and misc scales
         return 32 * 1024 * 1024 + 1024
     return 4_194_304
@@ -47,32 +45,22 @@ def get_cublas_workspace_size_bytes() -> None:
 def get_cublas_workspace(device: int, ub: bool, grouped_gemm: bool) -> torch.Tensor:
     """Returns workspace for cublas GEMM."""
     assert not (ub and grouped_gemm), "UB is unsupported for grouped GEMM."
-    if device is None:
-        device = te_platform().current_device()
-    workspace_device = torch.device(te_device_type(), device)
 
     if ub:
         return torch.empty(
             get_cublas_workspace_size_bytes() * _NUM_MAX_UB_STREAMS,
             dtype=torch.uint8,
-            device=workspace_device,
+            device=device,
         )
     if grouped_gemm:
         _multi_stream_cublas_workspace = []
-        num_streams = tex.get_num_cublas_streams() if te_device_type() == "cuda" else 1
-        for _ in range(num_streams):
+        for _ in range(tex.get_num_cublas_streams()):
             _multi_stream_cublas_workspace.append(
-                torch.empty(
-                    get_cublas_workspace_size_bytes(),
-                    dtype=torch.uint8,
-                    device=workspace_device,
-                )
+                torch.empty(get_cublas_workspace_size_bytes(), dtype=torch.uint8, device=device)
             )
         return _multi_stream_cublas_workspace
 
-    return torch.empty(
-        get_cublas_workspace_size_bytes(), dtype=torch.uint8, device=workspace_device
-    )
+    return torch.empty(get_cublas_workspace_size_bytes(), dtype=torch.uint8, device=device)
 
 
 def validate_gemm_scale(scale: Optional[float], required: bool) -> float:

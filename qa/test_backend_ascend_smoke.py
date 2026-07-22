@@ -36,32 +36,6 @@ def test_flag_gems_mm_matches_torch_npu():
     torch.testing.assert_close(actual, expected, rtol=1e-4, atol=1e-4)
 
 
-def test_transformer_engine_ascend_runtime():
-    """TE should select NPU without test-side monkey patching."""
-    import transformer_engine
-    from transformer_engine.pytorch.quantization import (
-        check_fp8_block_scaling_support,
-        check_fp8_support,
-        check_mxfp8_support,
-        check_nvfp4_support,
-    )
-    from transformer_engine.pytorch.utils import canonicalize_device
-
-    assert transformer_engine.te_device_type() == "npu"
-    assert transformer_engine.te_platform() is torch.npu
-    assert canonicalize_device(None) == torch.device("npu", torch.npu.current_device())
-
-    for capability_check in (
-        check_fp8_support,
-        check_mxfp8_support,
-        check_nvfp4_support,
-        check_fp8_block_scaling_support,
-    ):
-        supported, reason = capability_check()
-        assert not supported
-        assert "npu" in reason
-
-
 def test_transformer_engine_linear_forward_backward():
     """TE Linear should use the NPU backend for forward and backward passes."""
     import transformer_engine

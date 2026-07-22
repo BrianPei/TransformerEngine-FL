@@ -8,31 +8,22 @@
 
 import os
 from importlib import metadata
+import transformer_engine.common
 
 import torch
 
+# Public, simple global (kept for backward compatibility).
+TE_DEVICE_TYPE = "cuda"
+TE_PLATFORM = torch.cuda
 
-def _select_device_backend():
-    """Select the PyTorch accelerator requested for this process."""
-    requested = os.getenv("NVTE_DEVICE_TYPE", os.getenv("PLATFORM", "cuda")).strip().lower()
-    if requested in ("ascend", "npu"):
-        try:
-            import torch_npu  # noqa: F401  # pylint: disable=unused-import
-        except ImportError as exc:
-            raise RuntimeError(
-                "Ascend was selected, but torch_npu could not be imported."
-            ) from exc
+# Apply MUSA (VENDOR) Patches, such as torch.cuda.device -> torch.musa.device
+try:
+    from .plugin.core.backends.vendor.musa.patches import apply_patch as _musa_apply_patch
 
-        npu_platform = getattr(torch, "npu", None)
-        if npu_platform is None:
-            raise RuntimeError("Ascend was selected, but torch.npu is unavailable.")
-        return "npu", npu_platform
+    _musa_apply_patch()
+except Exception as e:
+    pass
 
-    return "cuda", torch.cuda
-
-
-# Public globals are kept for backward compatibility.
-TE_DEVICE_TYPE, TE_PLATFORM = _select_device_backend()
 
 def te_device_type(default: str = "cuda") -> str:
     try:
@@ -46,18 +37,6 @@ def te_platform(default=torch.cuda):
         return TE_PLATFORM
     except Exception:
         return default
-
-
-# Load the plugin system only after the process accelerator has been selected.
-import transformer_engine.common  # noqa: E402  # pylint: disable=wrong-import-position
-
-# Apply MUSA (VENDOR) patches after the public device helpers are available.
-try:
-    from .plugin.core.backends.vendor.musa.patches import apply_patch as _musa_apply_patch
-
-    _musa_apply_patch()
-except Exception:
-    pass
 
 
 try:
