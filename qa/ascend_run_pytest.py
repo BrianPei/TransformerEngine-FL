@@ -9,16 +9,21 @@ import os
 import sys
 
 os.environ.setdefault("PLATFORM", "ascend")
+os.environ.setdefault("NVTE_DEVICE_TYPE", "npu")
 os.environ.setdefault("TE_FL_SKIP_CUDA", "1")
 os.environ.setdefault("NVTE_FRAMEWORK", "pytorch")
-os.environ.setdefault("TORCHDYNAMO_DISABLE", "1")
 
-from ascend_npu_patch import apply_ascend_npu_patch
+import torch
 
 try:
-    apply_ascend_npu_patch()
-except RuntimeError as exc:
+    import torch_npu  # noqa: F401  # pylint: disable=unused-import
+except ImportError as exc:
     raise SystemExit(str(exc)) from exc
+
+import transformer_engine
+
+if transformer_engine.te_device_type() != "npu" or not torch.npu.is_available():
+    raise SystemExit("Transformer Engine did not initialize an available Ascend NPU backend.")
 
 import pytest
 

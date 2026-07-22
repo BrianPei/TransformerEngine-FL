@@ -16,7 +16,8 @@ mkdir -p "$XML_LOG_DIR"
 
 export TE_FL_SKIP_CUDA=1
 export NVTE_FRAMEWORK=pytorch
-export TORCHDYNAMO_DISABLE=1
+export PLATFORM=ascend
+export NVTE_DEVICE_TYPE=npu
 : "${NVTE_TEST_NVINSPECT_FEATURE_DIRS:=$TE_PATH/transformer_engine/debug/features}"
 : "${NVTE_TEST_NVINSPECT_CONFIGS_DIR:=$TE_PATH/tests/pytorch/debug/test_configs/}"
 

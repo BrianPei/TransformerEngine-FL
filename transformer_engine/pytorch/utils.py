@@ -12,7 +12,7 @@ from contextlib import nullcontext
 import numpy as np
 import torch
 
-from transformer_engine import te_device_type
+from transformer_engine import te_device_type, te_platform
 
 from .torch_version import torch_version
 from ..debug.pytorch.debug_quantization import DebugQuantizedTensor
@@ -80,8 +80,10 @@ def _get_device_compute_capability(device: torch.device) -> Tuple[int, int]:
 
 
 def get_device_compute_capability() -> Tuple[int, int]:
-    """CUDA compute capability of current GPU"""
-    return _get_device_compute_capability(torch.cuda.current_device())
+    """CUDA compute capability of the current device, or ``(0, 0)`` otherwise."""
+    if te_device_type() != "cuda":
+        return (0, 0)
+    return _get_device_compute_capability(te_platform().current_device())
 
 
 def attention_mask_func(
@@ -143,7 +145,7 @@ def all_close(a: torch.Tensor, b: torch.Tensor) -> bool:
 
 def print_rank_0(*args: Any) -> None:
     """print on rank 0"""
-    if torch.cuda.current_device() == 0:
+    if te_platform().current_device() == 0:
         print(*args)
 
 
@@ -496,6 +498,14 @@ def is_bf16_compatible() -> bool:
     """Replaces torch.cuda.is_bf16_compatible() with an explicit
     check on device compute capability to enforce sm_80 or higher.
     """
+    if te_device_type() != "cuda":
+        is_supported = getattr(te_platform(), "is_bf16_supported", None)
+        if is_supported is None:
+            return True
+        try:
+            return bool(is_supported())
+        except (RuntimeError, NotImplementedError):
+            return False
     return torch.cuda.get_device_capability()[0] >= 8
 
 
@@ -527,6 +537,8 @@ def is_non_tn_fp8_gemm_supported() -> bool:
     """Checks whether the device supports
     non-TN layouts for FP8 GEMMs.
     """
+    if te_device_type() != "cuda":
+        return False
     device_capability = torch.cuda.get_device_capability()
     return (10, 0) <= device_capability < (12, 0) or device_capability >= (13, 0)
 
@@ -553,11 +565,11 @@ def canonicalize_device(device: Optional[torch.device | str]) -> torch.device:
         # Use default CUDA device
         device = torch.get_default_device()
         if device.type != te_device_type():
-            device = torch.device(te_device_type(), torch.cuda.current_device())
+            device = torch.device(te_device_type(), te_platform().current_device())
     elif not isinstance(device, torch.device):
         device = torch.device(device)
     if device.type == te_device_type() and device.index is None:
-        device = torch.device(te_device_type(), torch.cuda.current_device())
+        device = torch.device(te_device_type(), te_platform().current_device())
     return device
 
 
@@ -585,9 +597,9 @@ def devices_match(device1: torch.device, device2: torch.device) -> bool:
         if index1 == index2:
             return True
         if index1 is None:
-            index1 = torch.cuda.current_device()
+            index1 = te_platform().current_device()
         if index2 is None:
-            index2 = torch.cuda.current_device()
+            index2 = te_platform().current_device()
         return index1 == index2
     return device1 == device2
 
@@ -595,7 +607,25 @@ def devices_match(device1: torch.device, device2: torch.device) -> bool:
 @functools.lru_cache
 def get_sm_count() -> int:
     """Returns the number of streaming multiprocessors in the current device."""
-    return torch.cuda.get_device_properties(torch.cuda.current_device()).multi_processor_count
+    get_properties = getattr(te_platform(), "get_device_properties", None)
+    if get_properties is None:
+        return 0
+    try:
+        properties = get_properties(te_platform().current_device())
+    except (RuntimeError, NotImplementedError):
+        return 0
+    return int(getattr(properties, "multi_processor_count", 0))
+
+
+def is_current_stream_capturing() -> bool:
+    """Whether the active accelerator stream is being captured."""
+    is_capturing = getattr(te_platform(), "is_current_stream_capturing", None)
+    if is_capturing is None:
+        return False
+    try:
+        return bool(is_capturing())
+    except (RuntimeError, NotImplementedError):
+        return False
 
 
 def round_up_to_nearest_multiple(value, multiple):

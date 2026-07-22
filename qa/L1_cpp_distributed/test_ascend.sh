@@ -14,6 +14,8 @@ REPO_ROOT=$(cd "$SCRIPT_DIR/../.." && pwd)
 mkdir -p "$XML_LOG_DIR"
 export TE_FL_SKIP_CUDA=1
 export NVTE_FRAMEWORK=pytorch
+export PLATFORM=ascend
+export NVTE_DEVICE_TYPE=npu
 
 reason="CUDA C++ comm_gemm has no Ascend C++ build in this repository; the Ascend path runs the real two-NPU HCCL/TE smoke instead."
 "$PYTHON_BIN" "$TE_PATH/qa/ascend_write_junit_skip.py" \

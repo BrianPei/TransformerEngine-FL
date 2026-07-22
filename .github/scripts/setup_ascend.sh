@@ -17,6 +17,8 @@ fi
 
 export TE_FL_SKIP_CUDA=1
 export NVTE_FRAMEWORK=pytorch
+export PLATFORM=ascend
+export NVTE_DEVICE_TYPE=npu
 
 echo "===== Load Ascend runtime environment ====="
 if [ -f /usr/local/Ascend/ascend-toolkit/set_env.sh ]; then
