@@ -27,10 +27,6 @@ run_test_step() {
 
     if [ "$runner" = "ascend" ]; then
         command=("$PYTHON_BIN" "$TE_PATH/qa/ascend_run_pytest.py")
-    elif [ "$runner" = "isolated" ]; then
-        # These backend files install flag_gems mocks during module import.
-        # pytest-cov imports TE first and defeats that isolation on Ascend.
-        command=(env -u PYTEST_ADDOPTS "$PYTHON_BIN" -m pytest)
     fi
 
     echo "-------------------------------------------------------"
@@ -53,32 +49,27 @@ run_test_step \
     ascend \
     "Ascend FlagOS operator tests"
 
-echo "[INFO] Running the Plugin Unit files shared with CUDA and MetaX."
+echo "[INFO] Running portable Plugin Unit files shared with CUDA and MetaX."
 PLUGIN_TEST_ROOT="$TE_PATH/transformer_engine/plugin/tests"
 run_test_step "pytest_test_plugin_policy.xml" \
     "$PLUGIN_TEST_ROOT/test_plugin_policy.py"
 run_test_step "pytest_test_plugin_manager.xml" \
     "$PLUGIN_TEST_ROOT/test_plugin_manager.py"
 run_test_step "pytest_test_backend_flagos.xml" \
-    "$PLUGIN_TEST_ROOT/test_backend_flagos.py" isolated
-run_test_step "pytest_test_backend_flagos_fused_adam.xml" \
-    "$PLUGIN_TEST_ROOT/test_backend_flagos_fused_adam.py" isolated
-run_test_step "pytest_test_backend_flagos_gemm.xml" \
-    "$PLUGIN_TEST_ROOT/test_backend_flagos_gemm.py" isolated
-run_test_step "pytest_test_backend_flagos_multi_tensor.xml" \
-    "$PLUGIN_TEST_ROOT/test_backend_flagos_multi_tensor.py" isolated
-run_test_step "pytest_test_backend_flagos_rmsnorm.xml" \
-    "$PLUGIN_TEST_ROOT/test_backend_flagos_rmsnorm.py" isolated
-run_test_step "pytest_test_backend_flagos_softmax.xml" \
-    "$PLUGIN_TEST_ROOT/test_backend_flagos_softmax.py" isolated
+    "$PLUGIN_TEST_ROOT/test_backend_flagos.py"
+
+# The FlagOS implementation lifecycle files use CPU tensors and import-time
+# flag_gems mocks. Real Ascend GEMM, RMSNorm, softmax, and multi-tensor paths
+# are covered by qa/test_backend_ascend_ops.py above. Fused Adam is not in the
+# current Ascend-supported Unit scope.
 run_test_step "pytest_test_backend_reference.xml" \
-    "$PLUGIN_TEST_ROOT/test_backend_reference.py" isolated
+    "$PLUGIN_TEST_ROOT/test_backend_reference.py"
 run_test_step "pytest_test_backend_reference_activation.xml" \
-    "$PLUGIN_TEST_ROOT/test_backend_reference_activation.py" isolated
+    "$PLUGIN_TEST_ROOT/test_backend_reference_activation.py"
 run_test_step "pytest_test_backend_reference_dropout.xml" \
-    "$PLUGIN_TEST_ROOT/test_backend_reference_dropout.py" isolated
+    "$PLUGIN_TEST_ROOT/test_backend_reference_dropout.py"
 run_test_step "pytest_test_backend_reference_gemm.xml" \
-    "$PLUGIN_TEST_ROOT/test_backend_reference_gemm.py" isolated
+    "$PLUGIN_TEST_ROOT/test_backend_reference_gemm.py"
 
 if [ "$FAIL" -ne 0 ]; then
     echo "Some Ascend PyTorch Unit tests failed."
