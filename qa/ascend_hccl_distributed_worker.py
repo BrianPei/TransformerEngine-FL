@@ -27,12 +27,10 @@ def main() -> None:
         torch.testing.assert_close(collective.cpu(), torch.tensor([expected]))
 
         import transformer_engine
-        from transformer_engine.plugin.core.backends.vendor.npu.patches import (
-            apply_patch as _apply_npu_patch,
-        )
 
-        # torchrun starts independent Python workers, so apply NPU patches in each rank.
-        _apply_npu_patch()
+        # torchrun starts independent Python workers, so set the TE device in each rank.
+        transformer_engine.TE_DEVICE_TYPE = "npu"
+        transformer_engine.TE_PLATFORM = torch_npu.npu
 
         import transformer_engine.pytorch as te
 

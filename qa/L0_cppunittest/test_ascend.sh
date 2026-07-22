@@ -73,13 +73,12 @@ junit_xml = sys.argv[2]
 
 try:
     import torch_npu  # noqa: F401
-    from transformer_engine.plugin.core.backends.vendor.npu.patches import (
-        apply_patch as _apply_npu_patch,
-    )
+    import transformer_engine
 
-    _apply_npu_patch()
+    transformer_engine.TE_DEVICE_TYPE = "npu"
+    transformer_engine.TE_PLATFORM = torch_npu.npu
 except Exception as exc:
-    print(f"[WARN] Failed to apply NPU patch before pytest: {exc}", file=sys.stderr)
+    print(f"[WARN] Failed to set NPU device type before pytest: {exc}", file=sys.stderr)
 
 raise SystemExit(
     pytest.main(
