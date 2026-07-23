@@ -7,8 +7,15 @@
 import pytest
 import torch
 
-torch_npu = pytest.importorskip("torch_npu")
-flag_gems = pytest.importorskip("flag_gems")
+try:
+    import torch_npu  # noqa: F401
+except ModuleNotFoundError as exc:
+    pytest.fail(f"torch_npu is required for real Ascend NPU tests: {exc}", pytrace=False)
+
+try:
+    import flag_gems
+except ModuleNotFoundError as exc:
+    pytest.fail(f"flag_gems is required for real Ascend NPU tests: {exc}", pytrace=False)
 
 pytestmark = pytest.mark.skipif(
     not torch.npu.is_available(),

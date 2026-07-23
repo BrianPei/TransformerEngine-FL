@@ -21,9 +21,24 @@ FAIL=0
 run_test_step() {
     local xml_file=$1
     local test_path=$2
-    local runner=${3:-pytest}
-    local label=${4:-$(basename "$test_path")}
+    shift 2
+    local runner=pytest
+    local label
+    label=$(basename "$test_path")
     local command=("$PYTHON_BIN" -m pytest)
+    local target_args=("$test_path")
+
+    if [ "$#" -gt 0 ]; then
+        runner=${1:-pytest}
+        shift
+    fi
+    if [ "$#" -gt 0 ]; then
+        label=${1:-$(basename "$test_path")}
+        shift
+    fi
+    if [ "$#" -gt 0 ]; then
+        target_args=("$@")
+    fi
 
     if [ "$runner" = "ascend" ]; then
         command=("$PYTHON_BIN" "$TE_PATH/qa/ascend_run_pytest.py")
@@ -34,7 +49,7 @@ run_test_step() {
     "${command[@]}" \
         -v -s --tb=short \
         --junitxml="$XML_LOG_DIR/$xml_file" \
-        "$test_path" || FAIL=1
+        "${target_args[@]}" || FAIL=1
 }
 
 echo "[INFO] Running real-NPU TE unit tests on Ascend."
@@ -70,6 +85,43 @@ run_test_step "pytest_test_backend_reference_dropout.xml" \
     "$PLUGIN_TEST_ROOT/test_backend_reference_dropout.py"
 run_test_step "pytest_test_backend_reference_gemm.xml" \
     "$PLUGIN_TEST_ROOT/test_backend_reference_gemm.py"
+
+echo "[INFO] Running selected shared PyTorch sanity and numerics tests on Ascend."
+NVTE_FLASH_ATTN=0 \
+NVTE_FUSED_ATTN=0 \
+NVTE_UNFUSED_ATTN=1 \
+run_test_step \
+    "pytest_shared_sanity_portable.xml" \
+    "$TE_PATH/tests/pytorch/test_sanity.py" \
+    ascend \
+    "Shared portable sanity tests" \
+    "$TE_PATH/tests/pytorch/test_sanity.py::test_sanity_normalization_amp[LayerNorm-False-False-small-dtype0]" \
+    "$TE_PATH/tests/pytorch/test_sanity.py::test_sanity_normalization_amp[RMSNorm-False-False-small-dtype0]" \
+    "$TE_PATH/tests/pytorch/test_sanity.py::test_sanity_linear[False-False-False-small-None-dtype0]" \
+    "$TE_PATH/tests/pytorch/test_sanity.py::test_sanity_layernorm_linear[False-LayerNorm-False-False-False-small-None-dtype0]" \
+    "$TE_PATH/tests/pytorch/test_sanity.py::test_sanity_layernorm_linear[False-RMSNorm-False-False-False-small-None-dtype0]" \
+    "$TE_PATH/tests/pytorch/test_sanity.py::test_sanity_layernorm_mlp[False-False-LayerNorm-gelu-False-False-False-small-None-dtype0]" \
+    "$TE_PATH/tests/pytorch/test_sanity.py::test_sanity_layernorm_mlp[False-False-RMSNorm-silu-False-False-False-small-None-dtype0]"
+
+NVTE_FLASH_ATTN=0 \
+NVTE_FUSED_ATTN=0 \
+NVTE_UNFUSED_ATTN=1 \
+run_test_step \
+    "pytest_shared_numerics_portable.xml" \
+    "$TE_PATH/tests/pytorch/test_numerics.py" \
+    ascend \
+    "Shared non-FP8 numerics and unfused attention tests" \
+    "$TE_PATH/tests/pytorch/test_numerics.py::test_linear_accuracy[False-False-small-1-dtype0]" \
+    "$TE_PATH/tests/pytorch/test_numerics.py::test_linear_accuracy[False-False-small-1-dtype1]" \
+    "$TE_PATH/tests/pytorch/test_numerics.py::test_layernorm_accuracy[False-1e-05-126m-1-dtype0]" \
+    "$TE_PATH/tests/pytorch/test_numerics.py::test_rmsnorm_accuracy[False-1e-05-126m-1-dtype0]" \
+    "$TE_PATH/tests/pytorch/test_numerics.py::test_layernorm_linear_accuracy[False-False-False-LayerNorm-small-1-dtype0]" \
+    "$TE_PATH/tests/pytorch/test_numerics.py::test_layernorm_linear_accuracy[False-False-False-RMSNorm-small-1-dtype0]" \
+    "$TE_PATH/tests/pytorch/test_numerics.py::test_layernorm_mlp_accuracy[False-False-LayerNorm-gelu-small-1-dtype0]" \
+    "$TE_PATH/tests/pytorch/test_numerics.py::test_layernorm_mlp_accuracy[False-False-RMSNorm-silu-small-1-dtype0]" \
+    "$TE_PATH/tests/pytorch/test_numerics.py::test_dpa_accuracy[126m-1-dtype0]" \
+    "$TE_PATH/tests/pytorch/test_numerics.py::test_mha_accuracy[causal-small-1-dtype0]" \
+    "$TE_PATH/tests/pytorch/test_numerics.py::test_mha_accuracy[no_mask-small-1-dtype0]"
 
 if [ "$FAIL" -ne 0 ]; then
     echo "Some Ascend PyTorch Unit tests failed."
