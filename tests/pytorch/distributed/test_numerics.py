@@ -34,7 +34,8 @@ fp8_block_scaling_available, reason_for_no_fp8_block_scaling = te.is_fp8_block_s
 nvfp4_available, reason_for_no_nvfp4 = te.is_nvfp4_available(return_reason=True)
 
 TEST_ROOT = Path(__file__).parent.resolve()
-NUM_PROCS: int = min(4, torch.cuda.device_count())
+_ASCEND_NUMERICS_SUBSET = bool(int(os.getenv("NVTE_ASCEND_DISTRIBUTED_NUMERICS_SUBSET", "0")))
+NUM_PROCS: int = min(2 if _ASCEND_NUMERICS_SUBSET else 4, torch.cuda.device_count())
 LAUNCH_CMD = ["torchrun", f"--nproc_per_node={NUM_PROCS}"]
 
 

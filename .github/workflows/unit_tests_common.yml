@@ -108,7 +108,15 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      
+
+      # Ascend installs the Python/plugin layer and does not need CUDA submodules
+      - name: Checkout Source Code on Ascend
+        if: inputs.platform == 'ascend'
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          set-safe-directory: true
+
       - name: Environment Setup
         if: inputs.setup_script != ''
         run: |
@@ -129,21 +137,39 @@ jobs:
               print(f'{k}={v}')
           ")
           
-          # Activate conda environment
-          if ${{inputs.platform == 'metax'}}; then
-            source /opt/conda/etc/profile.d/conda.sh
-            conda activate base
-          else
-            source /opt/miniconda3/etc/profile.d/conda.sh
-            conda activate flagscale-train
-          fi
+          # Activate the platform-specific Python environment.
+          case "${{ inputs.platform }}" in
+            cuda)
+              source /opt/miniconda3/etc/profile.d/conda.sh
+              conda activate flagscale-train
+              ;;
+            metax)
+              source /opt/conda/etc/profile.d/conda.sh
+              conda activate base
+              ;;
+            ascend)
+              if [ -f /opt/conda/etc/profile.d/conda.sh ]; then
+                source /opt/conda/etc/profile.d/conda.sh
+                conda activate "${CONDA_ENV:-base}"
+              elif [ -f /opt/miniconda3/etc/profile.d/conda.sh ]; then
+                source /opt/miniconda3/etc/profile.d/conda.sh
+                conda activate "${CONDA_ENV:-flagscale-train}"
+              fi
+              ;;
+            *)
+              echo "Unsupported platform: ${{ inputs.platform }}" >&2
+              exit 1
+              ;;
+          esac
           echo "PATH=$PATH" >> $GITHUB_ENV
 
           export TE_PATH=$GITHUB_WORKSPACE
           export TE_LIB_PATH=$(python3 -c "import site; print(site.getsitepackages()[0])")
           export PYTHONPATH=$GITHUB_WORKSPACE:${PYTHONPATH:-}
-          export PATH=${CUDA_HOME:-/usr/local/cuda}/bin:$PATH
-          export LD_LIBRARY_PATH=${CUDA_HOME:-/usr/local/cuda}/lib:${LD_LIBRARY_PATH:-}
+          if [ "${{ inputs.platform }}" = "cuda" ] || [ "${{ inputs.platform }}" = "metax" ]; then
+            export PATH=${CUDA_HOME:-/usr/local/cuda}/bin:$PATH
+            export LD_LIBRARY_PATH=${CUDA_HOME:-/usr/local/cuda}/lib:${LD_LIBRARY_PATH:-}
+          fi
           
           # check envs before running tests
           echo "TE_PATH=$TE_PATH"
@@ -155,42 +181,80 @@ jobs:
           # Ensure log directory exists regardless of volume mount state
           mkdir -p /logs
 
-          # Coverage setup: install once + configure collection via PYTEST_ADDOPTS
+          # Coverage setup: Ascend unit jobs must always produce raw coverage.
           COVERAGE_ENABLED=false
-          if pip3 install coverage pytest-cov --quiet 2>/dev/null; then
+          if [ "${{ inputs.platform }}" = "ascend" ]; then
+            python3 -m pip install --quiet --no-cache-dir coverage pytest-cov
+            python3 -c "import importlib.metadata as m; import coverage, pytest_cov; print('[coverage] coverage', m.version('coverage'), 'pytest-cov', m.version('pytest-cov'))"
+            export PYTEST_ADDOPTS="--cov=transformer_engine/pytorch --cov=transformer_engine/debug --cov=transformer_engine/plugin --cov-append --cov-report="
+            COVERAGE_ENABLED=true
+          elif python3 -m pip install --quiet coverage pytest-cov 2>/dev/null; then
             export PYTEST_ADDOPTS="--cov=transformer_engine/pytorch --cov=transformer_engine/debug --cov=transformer_engine/plugin --cov-append --cov-report="
             COVERAGE_ENABLED=true
           else
             echo "WARNING: Failed to install coverage/pytest-cov, coverage collection disabled"
           fi
 
-          if [[ "${{ matrix.test_group.name }}" != *"debug"* ]]; then
+          if { [ "${{ inputs.platform }}" = "cuda" ] || [ "${{ inputs.platform }}" = "metax" ]; } && \
+             [[ "${{ matrix.test_group.name }}" != *"debug"* ]]; then
             # Fail fast on backend/API mismatch before running the full test group.
             # Skip for debug group (does not use FP8/optimizer symbols).
             python3 -c "import sys, importlib; import transformer_engine.common as _te_common; tex = importlib.import_module('transformer_engine_torch'); required=['multi_tensor_scale','multi_tensor_compute_scale_and_scale_inv']; missing=[n for n in required if not hasattr(tex, n)]; print('[TE check] module:', tex); print('[TE check] file:', getattr(tex, '__file__', 'N/A')); print('[TE check] missing:', ', '.join(missing) if missing else 'none'); sys.exit(1 if missing else 0)"
           fi
 
-          bash ${{ matrix.test_group.path }}
+          test_script="${{ matrix.test_group.path }}"
+          if [ "${{ inputs.platform }}" = "ascend" ]; then
+            test_script="${test_script%.sh}_ascend.sh"
+            if [ ! -f "$test_script" ]; then
+              echo "Ascend test script not found: $test_script" >&2
+              exit 1
+            fi
+          fi
+          echo "Running test script: $test_script"
+          bash "$test_script"
           exit_code=$?
 
           # Combine coverage fragments and generate JSON report
           if [ "$COVERAGE_ENABLED" = "true" ]; then
-            python3 -m coverage combine --keep 2>/dev/null || true
-            python3 -m coverage json \
-              -o "coverage-${{ inputs.platform }}-${{ inputs.device }}-${{ matrix.test_group.name }}.json" \
-              --include="transformer_engine/pytorch/*,transformer_engine/debug/*,transformer_engine/plugin/*" \
-              --omit="*/setup.py,*/transformer_engine/plugin/core/_build_config.py" \
-              -i 2>/dev/null \
-              || echo "WARNING: No coverage data found"
+            shopt -s nullglob
+            coverage_fragments=(.coverage.*)
+            shopt -u nullglob
+
+            if [ "${#coverage_fragments[@]}" -gt 0 ]; then
+              python3 -m coverage combine --keep
+            else
+              echo "No coverage fragments found; using existing .coverage file if present."
+            fi
 
             if [ -f .coverage ]; then
+              python3 -m coverage json \
+                -o "coverage-${{ inputs.platform }}-${{ inputs.device }}-${{ matrix.test_group.name }}.json" \
+                --include="transformer_engine/pytorch/*,transformer_engine/debug/*,transformer_engine/plugin/*" \
+                --omit="*/setup.py,*/transformer_engine/plugin/core/_build_config.py" \
+                -i
               cp .coverage "coverage-${{ inputs.platform }}-${{ inputs.device }}-${{ matrix.test_group.name }}.coverage"
+            else
+              echo "WARNING: No raw coverage data found for ${{ inputs.platform }} ${{ matrix.test_group.name }}"
+              if [ "${{ inputs.platform }}" = "ascend" ]; then
+                exit 1
+              fi
             fi
           fi
           exit $exit_code
         timeout-minutes: 60
 
+      - name: Upload Ascend Coverage Artifact
+        if: inputs.platform == 'ascend'
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-${{ inputs.platform }}-${{ inputs.device }}-${{ matrix.test_group.name }}
+          path: |
+            coverage-${{ inputs.platform }}-${{ inputs.device }}-${{ matrix.test_group.name }}.json
+            coverage-${{ inputs.platform }}-${{ inputs.device }}-${{ matrix.test_group.name }}.coverage
+          if-no-files-found: error
+
       - name: Upload Coverage Artifact
+        if: inputs.platform != 'ascend'
         uses: actions/upload-artifact@v4
         continue-on-error: true
         with:
@@ -232,15 +296,31 @@ jobs:
         run: |
           set -euo pipefail
 
-          if ${{inputs.platform == 'metax'}}; then
-            source /opt/conda/etc/profile.d/conda.sh
-            conda activate base
-          else
-            source /opt/miniconda3/etc/profile.d/conda.sh
-            conda activate flagscale-train
-          fi
+          case "${{ inputs.platform }}" in
+            cuda)
+              source /opt/miniconda3/etc/profile.d/conda.sh
+              conda activate flagscale-train
+              ;;
+            metax)
+              source /opt/conda/etc/profile.d/conda.sh
+              conda activate base
+              ;;
+            ascend)
+              if [ -f /opt/conda/etc/profile.d/conda.sh ]; then
+                source /opt/conda/etc/profile.d/conda.sh
+                conda activate "${CONDA_ENV:-base}"
+              elif [ -f /opt/miniconda3/etc/profile.d/conda.sh ]; then
+                source /opt/miniconda3/etc/profile.d/conda.sh
+                conda activate "${CONDA_ENV:-flagscale-train}"
+              fi
+              ;;
+            *)
+              echo "Unsupported platform: ${{ inputs.platform }}" >&2
+              exit 1
+              ;;
+          esac
 
-          python3 -m pip install coverage --quiet
+          python3 -m pip install --quiet --no-cache-dir coverage
 
           mkdir -p coverage-raw
           coverage_count=0
@@ -253,6 +333,10 @@ jobs:
           if [ "$coverage_count" -eq 0 ]; then
             echo "WARNING: No raw coverage files found for aggregation"
             echo "coverage_aggregated=false" >> "$GITHUB_OUTPUT"
+            if [ "${{ inputs.platform }}" = "ascend" ]; then
+              echo "Ascend Unit jobs must produce real coverage data" >&2
+              exit 1
+            fi
             exit 0
           fi
 
