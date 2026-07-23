@@ -14,8 +14,9 @@ import torch
 import torch.distributed as dist
 import torch_npu  # noqa: F401
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
-from ascend_npu_patch import apply_ascend_npu_patch
+ASCEND_TEST_UTILS = Path(__file__).resolve().parents[2] / "test_utils" / "ascend"
+sys.path.insert(0, str(ASCEND_TEST_UTILS))
+from npu_patch import apply_ascend_npu_patch
 
 
 def main() -> None:

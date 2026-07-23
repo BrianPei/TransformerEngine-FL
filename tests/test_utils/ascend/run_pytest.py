@@ -13,7 +13,7 @@ os.environ.setdefault("TE_FL_SKIP_CUDA", "1")
 os.environ.setdefault("NVTE_FRAMEWORK", "pytorch")
 os.environ.setdefault("TORCHDYNAMO_DISABLE", "1")
 
-from ascend_npu_patch import apply_ascend_npu_patch
+from npu_patch import apply_ascend_npu_patch
 
 try:
     apply_ascend_npu_patch()

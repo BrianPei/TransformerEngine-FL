@@ -26,10 +26,11 @@ elif [ -f /usr/local/Ascend/latest/set_env.sh ]; then
 fi
 
 if [ -n "${GITHUB_ENV:-}" ]; then
-    # Persist CANN runtime paths for subsequent QA steps.
+    # Persist the active runtime and pytest bootstrap for subsequent CI steps.
     {
         echo "PATH=$PATH"
         echo "LD_LIBRARY_PATH=${LD_LIBRARY_PATH:-}"
+        echo "TE_TEST_PYTEST_COMMAND=python3 $WORKSPACE/tests/test_utils/ascend/run_pytest.py"
     } >> "$GITHUB_ENV"
 fi
 
