@@ -76,6 +76,8 @@ coverage:
   required: true
   python: python3
   sources:
+    - transformer_engine
+  include:
     - transformer_engine/pytorch/*
     - transformer_engine/debug/*
     - transformer_engine/plugin/*

@@ -32,6 +32,10 @@ coverage:
   required: false
   python: python3
   sources:
+    # Importable package or source directory passed to pytest-cov --cov.
+    - transformer_engine
+  include:
+    # Optional file patterns used to limit generated coverage reports.
     - transformer_engine/pytorch/*
     - transformer_engine/debug/*
     - transformer_engine/plugin/*
