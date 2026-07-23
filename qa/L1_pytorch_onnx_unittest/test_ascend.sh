@@ -27,6 +27,9 @@ if missing:
     )
 PY
 
+NVTE_FLASH_ATTN=0 \
+NVTE_FUSED_ATTN=0 \
+NVTE_UNFUSED_ATTN=1 \
 NVTE_UnfusedDPA_Emulate_FP8=1 \
 "$PYTHON_BIN" "$TE_PATH/qa/ascend_run_pytest.py" \
     -v -s \

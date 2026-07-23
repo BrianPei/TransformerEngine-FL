@@ -75,15 +75,6 @@ _skip_metax_onnx_baddbmm = pytest.mark.skipif(
     _is_metax,
     reason="MetaX mcPytorch ONNX exporter cannot decompose aten.baddbmm with symbolic dims",
 )
-_skip_ascend_layernorm_mlp_onnx = pytest.mark.skipif(
-    _is_ascend,
-    reason="Ascend TE-FL backend does not provide the glu operator required by LayerNormMLP ONNX export",
-)
-_skip_ascend_attention_onnx = pytest.mark.skipif(
-    _is_ascend,
-    reason="This TE attention export path still queries CUDA device capability internally",
-)
-
 fp8_recipes = []
 if mxfp8_available:
     fp8_recipes.append(recipe.MXFP8BlockScaling())
@@ -735,39 +726,32 @@ def _test_export_layernorm_mlp(
 
 @pytest.mark.parametrize("fp8_recipe", fp8_recipes)
 @pytest.mark.parametrize("precision", [torch.float32, torch.float16, torch.bfloat16])
-@_skip_ascend_layernorm_mlp_onnx
 def test_export_layernorm_mlp(seed_default_rng, fp8_recipe, precision):
     _test_export_layernorm_mlp(fp8_recipe=fp8_recipe, precision=precision)
 
 
-@_skip_ascend_layernorm_mlp_onnx
 def test_export_layernorm_mlp_return_layernorm_output(seed_default_rng):
     _test_export_layernorm_mlp(return_layernorm_output=True)
 
 
-@_skip_ascend_layernorm_mlp_onnx
 def test_export_layernorm_mlp_return_bias(seed_default_rng):
     _test_export_layernorm_mlp(return_bias=True)
 
 
-@_skip_ascend_layernorm_mlp_onnx
 def test_export_layernorm_mlp_no_bias(seed_default_rng):
     _test_export_layernorm_mlp(use_bias=False)
 
 
-@_skip_ascend_layernorm_mlp_onnx
 def test_export_layernorm_mlp_zero_centered_gamma(seed_default_rng):
     _test_export_layernorm_mlp(zero_centered_gamma=True)
 
 
 @pytest.mark.parametrize("normalization", all_normalizations[1:])
-@_skip_ascend_layernorm_mlp_onnx
 def test_export_layernorm_mlp_normalization(seed_default_rng, normalization):
     _test_export_layernorm_mlp(normalization=normalization)
 
 
 @pytest.mark.parametrize("activation", supported_activations[1:])
-@_skip_ascend_layernorm_mlp_onnx
 def test_export_layernorm_mlp_activation(seed_default_rng, activation):
     _test_export_layernorm_mlp(activation=activation)
 
@@ -825,7 +809,6 @@ if fp8_available:
         ),  # calls forward_torch_softmax (apply no mask)
     ],
 )
-@_skip_ascend_attention_onnx
 def test_export_core_attention(
     precision: torch.dtype,
     use_mask: bool,
@@ -1052,31 +1035,26 @@ def _test_export_multihead_attention(
 @pytest.mark.parametrize("fp8_recipe", fp8_recipes)
 @pytest.mark.parametrize("precision", [torch.float32, torch.float16, torch.bfloat16])
 @_skip_metax_onnx_baddbmm
-@_skip_ascend_attention_onnx
 def test_export_multihead_attention_recipe(fp8_recipe, precision):
     _test_export_multihead_attention(fp8_recipe=fp8_recipe, precision=precision)
 
 
 @_skip_metax_onnx_baddbmm
-@_skip_ascend_attention_onnx
 def test_export_multihead_attention_no_mask():
     _test_export_multihead_attention(use_mask=False)
 
 
 @_skip_metax_onnx_baddbmm
-@_skip_ascend_attention_onnx
 def test_export_multihead_attention_no_input_layernorm():
     _test_export_multihead_attention(input_layernorm=False)
 
 
 @_skip_metax_onnx_baddbmm
-@_skip_ascend_attention_onnx
 def test_export_multihead_attention_cross_attn():
     _test_export_multihead_attention(attention_type="cross")
 
 
 @_skip_metax_onnx_baddbmm
-@_skip_ascend_attention_onnx
 def test_export_multihead_attention_unfused_qkv_params():
     _test_export_multihead_attention(fuse_qkv_params=False)
 
@@ -1158,33 +1136,27 @@ def _test_export_transformer_layer(
 
 @pytest.mark.parametrize("fp8_recipe", fp8_recipes)
 @pytest.mark.parametrize("precision", [torch.float32, torch.float16, torch.bfloat16])
-@_skip_ascend_attention_onnx
 def test_export_transformer_layer_recipe(fp8_recipe, precision):
     _test_export_transformer_layer(fp8_recipe=fp8_recipe, precision=precision)
 
 
-@_skip_ascend_attention_onnx
 def test_export_transformer_layer_no_mask():
     _test_export_transformer_layer(use_mask=False)
 
 
-@_skip_ascend_attention_onnx
 def test_export_transformer_layer_output_layernorm():
     _test_export_transformer_layer(output_layernorm=True)
 
 
-@_skip_ascend_attention_onnx
 def test_export_transformer_layer_unfused_qkv_params():
     _test_export_transformer_layer(fuse_qkv_params=False)
 
 
-@_skip_ascend_attention_onnx
 def test_export_transformer_layer_zero_centered_gamma():
     _test_export_transformer_layer(zero_centered_gamma=True)
 
 
 @pytest.mark.parametrize("activation", supported_activations[1:])
-@_skip_ascend_attention_onnx
 def test_export_transformer_layer_activation(activation):
     _test_export_transformer_layer(activation=activation)
 
@@ -1192,7 +1164,6 @@ def test_export_transformer_layer_activation(activation):
 @pytest.mark.parametrize("fp8_recipe", fp8_recipes)
 @pytest.mark.parametrize("precision", [torch.float16, torch.bfloat16])
 @_skip_metax_onnx_baddbmm
-@_skip_ascend_attention_onnx
 def test_export_gpt_generation(
     fp8_recipe: recipe.Recipe,
     precision: torch.dtype,

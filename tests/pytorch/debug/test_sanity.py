@@ -114,10 +114,6 @@ def test_sanity_debug(model_key, fp8, config_key, feature_dirs):
         pytest.skip(reason_for_no_fp8)
     if _is_ascend and config_key == "fake_quant":
         pytest.skip("Ascend TE-FL backend does not provide the quantize operator required by fake quant")
-    if _is_ascend and model_key == "layernorm_mlp":
-        pytest.skip("Ascend TE-FL backend does not provide the glu operator required by LayerNormMLP")
-    if _is_ascend and model_key in {"mha_attention", "transformer_layer"}:
-        pytest.skip("This TE attention path still queries CUDA device capability internally")
     if not fp8 and config_key in fp8_required_configs:
         pytest.skip(f"Config '{config_key}' requires FP8")
     _run_test(model_key, fp8, configs[config_key], feature_dirs)
