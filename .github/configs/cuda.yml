@@ -58,6 +58,8 @@ coverage:
   required: false
   python: /opt/miniconda3/envs/flagscale-train/bin/python3
   sources:
+    - transformer_engine
+  include:
     - transformer_engine/pytorch/*
     - transformer_engine/debug/*
     - transformer_engine/plugin/*

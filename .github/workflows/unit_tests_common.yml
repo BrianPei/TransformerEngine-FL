@@ -48,6 +48,10 @@ on:
         required: false
         type: string
         default: ''
+      coverage_include:
+        required: false
+        type: string
+        default: ''
       coverage_omit:
         required: false
         type: string
@@ -135,6 +139,7 @@ jobs:
           COVERAGE_ENABLED: ${{ inputs.coverage_enabled }}
           COVERAGE_REQUIRED: ${{ inputs.coverage_required }}
           COVERAGE_SOURCES: ${{ inputs.coverage_sources }}
+          COVERAGE_INCLUDE: ${{ inputs.coverage_include }}
           COVERAGE_OMIT: ${{ inputs.coverage_omit }}
         run: |
           set -euo pipefail
@@ -187,9 +192,11 @@ jobs:
               coverage_command=(
                 python3 -m coverage json
                 -o "${coverage_name}.json"
-                --include="$COVERAGE_SOURCES"
                 -i
               )
+              if [ -n "$COVERAGE_INCLUDE" ]; then
+                coverage_command+=(--include="$COVERAGE_INCLUDE")
+              fi
               if [ -n "$COVERAGE_OMIT" ]; then
                 coverage_command+=(--omit="$COVERAGE_OMIT")
               fi
@@ -247,7 +254,7 @@ jobs:
         id: aggregate
         env:
           COVERAGE_REQUIRED: ${{ inputs.coverage_required }}
-          COVERAGE_SOURCES: ${{ inputs.coverage_sources }}
+          COVERAGE_INCLUDE: ${{ inputs.coverage_include }}
           COVERAGE_OMIT: ${{ inputs.coverage_omit }}
           COVERAGE_PYTHON: ${{ inputs.coverage_python }}
         run: |
@@ -276,9 +283,11 @@ jobs:
           coverage_command=(
             "$COVERAGE_PYTHON" -m coverage json
             -o "$coverage_name"
-            --include="$COVERAGE_SOURCES"
             -i
           )
+          if [ -n "$COVERAGE_INCLUDE" ]; then
+            coverage_command+=(--include="$COVERAGE_INCLUDE")
+          fi
           if [ -n "$COVERAGE_OMIT" ]; then
             coverage_command+=(--omit="$COVERAGE_OMIT")
           fi
