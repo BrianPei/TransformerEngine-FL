@@ -35,17 +35,40 @@ container_options: >-
 # Platform-specific environment setup script
 setup_script: .github/scripts/setup_ascend.sh
 
-# Build environment variables
-build_env:
-  PLATFORM: ascend
-  TE_FL_SKIP_CUDA: '1'
-  NVTE_FRAMEWORK: pytorch
-  NVTE_WITH_CUDA: '0'
-  NVTE_WITH_MACA: '0'
-  TE_WITH_NCCL: '0'
-  ASCEND_VISIBLE_DEVICES: '0,1,2,3'
-  ASCEND_RT_VISIBLE_DEVICES: '0,1,2,3'
-  PYTORCH_NPU_ALLOC_CONF: expandable_segments:True
+coverage:
+  enabled: true
+  required: true
+  python: python3
+  sources:
+    - transformer_engine
+  include:
+    - transformer_engine/pytorch/*
+    - transformer_engine/debug/*
+    - transformer_engine/plugin/*
+  omit:
+    - '*/setup.py'
+    - '*/transformer_engine/plugin/core/_build_config.py'
+
+unit_test_matrix:
+  - name: pytorch_debug
+    runner: script
+    path: qa/L0_pytorch_debug_unittest/test_ascend.sh
+
+  - name: pytorch_unittest
+    runner: script
+    path: qa/L0_pytorch_unittest/test_ascend.sh
+
+  - name: pytorch_distributed_unittest
+    runner: script
+    path: qa/L1_pytorch_distributed_unittest/test_ascend.sh
+
+  - name: pytorch_onnx_unittest
+    runner: script
+    path: qa/L1_pytorch_onnx_unittest/test_ascend.sh
+
+integration_test_matrix:
+  - name: pytorch_mcore_integration
+    path: qa/L1_pytorch_mcore_integration/test.sh
 
 # Device types to run tests on
 device_types:
