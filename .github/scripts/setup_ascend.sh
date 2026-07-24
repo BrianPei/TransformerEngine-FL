@@ -26,10 +26,11 @@ elif [ -f /usr/local/Ascend/latest/set_env.sh ]; then
 fi
 
 if [ -n "${GITHUB_ENV:-}" ]; then
-    # Persist CANN runtime paths for subsequent QA steps.
+    # Persist the active runtime and pytest bootstrap for subsequent CI steps.
     {
         echo "PATH=$PATH"
         echo "LD_LIBRARY_PATH=${LD_LIBRARY_PATH:-}"
+        echo "TE_TEST_PYTEST_COMMAND=python3 $WORKSPACE/tests/test_utils/ascend/run_pytest.py"
     } >> "$GITHUB_ENV"
 fi
 
@@ -49,8 +50,13 @@ if not torch.npu.is_available():
 print("NPU device count:", torch.npu.device_count())
 PY
 
-echo "===== Install test dependencies ====="
-python3 -m pip install nvdlfw-inspect --quiet
+echo "===== Verify test dependencies ====="
+python3 - <<'PY'
+try:
+    import nvdlfw_inspect  # noqa: F401
+except ModuleNotFoundError as exc:
+    raise SystemExit(f"nvdlfw_inspect is required for Ascend tests: {exc}") from exc
+PY
 
 echo "===== Install TransformerEngine-FL Python/plugin layer ====="
 cd "$WORKSPACE"

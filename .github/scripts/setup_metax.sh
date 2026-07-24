@@ -6,13 +6,16 @@ set -euo pipefail
 echo "===== Step 0: Activate Python environment ====="
 source /opt/conda/etc/profile.d/conda.sh
 conda activate base
-echo "PATH=$PATH" >> $GITHUB_ENV
 echo "Python: $(which python3) ($(python3 --version 2>&1))"
 
 echo "===== Step 1: Base Environment Setup ====="
 # Configure MACA toolchain paths
-export PATH=/opt/maca/bin:$PATH
-export LD_LIBRARY_PATH=/opt/maca/lib:$LD_LIBRARY_PATH
+export PATH="/opt/maca/bin:$PATH"
+export LD_LIBRARY_PATH="/opt/maca/lib:${LD_LIBRARY_PATH:-}"
+{
+    echo "PATH=$PATH"
+    echo "LD_LIBRARY_PATH=$LD_LIBRARY_PATH"
+} >> "$GITHUB_ENV"
 service ssh restart
 
 echo "===== Step 2: Create nvcc Symlink (cucc -> nvcc) ====="
@@ -45,6 +48,11 @@ import transformer_engine
 import transformer_engine_torch as te
 print("transformer_engine:", transformer_engine)
 print("transformer_engine_torch:", te)
+required = ["multi_tensor_scale", "multi_tensor_compute_scale_and_scale_inv"]
+missing = [name for name in required if not hasattr(te, name)]
+print("missing backend APIs:", ", ".join(missing) if missing else "none")
+if missing:
+    raise SystemExit(1)
 EOF
 
 echo "===== Environment Setup Complete ====="
