@@ -84,27 +84,7 @@ jobs:
           /usr/bin/git config --global --unset-all credential.helper 2>/dev/null || true
           /usr/bin/git config --system --unset-all credential.helper 2>/dev/null || true
 
-      - name: Checkout source code (attempt 1)
-        id: checkout1
-        uses: actions/checkout@v4
-        continue-on-error: true
-        with:
-          fetch-depth: 0
-          submodules: ${{ inputs.checkout_submodules }}
-          set-safe-directory: true
-
-      - name: Checkout source code (attempt 2)
-        id: checkout2
-        if: steps.checkout1.outcome == 'failure'
-        uses: actions/checkout@v4
-        continue-on-error: true
-        with:
-          fetch-depth: 0
-          submodules: ${{ inputs.checkout_submodules }}
-          set-safe-directory: true
-
-      - name: Checkout source code (attempt 3)
-        if: steps.checkout1.outcome == 'failure' && steps.checkout2.outcome == 'failure'
+      - name: Checkout source code
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
