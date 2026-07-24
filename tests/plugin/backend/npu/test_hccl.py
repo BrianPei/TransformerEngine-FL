@@ -21,7 +21,7 @@ def test_two_npu_hccl_transformer_engine() -> None:
     if not torch.npu.is_available() or torch.npu.device_count() < 2:
         pytest.skip("At least two visible Ascend NPUs are required")
 
-    worker = Path(__file__).with_name("ascend_hccl_worker.py")
+    worker = Path(__file__).with_name("hccl_worker.py")
     env = os.environ.copy()
     env.setdefault("ASCEND_RT_VISIBLE_DEVICES", "0,1")
     torchrun = shutil.which("torchrun")

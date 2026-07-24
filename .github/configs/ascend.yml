@@ -113,38 +113,38 @@ unit_test_matrix:
     steps:
       - name: Ascend TE module smoke tests
         junit: pytest_ascend_backend_smoke.xml
-        targets: [tests/pytorch/ascend/test_backend_smoke.py]
+        targets: [tests/plugin/backend/npu/test_modules.py]
       - name: Ascend FlagOS operator tests
         junit: pytest_ascend_backend_ops.xml
-        targets: [tests/pytorch/ascend/test_backend_ops.py]
+        targets: [tests/plugin/backend/npu/test_gemm.py]
       - name: plugin policy
         junit: pytest_test_plugin_policy.xml
         use_platform_runner: false
-        targets: [transformer_engine/plugin/tests/test_plugin_policy.py]
+        targets: [tests/plugin/plugin/test_policy.py]
       - name: plugin manager
         junit: pytest_test_plugin_manager.xml
         use_platform_runner: false
-        targets: [transformer_engine/plugin/tests/test_plugin_manager.py]
+        targets: [tests/plugin/plugin/test_manager.py]
       - name: FlagOS backend lifecycle
         junit: pytest_test_backend_flagos.xml
         use_platform_runner: false
-        targets: [transformer_engine/plugin/tests/test_backend_flagos.py]
+        targets: [tests/plugin/backend/flagos/test_lifecycle.py]
       - name: reference backend lifecycle
         junit: pytest_test_backend_reference.xml
         use_platform_runner: false
-        targets: [transformer_engine/plugin/tests/test_backend_reference.py]
+        targets: [tests/plugin/backend/reference/test_lifecycle.py]
       - name: reference activation operations
         junit: pytest_test_backend_reference_activation.xml
         use_platform_runner: false
-        targets: [transformer_engine/plugin/tests/test_backend_reference_activation.py]
+        targets: [tests/plugin/backend/reference/test_activation.py]
       - name: reference dropout operations
         junit: pytest_test_backend_reference_dropout.xml
         use_platform_runner: false
-        targets: [transformer_engine/plugin/tests/test_backend_reference_dropout.py]
+        targets: [tests/plugin/backend/reference/test_dropout.py]
       - name: reference GEMM operations
         junit: pytest_test_backend_reference_gemm.xml
         use_platform_runner: false
-        targets: [transformer_engine/plugin/tests/test_backend_reference_gemm.py]
+        targets: [tests/plugin/backend/reference/test_gemm.py]
       - name: shared portable sanity tests
         junit: pytest_shared_sanity_portable.xml
         env:
@@ -185,7 +185,7 @@ unit_test_matrix:
     steps:
       - name: two-NPU HCCL Transformer Engine test
         junit: pytest_hccl_te.xml
-        targets: [tests/pytorch/distributed/test_ascend_hccl.py]
+        targets: [tests/plugin/backend/npu/test_hccl.py]
       - name: context parallel utilities
         junit: pytest_test_cp_utils.xml
         use_platform_runner: false

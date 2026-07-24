@@ -7,15 +7,10 @@
 from __future__ import annotations
 
 import os
-from pathlib import Path
-import sys
-
 import torch
 import torch.distributed as dist
 import torch_npu  # noqa: F401
 
-ASCEND_TEST_UTILS = Path(__file__).resolve().parents[2] / "test_utils" / "ascend"
-sys.path.insert(0, str(ASCEND_TEST_UTILS))
 from npu_patch import apply_ascend_npu_patch
 
 
