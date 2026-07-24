@@ -89,9 +89,7 @@ def _patch_quantization_capability_checks() -> None:
 
     layernorm_mlp._get_act_func_supported_list = _npu_activation_table
 
-    quantization.check_fp8_support = lambda: _unsupported(
-        "FP8 execution is not supported on npu."
-    )
+    quantization.check_fp8_support = lambda: _unsupported("FP8 execution is not supported on npu.")
     quantization.check_mxfp8_support = lambda: _unsupported(
         "MXFP8 execution is not supported on npu."
     )
