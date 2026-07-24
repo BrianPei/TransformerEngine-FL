@@ -109,9 +109,7 @@ def test_transformer_engine_normalization_forward_backward(module_name):
     ref_inputs = inputs.detach().clone().requires_grad_(True)
     ref_weight = layer.weight.detach().clone().requires_grad_(True)
     if module_name == "RMSNorm":
-        ref_output = ref_inputs * torch.rsqrt(
-            ref_inputs.square().mean(dim=-1, keepdim=True) + eps
-        )
+        ref_output = ref_inputs * torch.rsqrt(ref_inputs.square().mean(dim=-1, keepdim=True) + eps)
         ref_output = ref_output * ref_weight
         ref_output.backward(output_grad)
         ref_bias_grad = None
@@ -175,9 +173,7 @@ def test_transformer_engine_layernorm_linear_matches_torch_npu(
         )
     else:
         ref_norm_bias = None
-        normalized = ref_inputs * torch.rsqrt(
-            ref_inputs.square().mean(dim=-1, keepdim=True) + eps
-        )
+        normalized = ref_inputs * torch.rsqrt(ref_inputs.square().mean(dim=-1, keepdim=True) + eps)
         normalized = normalized * effective_weight
 
     ref_weight = layer.weight.detach().clone().requires_grad_(True)
@@ -214,11 +210,7 @@ def test_transformer_engine_deferred_init_materializes_on_npu(module_name):
     import transformer_engine.pytorch as te
 
     module_class = getattr(te, module_name)
-    args = (
-        (16, 32)
-        if module_name in {"Linear", "LayerNormLinear", "LayerNormMLP"}
-        else (16,)
-    )
+    args = (16, 32) if module_name in {"Linear", "LayerNormLinear", "LayerNormMLP"} else (16,)
     kwargs = {
         "device": "meta",
         "params_dtype": torch.float32,
@@ -256,7 +248,5 @@ def test_ascend_backend_dispatch_selection():
         "silu": "reference.torch",
         "dsilu": "reference.torch",
     }
-    selected_impls = {
-        op_name: manager.get_selected_impl_id(op_name) for op_name in expected_impls
-    }
+    selected_impls = {op_name: manager.get_selected_impl_id(op_name) for op_name in expected_impls}
     assert selected_impls == expected_impls
