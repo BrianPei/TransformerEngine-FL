@@ -252,7 +252,9 @@ def te_infer(
     fp8_recipe: recipe.Recipe,
 ):
     """Transformer Engine forward propagation."""
-    with torch.inference_mode(), _onnx_autocast(fp8_recipe if is_fp8 else None), warnings.catch_warnings():
+    with torch.inference_mode(), _onnx_autocast(
+        fp8_recipe if is_fp8 else None
+    ), warnings.catch_warnings():
         te_outputs = model(*inps if isinstance(inps, tuple) else (inps,))
         if not isinstance(te_outputs, tuple):
             te_outputs = (te_outputs,)
@@ -355,10 +357,14 @@ def validate_result(
             print("registered custom FP8 Q/DQ ops!")
 
         """Create an ONNX Runtime session for validation."""
-        providers = ["CPUExecutionProvider"] if _is_ascend else [
-            "CUDAExecutionProvider",
-            "CPUExecutionProvider",
-        ]
+        providers = (
+            ["CPUExecutionProvider"]
+            if _is_ascend
+            else [
+                "CUDAExecutionProvider",
+                "CPUExecutionProvider",
+            ]
+        )
         kwargs = {"providers": providers}
         if is_fp8:
             sess_options = ort.SessionOptions()
@@ -463,7 +469,9 @@ def _test_export_linear(
             ret = self.linear(input)
             return ret
 
-    inp = torch.randn(batch_size, hidden_size, in_features, device=te_device_type(), dtype=precision)
+    inp = torch.randn(
+        batch_size, hidden_size, in_features, device=te_device_type(), dtype=precision
+    )
     fp8_str = "_fp8" if fp8_recipe is not None else ""
     bias_str = "_bias" if use_bias else ""
     high_prec_str = dtype2str(precision)
@@ -527,7 +535,9 @@ def _test_export_layernorm(
     out_features = 256
     hidden_size = 256
 
-    inp = torch.ones(batch_size, in_features, out_features, device=te_device_type(), dtype=precision)
+    inp = torch.ones(
+        batch_size, in_features, out_features, device=te_device_type(), dtype=precision
+    )
     fp8_str = "_fp8" if fp8_recipe is not None else ""
     high_prec_str = dtype2str(precision)
     fname = f"te.layernorm_linear{fp8_str}{high_prec_str}.onnx"
@@ -827,7 +837,9 @@ def test_export_core_attention(
     attention_mask = None
     if use_mask:
         # Generate a random mask with 50% probability for 0 or 1.
-        probs = 0.5 * torch.ones(batch_size, 1, 1, seq_len, device=te_device_type(), dtype=precision)
+        probs = 0.5 * torch.ones(
+            batch_size, 1, 1, seq_len, device=te_device_type(), dtype=precision
+        )
         attention_mask = torch.bernoulli(probs).to(te_device_type(), dtype=torch.bool)
     inp = (query_layer, key_layer, value_layer, attention_mask)
 

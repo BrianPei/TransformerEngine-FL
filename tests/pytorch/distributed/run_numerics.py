@@ -14,9 +14,7 @@ import math
 if os.environ.get("PLATFORM") == "ascend":
     sys.path.insert(
         0,
-        os.path.abspath(
-            os.path.join(os.path.dirname(__file__), "../..", "test_utils", "ascend")
-        ),
+        os.path.abspath(os.path.join(os.path.dirname(__file__), "../..", "test_utils", "ascend")),
     )
     from npu_patch import apply_ascend_npu_patch
 

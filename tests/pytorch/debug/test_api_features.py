@@ -26,7 +26,9 @@ _skip_metax_quantize = pytest.mark.skipif(
 _is_ascend = os.environ.get("PLATFORM") == "ascend" or te_device_type() == "npu"
 _skip_ascend_quantize = pytest.mark.skipif(
     _is_ascend,
-    reason="Ascend TE-FL backend does not provide the quantize operator required by this FP8 API path",
+    reason=(
+        "Ascend TE-FL backend does not provide the quantize operator required by this FP8 API path"
+    ),
 )
 
 
