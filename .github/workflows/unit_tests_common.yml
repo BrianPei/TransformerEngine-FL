@@ -61,39 +61,10 @@ jobs:
       options: --pull never ${{ inputs.container_options }}
 
     steps:
-      # Cuda requires git safe.directory configuration and 3 checkout attempts to handle submodule-heavy repos
+      # Cuda requires git safe.directory configuration before checkout.
       - name: Configure Git Safe Directory on Cuda
         if: inputs.platform == 'cuda'
         run: /usr/bin/git config --global safe.directory '*'
-
-      - name: Checkout Source Code on Cuda (attempt 1)
-        id: checkout1
-        if: inputs.platform == 'cuda'
-        uses: actions/checkout@v4
-        continue-on-error: true
-        with:
-          fetch-depth: 0
-          submodules: recursive
-          set-safe-directory: true
-
-      - name: Checkout Source Code on Cuda (attempt 2)
-        id: checkout2
-        if: inputs.platform == 'cuda' && steps.checkout1.outcome == 'failure'
-        uses: actions/checkout@v4
-        continue-on-error: true
-        with:
-          fetch-depth: 0
-          submodules: recursive
-          set-safe-directory: true
-
-      - name: Checkout Source Code on Cuda (attempt 3)
-        id: checkout3
-        if: inputs.platform == 'cuda' && steps.checkout2.outcome == 'failure'
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-          submodules: recursive
-          set-safe-directory: true
 
       # Metax requires to clean vscode-remote-container
       - name: Configure Clean Git Env on Metax
@@ -102,19 +73,11 @@ jobs:
           git config --global --unset-all credential.helper 2>/dev/null || true
           git config --system --unset-all credential.helper 2>/dev/null || true
 
-      # Metax no need submodules
-      - name: Checkout Source Code on Metax
-        if: inputs.platform == 'metax'
+      - name: Checkout Source Code
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
-
-      # Ascend installs the Python/plugin layer and does not need CUDA submodules
-      - name: Checkout Source Code on Ascend
-        if: inputs.platform == 'ascend'
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
+          submodules: ${{ inputs.platform == 'cuda' && 'recursive' || 'false' }}
           set-safe-directory: true
 
       - name: Environment Setup
@@ -183,16 +146,14 @@ jobs:
 
           # Coverage setup: Ascend unit jobs must always produce raw coverage.
           COVERAGE_ENABLED=false
-          if [ "${{ inputs.platform }}" = "ascend" ]; then
-            python3 -m pip install --quiet --no-cache-dir coverage pytest-cov
-            python3 -c "import importlib.metadata as m; import coverage, pytest_cov; print('[coverage] coverage', m.version('coverage'), 'pytest-cov', m.version('pytest-cov'))"
+          if python3 -c "import importlib.metadata as m; import coverage, pytest_cov; print('[coverage] coverage', m.version('coverage'), 'pytest-cov', m.version('pytest-cov'))"; then
             export PYTEST_ADDOPTS="--cov=transformer_engine/pytorch --cov=transformer_engine/debug --cov=transformer_engine/plugin --cov-append --cov-report="
             COVERAGE_ENABLED=true
-          elif python3 -m pip install --quiet coverage pytest-cov 2>/dev/null; then
-            export PYTEST_ADDOPTS="--cov=transformer_engine/pytorch --cov=transformer_engine/debug --cov=transformer_engine/plugin --cov-append --cov-report="
-            COVERAGE_ENABLED=true
+          elif [ "${{ inputs.platform }}" = "ascend" ]; then
+            echo "ERROR: Ascend coverage dependencies are missing in the CI image: coverage pytest-cov" >&2
+            exit 1
           else
-            echo "WARNING: Failed to install coverage/pytest-cov, coverage collection disabled"
+            echo "WARNING: coverage dependencies are missing in the CI image; coverage collection disabled"
           fi
 
           if { [ "${{ inputs.platform }}" = "cuda" ] || [ "${{ inputs.platform }}" = "metax" ]; } && \
@@ -320,8 +281,6 @@ jobs:
               ;;
           esac
 
-          python3 -m pip install --quiet --no-cache-dir coverage
-
           mkdir -p coverage-raw
           coverage_count=0
           for coverage_file in coverage-artifacts/*.coverage; do
@@ -340,6 +299,7 @@ jobs:
             exit 0
           fi
 
+          python3 -c "import importlib.metadata as m; import coverage; print('[coverage] coverage', m.version('coverage'))"
           python3 -m coverage combine coverage-raw
           python3 -m coverage json \
             -o "coverage-${{ inputs.platform }}-${{ inputs.device }}-pytorch-unittest.json" \
