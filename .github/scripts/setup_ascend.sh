@@ -30,7 +30,7 @@ if [ -n "${GITHUB_ENV:-}" ]; then
     {
         echo "PATH=$PATH"
         echo "LD_LIBRARY_PATH=${LD_LIBRARY_PATH:-}"
-        echo "TE_TEST_PYTEST_COMMAND=python3 $WORKSPACE/tests/test_utils/ascend/run_pytest.py"
+        echo "TE_TEST_PYTEST_COMMAND=python3 $WORKSPACE/tests/plugin/backend/npu/run_pytest.py"
     } >> "$GITHUB_ENV"
 fi
 

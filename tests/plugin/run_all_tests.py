@@ -4,15 +4,15 @@
 import sys
 import torch
 
-from test_activations import ActivationTests
-from test_normalization import NormalizationTests
-from test_operations import OperationsTests
-from test_softmax import SoftmaxTests
-from test_optimizer import OptimizerTests
-from test_flash_attention import FlashAttentionTests
-from test_te_general_grouped import grouped_gemmTests
-from test_fused_rope import FusedRoPETests
-from test_policy import run_all_tests
+from backend.test_activations import ActivationTests
+from backend.test_flash_attention import FlashAttentionTests
+from backend.test_normalization import NormalizationTests
+from backend.test_operations import OperationsTests
+from backend.test_optimizer import OptimizerTests
+from backend.test_softmax import SoftmaxTests
+from backend.test_te_general_grouped import grouped_gemmTests
+from backend.flagos.test_fused_rope import FusedRoPETests
+from plugin.test_policy_selection import run_all_tests
 
 
 def main():
