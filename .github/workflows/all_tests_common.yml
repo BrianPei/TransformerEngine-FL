@@ -6,7 +6,7 @@ on:
       platform:
         required: true
         type: string
-        description: Platform name (e.g., cuda, default)
+        description: Platform configuration name
       run_unit_tests:
         required: false
         type: boolean
@@ -35,6 +35,7 @@ jobs:
       build_env: ${{ steps.config.outputs.build_env }}
       checkout_submodules: ${{ steps.config.outputs.checkout_submodules }}
       unit_test_matrix: ${{ steps.config.outputs.unit_test_matrix }}
+      integration_test_matrix: ${{ steps.config.outputs.integration_test_matrix }}
       coverage_enabled: ${{ steps.config.outputs.coverage_enabled }}
       coverage_required: ${{ steps.config.outputs.coverage_required }}
       coverage_sources: ${{ steps.config.outputs.coverage_sources }}
@@ -96,6 +97,14 @@ jobs:
             exit 1
           fi
           echo "unit_test_matrix=$UNIT_TEST_MATRIX" >> $GITHUB_OUTPUT
+
+          INTEGRATION_TEST_MATRIX=$(yq '.integration_test_matrix // [] | tojson(0)' "$CONFIG_FILE")
+          if [ "${{ inputs.run_integration_tests }}" = "true" ] && \
+             { [ "$INTEGRATION_TEST_MATRIX" = "null" ] || [ "$INTEGRATION_TEST_MATRIX" = "[]" ]; }; then
+            echo "integration_test_matrix must be defined in $CONFIG_FILE" >&2
+            exit 1
+          fi
+          echo "integration_test_matrix=$INTEGRATION_TEST_MATRIX" >> $GITHUB_OUTPUT
 
           COVERAGE_ENABLED=$(yq '.coverage.enabled // false' "$CONFIG_FILE")
           COVERAGE_REQUIRED=$(yq '.coverage.required // false' "$CONFIG_FILE")
@@ -160,7 +169,10 @@ jobs:
 
   integration_tests:
     name: integration_tests
-    if: inputs.run_integration_tests
+    if: >-
+      always() && inputs.run_integration_tests &&
+      (needs.unit_tests_complete.result == 'success' ||
+      needs.unit_tests_complete.result == 'skipped')
     needs:
       - checkout_and_config
       - unit_tests_complete
@@ -170,7 +182,6 @@ jobs:
         device: ${{ fromJson(needs.checkout_and_config.outputs.device_types) }}
     uses: ./.github/workflows/integration_tests_common.yml
     with:
-      platform: ${{ inputs.platform }}
       device: ${{ matrix.device }}
       image: ${{ needs.checkout_and_config.outputs.ci_image }}
       runs_on: ${{ needs.checkout_and_config.outputs.runs_on }}
@@ -178,6 +189,8 @@ jobs:
       container_options: ${{ needs.checkout_and_config.outputs.container_options }}
       setup_script: ${{ needs.checkout_and_config.outputs.setup_script }}
       build_env: ${{ needs.checkout_and_config.outputs.build_env }}
+      checkout_submodules: ${{ needs.checkout_and_config.outputs.checkout_submodules }}
+      test_matrix: ${{ needs.checkout_and_config.outputs.integration_test_matrix }}
 
   integration_tests_complete:
     name: integration_tests_complete

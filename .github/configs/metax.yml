@@ -84,6 +84,18 @@ unit_test_matrix:
     runner: script
     path: qa/L1_pytorch_onnx_unittest/test.sh
 
+integration_test_matrix:
+  - name: pytorch_mcore_integration
+    path: qa/L1_pytorch_mcore_integration/test.sh
+    env:
+      PLATFORM: metax
+      TE_FL_PREFER: vendor
+      MCORE_REPO_URL: https://github.com/flagos-ai/Megatron-LM-FL.git
+      MCORE_REF: 175ae90ec92a9e6fea2d74ccd24d6a1835d3ae82
+      DISTRIBUTED_BACKEND: nccl
+      CUDA_DEVICE_MAX_CONNECTIONS: '1'
+      CUBLAS_WORKSPACE_CONFIG: ':4096:8'
+
 # Test matrix configuration
 test_matrix:
   unit:
