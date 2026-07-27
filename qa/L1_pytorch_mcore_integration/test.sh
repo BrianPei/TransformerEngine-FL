@@ -34,10 +34,25 @@ retry_command() {
 : "${MCORE_REF:=main}"
 : "${OUTPUT_DIR:=${TE_PATH}/qa/L1_pytorch_mcore_integration/output}"
 : "${DATA_CACHE_PATH:=/tmp/data_cache}"
+: "${PLATFORM:=cuda}"
+
+# Megatron-LM-FL accepts the NCCL backend name on Ascend and maps it to HCCL
+# through torch_npu.contrib.transfer_to_npu.
+: "${DISTRIBUTED_BACKEND:=nccl}"
 
 # Check whether FP8 is supported
 WITH_FP8=
-if command -v nvidia-smi &>/dev/null; then
+if [ "${PLATFORM}" = "ascend" ]; then
+    python3 - <<'PY'
+import torch
+import torch_npu  # noqa: F401
+
+if not torch.npu.is_available():
+    raise SystemExit("Ascend NPU is not available")
+print("torch:", torch.__version__)
+print("NPU device count:", torch.npu.device_count())
+PY
+elif command -v nvidia-smi &>/dev/null; then
     DEVICE_ARCH=$(nvidia-smi --query-gpu=compute_cap --format=csv,noheader | head -n 1 | sed 's/[^0-9]//g')
     if [[ ${DEVICE_ARCH} -ge 89 ]]; then
         WITH_FP8=1
@@ -72,6 +87,13 @@ print(f"six available: {six.__version__}")
 print(f"regex available: {regex.__version__}")
 PY
 
+# Megatron's mock dataset requires its pybind11 helper extension. Source-only
+# checkouts do not provide the compiled module.
+if ! PYTHONPATH="${MCORE_PATH}:${PYTHONPATH:-}" python3 -c \
+    "import megatron.core.datasets.helpers_cpp" 2>/dev/null; then
+    (cd "${MCORE_PATH}" && python3 setup.py build_ext --inplace)
+fi
+
 CHECKPOINT_DIR=${OUTPUT_DIR}/checkpoints
 TENSORBOARD_DIR=${OUTPUT_DIR}/tensorboard
 mkdir -p "${CHECKPOINT_DIR}" "${TENSORBOARD_DIR}" "${DATA_CACHE_PATH}" /tmp/checkpoints
@@ -79,16 +101,52 @@ mkdir -p "${CHECKPOINT_DIR}" "${TENSORBOARD_DIR}" "${DATA_CACHE_PATH}" /tmp/chec
 echo "Using Megatron-LM-FL repo: ${MCORE_REPO_URL}"
 echo "Using Megatron-LM-FL ref: ${MCORE_REF}"
 git -C "${MCORE_PATH}" rev-parse --short HEAD
+echo "Platform: ${PLATFORM}"
+echo "Distributed backend: ${DISTRIBUTED_BACKEND}"
+if [ -n "${WITH_FP8}" ]; then
+    echo "FP8 enabled: yes"
+else
+    echo "FP8 enabled: no"
+fi
 
 # Megatron-LM-FL invocation. Keep the argument shape aligned with the
 # previously validated tp1/pp1 mock-data GPT functional case while letting CI
 # exit after a few steps.
+DEVICE_ENV="
+NCCL_ALGO=Ring
+"
+if [ "${PLATFORM}" != "ascend" ]; then
+    DEVICE_ENV="${DEVICE_ENV}
+CUDA_DEVICE_MAX_CONNECTIONS=1
+CUBLAS_WORKSPACE_CONFIG=:4096:8
+"
+fi
+
+NUM_LAYERS=12
+HIDDEN_SIZE=512
+NUM_ATTENTION_HEADS=8
+SEQ_LENGTH=1024
+MICRO_BATCH_SIZE=4
+GLOBAL_BATCH_SIZE=32
+DIAGNOSTIC_ARGS="
+--log-params-norm
+--log-num-zeros-in-grad
+--log-memory-to-tensorboard
+"
+if [ "${PLATFORM}" = "ascend" ]; then
+    NUM_LAYERS=2
+    HIDDEN_SIZE=128
+    NUM_ATTENTION_HEADS=4
+    SEQ_LENGTH=128
+    MICRO_BATCH_SIZE=1
+    GLOBAL_BATCH_SIZE=1
+    DIAGNOSTIC_ARGS=""
+fi
+
 COMMAND="
 NVTE_TORCH_COMPILE=0
 NVTE_ALLOW_NONDETERMINISTIC_ALGO=0
-CUDA_DEVICE_MAX_CONNECTIONS=1
-NCCL_ALGO=Ring
-CUBLAS_WORKSPACE_CONFIG=:4096:8
+${DEVICE_ENV}
 
 torchrun
 --nnodes=1
@@ -97,17 +155,16 @@ torchrun
 ${MCORE_PATH}/pretrain_gpt.py
 --tensor-model-parallel-size 1
 --pipeline-model-parallel-size 1
---num-layers 12
---hidden-size 512
---num-attention-heads 8
---log-params-norm
---log-num-zeros-in-grad
+--num-layers ${NUM_LAYERS}
+--hidden-size ${HIDDEN_SIZE}
+--num-attention-heads ${NUM_ATTENTION_HEADS}
+${DIAGNOSTIC_ARGS}
 --log-validation-ppl-to-tensorboard
 --log-timers-to-tensorboard
---seq-length 1024
---max-position-embeddings 1024
---micro-batch-size 4
---global-batch-size 32
+--seq-length ${SEQ_LENGTH}
+--max-position-embeddings ${SEQ_LENGTH}
+--micro-batch-size ${MICRO_BATCH_SIZE}
+--global-batch-size ${GLOBAL_BATCH_SIZE}
 --train-iters 50
 --eval-iters 10
 --timing-log-level 0
@@ -117,7 +174,7 @@ ${MCORE_PATH}/pretrain_gpt.py
 --tokenizer-type NullTokenizer
 --vocab-size 8192
 --mock-data
---distributed-backend nccl
+--distributed-backend ${DISTRIBUTED_BACKEND}
 --lr 0.00015
 --lr-decay-style cosine
 --min-lr 1.0e-5
@@ -141,7 +198,6 @@ ${MCORE_PATH}/pretrain_gpt.py
 --data-cache-path ${DATA_CACHE_PATH}
 --bf16
 --attention-backend unfused
---log-memory-to-tensorboard
 --tensorboard-dir ${TENSORBOARD_DIR}
 --exit-interval 4
 ${WITH_FP8:+--fp8-format hybrid}
