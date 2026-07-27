@@ -52,6 +52,20 @@ jobs:
       options: --pull never ${{ inputs.container_options }}
 
     steps:
+      - name: Prepare Checkout Environment on Ascend
+        if: inputs.platform == 'ascend'
+        run: |
+          /usr/bin/git config --global safe.directory '*'
+          /usr/bin/git config --global --unset-all credential.helper 2>/dev/null || true
+          /usr/bin/git config --system --unset-all credential.helper 2>/dev/null || true
+
+      - name: Checkout Source Code on Ascend
+        if: inputs.platform == 'ascend'
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          set-safe-directory: true
+
       # Cuda requires git safe.directory configuration and 3 checkout attempts to handle submodule-heavy repos
       - name: Configure Git Safe Directory on Cuda
         if: inputs.platform == 'cuda'
@@ -99,7 +113,26 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      
+
+      - name: Export Build Environment
+        env:
+          BUILD_ENV_JSON: ${{ inputs.build_env }}
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+
+          build_env = json.loads(os.environ["BUILD_ENV_JSON"])
+          with open(os.environ["GITHUB_ENV"], "a", encoding="utf-8") as env_file:
+              for key, value in build_env.items():
+                  value = str(value)
+                  if "\n" in key or "\n" in value:
+                      raise SystemExit(
+                          f"Multiline build environment value is not supported: {key}"
+                      )
+                  env_file.write(f"{key}={value}\n")
+          PY
+
       - name: Environment Setup
         if: inputs.setup_script != ''
         run: |
@@ -114,16 +147,31 @@ jobs:
         run: |
           set -euo pipefail
 
-          # Activate conda environment
+          # Ascend environment activation is handled by setup_ascend.sh.
           if ${{inputs.platform == 'metax'}}; then
             source /opt/conda/etc/profile.d/conda.sh
             conda activate base
-          else
+          elif ${{inputs.platform == 'cuda'}}; then
             source /opt/miniconda3/etc/profile.d/conda.sh
             conda activate flagscale-train
           fi
           echo "PATH=$PATH" >> $GITHUB_ENV
-          export TE_LIB_PATH=$(python -c "import site; print(site.getsitepackages()[0])")/transformer_engine
+          export TE_LIB_PATH=$(python3 -c "import site; print(site.getsitepackages()[0])")/transformer_engine
+
+          if ${{inputs.platform == 'ascend'}}; then
+            python3 - <<'PY'
+          import torch
+          import torch_npu  # noqa: F401
+          import transformer_engine
+          import transformer_engine.pytorch
+
+          if not torch.npu.is_available():
+              raise SystemExit("Ascend NPU is not available")
+          print("torch:", torch.__version__)
+          print("NPU device count:", torch.npu.device_count())
+          print("transformer_engine:", transformer_engine.__file__)
+          PY
+          fi
 
           echo "=== Running L1 PyTorch Megatron-FL MCore Integration Test ==="
           # python3 --version
@@ -131,4 +179,3 @@ jobs:
 
           bash ${{ matrix.test_group.path }}
         timeout-minutes: 30
-        
