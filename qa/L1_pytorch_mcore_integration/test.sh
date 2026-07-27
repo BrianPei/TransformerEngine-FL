@@ -64,10 +64,11 @@ fi
 
 # Download or sync Megatron-LM-FL to the requested repo/ref.
 if [ ! -d "${MCORE_PATH}" ]; then
-    pushd $(dirname ${MCORE_PATH})
+    mkdir -p "$(dirname "${MCORE_PATH}")"
+    pushd "$(dirname "${MCORE_PATH}")"
     git config --global --unset-all credential.helper 2>/dev/null || true
     git config --system --unset-all credential.helper 2>/dev/null || true
-    retry_command 3 5 git clone --depth 1 -b "${MCORE_REF}" "${MCORE_REPO_URL}" $(basename ${MCORE_PATH})
+    retry_command 3 5 git clone --depth 1 -b "${MCORE_REF}" "${MCORE_REPO_URL}" "$(basename "${MCORE_PATH}")"
     popd
 fi
 
