@@ -2,7 +2,7 @@
 #
 # See LICENSE for license information.
 
-set -e
+set -euo pipefail
 
 SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 
@@ -31,28 +31,23 @@ retry_command() {
 : "${TE_PATH:=$(cd -- "${SCRIPT_DIR}/../.." && pwd)}"
 : "${MCORE_PATH:=/workspace/Megatron-LM-FL}"
 : "${MCORE_REPO_URL:=https://github.com/flagos-ai/Megatron-LM-FL.git}"
-: "${MCORE_REF:=main}"
+: "${MCORE_REF:=175ae90ec92a9e6fea2d74ccd24d6a1835d3ae82}"
 : "${OUTPUT_DIR:=${TE_PATH}/qa/L1_pytorch_mcore_integration/output}"
 : "${DATA_CACHE_PATH:=/tmp/data_cache}"
-: "${PLATFORM:=cuda}"
+: "${PLATFORM:=unknown}"
 
-# Megatron-LM-FL accepts the NCCL backend name on Ascend and maps it to HCCL
-# through torch_npu.contrib.transfer_to_npu.
 : "${DISTRIBUTED_BACKEND:=nccl}"
+: "${NUM_LAYERS:=12}"
+: "${HIDDEN_SIZE:=512}"
+: "${NUM_ATTENTION_HEADS:=8}"
+: "${SEQ_LENGTH:=1024}"
+: "${MICRO_BATCH_SIZE:=4}"
+: "${GLOBAL_BATCH_SIZE:=32}"
+: "${ENABLE_DIAGNOSTICS:=1}"
 
 # Check whether FP8 is supported
 WITH_FP8=
-if [ "${PLATFORM}" = "ascend" ]; then
-    python3 - <<'PY'
-import torch
-import torch_npu  # noqa: F401
-
-if not torch.npu.is_available():
-    raise SystemExit("Ascend NPU is not available")
-print("torch:", torch.__version__)
-print("NPU device count:", torch.npu.device_count())
-PY
-elif command -v nvidia-smi &>/dev/null; then
+if command -v nvidia-smi &>/dev/null; then
     DEVICE_ARCH=$(nvidia-smi --query-gpu=compute_cap --format=csv,noheader | head -n 1 | sed 's/[^0-9]//g')
     if [[ ${DEVICE_ARCH} -ge 89 ]]; then
         WITH_FP8=1
@@ -65,17 +60,19 @@ fi
 # Download or sync Megatron-LM-FL to the requested repo/ref.
 if [ ! -d "${MCORE_PATH}" ]; then
     mkdir -p "$(dirname "${MCORE_PATH}")"
-    pushd "$(dirname "${MCORE_PATH}")"
     git config --global --unset-all credential.helper 2>/dev/null || true
     git config --system --unset-all credential.helper 2>/dev/null || true
-    retry_command 3 5 git clone --depth 1 -b "${MCORE_REF}" "${MCORE_REPO_URL}" "$(basename "${MCORE_PATH}")"
-    popd
+    retry_command 3 5 git clone --filter=blob:none --no-checkout \
+        "${MCORE_REPO_URL}" "${MCORE_PATH}"
 fi
 
 if [ -d "${MCORE_PATH}/.git" ]; then
     git -C "${MCORE_PATH}" remote set-url origin "${MCORE_REPO_URL}"
     retry_command 3 5 git -C "${MCORE_PATH}" fetch --depth 1 origin "${MCORE_REF}"
-    git -C "${MCORE_PATH}" checkout -B "${MCORE_REF}" "FETCH_HEAD"
+    git -C "${MCORE_PATH}" checkout --detach --force "FETCH_HEAD"
+else
+    echo "Megatron-LM-FL checkout is not a Git repository: ${MCORE_PATH}" >&2
+    exit 1
 fi
 
 # Megatron-LM-FL tokenizer imports happen at module import time, so direct
@@ -113,35 +110,22 @@ fi
 # Megatron-LM-FL invocation. Keep the argument shape aligned with the
 # previously validated tp1/pp1 mock-data GPT functional case while letting CI
 # exit after a few steps.
-DEVICE_ENV="
-NCCL_ALGO=Ring
-"
-if [ "${PLATFORM}" != "ascend" ]; then
+DEVICE_ENV="NCCL_ALGO=${NCCL_ALGO:-Ring}"
+if [ -n "${CUDA_DEVICE_MAX_CONNECTIONS:-}" ]; then
     DEVICE_ENV="${DEVICE_ENV}
-CUDA_DEVICE_MAX_CONNECTIONS=1
-CUBLAS_WORKSPACE_CONFIG=:4096:8
-"
+CUDA_DEVICE_MAX_CONNECTIONS=${CUDA_DEVICE_MAX_CONNECTIONS}"
+fi
+if [ -n "${CUBLAS_WORKSPACE_CONFIG:-}" ]; then
+    DEVICE_ENV="${DEVICE_ENV}
+CUBLAS_WORKSPACE_CONFIG=${CUBLAS_WORKSPACE_CONFIG}"
 fi
 
-NUM_LAYERS=12
-HIDDEN_SIZE=512
-NUM_ATTENTION_HEADS=8
-SEQ_LENGTH=1024
-MICRO_BATCH_SIZE=4
-GLOBAL_BATCH_SIZE=32
-DIAGNOSTIC_ARGS="
+DIAGNOSTIC_ARGS=""
+if [ "${ENABLE_DIAGNOSTICS}" = "1" ]; then
+    DIAGNOSTIC_ARGS="
 --log-params-norm
 --log-num-zeros-in-grad
---log-memory-to-tensorboard
-"
-if [ "${PLATFORM}" = "ascend" ]; then
-    NUM_LAYERS=2
-    HIDDEN_SIZE=128
-    NUM_ATTENTION_HEADS=4
-    SEQ_LENGTH=128
-    MICRO_BATCH_SIZE=1
-    GLOBAL_BATCH_SIZE=1
-    DIAGNOSTIC_ARGS=""
+--log-memory-to-tensorboard"
 fi
 
 COMMAND="
