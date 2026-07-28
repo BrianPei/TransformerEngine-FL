@@ -42,17 +42,6 @@ cd $GITHUB_WORKSPACE
 TE_FL_SKIP_CUDA=1 python3 setup.py install
 
 echo "===== Step 6: Final Verification ====="
-# Verify both TE Python API and backend are functional
-python3 - <<'EOF'
-import transformer_engine
-import transformer_engine_torch as te
-print("transformer_engine:", transformer_engine)
-print("transformer_engine_torch:", te)
-required = ["multi_tensor_scale", "multi_tensor_compute_scale_and_scale_inv"]
-missing = [name for name in required if not hasattr(te, name)]
-print("missing backend APIs:", ", ".join(missing) if missing else "none")
-if missing:
-    raise SystemExit(1)
-EOF
+python3 tests/pytorch/test_sanity_import.py
 
 echo "===== Environment Setup Complete ====="

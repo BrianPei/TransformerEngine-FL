@@ -26,17 +26,5 @@ pip install . -v --no-deps --no-build-isolation
 
 echo "===== Step 3: Verify Installation ====="
 python3 tests/pytorch/test_sanity_import.py
-python3 - <<'PY'
-import importlib
-
-tex = importlib.import_module("transformer_engine_torch")
-required = ["multi_tensor_scale", "multi_tensor_compute_scale_and_scale_inv"]
-missing = [name for name in required if not hasattr(tex, name)]
-print("[TE check] module:", tex)
-print("[TE check] file:", getattr(tex, "__file__", "N/A"))
-print("[TE check] missing:", ", ".join(missing) if missing else "none")
-if missing:
-    raise SystemExit(1)
-PY
 
 echo "===== Environment Setup Complete ====="
