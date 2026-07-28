@@ -3,6 +3,11 @@
 # Called by unit_tests_common.yml for Metax platforms (C500, etc.)
 set -euo pipefail
 
+export TE_FL_SKIP_CUDA="${TE_FL_SKIP_CUDA:-1}"
+export NVTE_WITH_MACA="${NVTE_WITH_MACA:-1}"
+export CUDA_HOME="${CUDA_HOME:-/opt/maca}"
+export MACA_HOME="${MACA_HOME:-/opt/maca}"
+
 echo "===== Step 0: Activate Python environment ====="
 source /opt/conda/etc/profile.d/conda.sh
 conda activate base
@@ -10,9 +15,13 @@ echo "Python: $(which python3) ($(python3 --version 2>&1))"
 
 echo "===== Step 1: Base Environment Setup ====="
 # Configure MACA toolchain paths
-export PATH="/opt/maca/bin:$PATH"
-export LD_LIBRARY_PATH="/opt/maca/lib:${LD_LIBRARY_PATH:-}"
+export PATH="${MACA_HOME}/bin:$PATH"
+export LD_LIBRARY_PATH="${MACA_HOME}/lib:${LD_LIBRARY_PATH:-}"
 {
+    echo "TE_FL_SKIP_CUDA=$TE_FL_SKIP_CUDA"
+    echo "NVTE_WITH_MACA=$NVTE_WITH_MACA"
+    echo "CUDA_HOME=$CUDA_HOME"
+    echo "MACA_HOME=$MACA_HOME"
     echo "PATH=$PATH"
     echo "LD_LIBRARY_PATH=$LD_LIBRARY_PATH"
 } >> "$GITHUB_ENV"

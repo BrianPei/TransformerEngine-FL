@@ -22,10 +22,6 @@ on:
         required: false
         type: string
         default: ''
-      build_env:
-        required: false
-        type: string
-        default: '{}'
       checkout_submodules:
         required: false
         type: string
@@ -64,43 +60,9 @@ jobs:
           submodules: ${{ inputs.checkout_submodules }}
           set-safe-directory: true
 
-      - name: Export Build Environment
-        env:
-          ENV_JSON: ${{ inputs.build_env }}
-        run: |
-          python3 - <<'PY'
-          import json
-          import os
-
-          values = json.loads(os.environ["ENV_JSON"]) or {}
-          with open(os.environ["GITHUB_ENV"], "a", encoding="utf-8") as env_file:
-              for key, value in values.items():
-                  value = str(value)
-                  if "\n" in key or "\n" in value:
-                      raise SystemExit(f"Multiline environment value is not supported: {key}")
-                  env_file.write(f"{key}={value}\n")
-          PY
-
       - name: Environment Setup
         if: inputs.setup_script != ''
         run: bash "$GITHUB_WORKSPACE/${{ inputs.setup_script }}"
-
-      - name: Export Test Environment
-        env:
-          ENV_JSON: ${{ toJson(matrix.test_group.env) }}
-        run: |
-          python3 - <<'PY'
-          import json
-          import os
-
-          values = json.loads(os.environ["ENV_JSON"]) or {}
-          with open(os.environ["GITHUB_ENV"], "a", encoding="utf-8") as env_file:
-              for key, value in values.items():
-                  value = str(value)
-                  if "\n" in key or "\n" in value:
-                      raise SystemExit(f"Multiline environment value is not supported: {key}")
-                  env_file.write(f"{key}={value}\n")
-          PY
 
       - name: Execute Tests
         env:

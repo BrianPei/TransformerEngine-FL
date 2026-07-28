@@ -38,17 +38,6 @@ container_options: >-
 # Platform-specific environment setup script
 setup_script: .github/scripts/setup_cuda.sh
 
-# Build environment variables (platform-specific)
-build_env:
-  TE_FL_SKIP_CUDA: '0'
-  SKIP_CUDA_BUILD: '0'
-  NVTE_WITH_CUDA: '1'
-  NVTE_WITH_MACA: '0'
-  TE_WITH_NCCL: '1'
-  NVTE_FRAMEWORK: pytorch
-  CUDA_HOME: /usr/local/cuda-12.8
-  NVCC: /usr/local/cuda-12.8/bin/nvcc
-
 # Device types to run tests on
 device_types:
   - a100
@@ -84,14 +73,6 @@ unit_test_matrix:
 integration_test_matrix:
   - name: pytorch_mcore_integration
     path: qa/L1_pytorch_mcore_integration/test.sh
-    env:
-      PLATFORM: cuda
-      TE_FL_PREFER: vendor
-      MCORE_REPO_URL: https://github.com/flagos-ai/Megatron-LM-FL.git
-      MCORE_REF: 175ae90ec92a9e6fea2d74ccd24d6a1835d3ae82
-      DISTRIBUTED_BACKEND: nccl
-      CUDA_DEVICE_MAX_CONNECTIONS: '1'
-      CUBLAS_WORKSPACE_CONFIG: ':4096:8'
 
 # Test matrix configuration
 test_matrix:

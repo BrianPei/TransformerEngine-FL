@@ -27,6 +27,18 @@ retry_command() {
     return 1
 }
 
+detect_platform() {
+    if command -v nvidia-smi &>/dev/null; then
+        echo cuda
+    elif command -v mx-smi &>/dev/null || [ -d /opt/maca ]; then
+        echo metax
+    elif command -v npu-smi &>/dev/null || [ -d /usr/local/Ascend ]; then
+        echo ascend
+    else
+        echo unknown
+    fi
+}
+
 # Paths
 : "${TE_PATH:=$(cd -- "${SCRIPT_DIR}/../.." && pwd)}"
 : "${MCORE_PATH:=/workspace/Megatron-LM-FL}"
@@ -34,16 +46,39 @@ retry_command() {
 : "${MCORE_REF:=175ae90ec92a9e6fea2d74ccd24d6a1835d3ae82}"
 : "${OUTPUT_DIR:=${TE_PATH}/qa/L1_pytorch_mcore_integration/output}"
 : "${DATA_CACHE_PATH:=/tmp/data_cache}"
-: "${PLATFORM:=unknown}"
+: "${PLATFORM:=$(detect_platform)}"
+: "${TE_FL_PREFER:=vendor}"
 
 : "${DISTRIBUTED_BACKEND:=nccl}"
-: "${NUM_LAYERS:=12}"
-: "${HIDDEN_SIZE:=512}"
-: "${NUM_ATTENTION_HEADS:=8}"
-: "${SEQ_LENGTH:=1024}"
-: "${MICRO_BATCH_SIZE:=4}"
-: "${GLOBAL_BATCH_SIZE:=32}"
-: "${ENABLE_DIAGNOSTICS:=1}"
+if [ "${PLATFORM}" = "ascend" ]; then
+    : "${NUM_LAYERS:=2}"
+    : "${HIDDEN_SIZE:=128}"
+    : "${NUM_ATTENTION_HEADS:=4}"
+    : "${SEQ_LENGTH:=128}"
+    : "${MICRO_BATCH_SIZE:=1}"
+    : "${GLOBAL_BATCH_SIZE:=1}"
+    : "${ENABLE_DIAGNOSTICS:=0}"
+else
+    : "${NUM_LAYERS:=12}"
+    : "${HIDDEN_SIZE:=512}"
+    : "${NUM_ATTENTION_HEADS:=8}"
+    : "${SEQ_LENGTH:=1024}"
+    : "${MICRO_BATCH_SIZE:=4}"
+    : "${GLOBAL_BATCH_SIZE:=32}"
+    : "${ENABLE_DIAGNOSTICS:=1}"
+    : "${CUDA_DEVICE_MAX_CONNECTIONS:=1}"
+    : "${CUBLAS_WORKSPACE_CONFIG:=:4096:8}"
+fi
+
+export PLATFORM TE_FL_PREFER MCORE_REPO_URL MCORE_REF DISTRIBUTED_BACKEND
+export NUM_LAYERS HIDDEN_SIZE NUM_ATTENTION_HEADS SEQ_LENGTH
+export MICRO_BATCH_SIZE GLOBAL_BATCH_SIZE ENABLE_DIAGNOSTICS
+if [ -n "${CUDA_DEVICE_MAX_CONNECTIONS:-}" ]; then
+    export CUDA_DEVICE_MAX_CONNECTIONS
+fi
+if [ -n "${CUBLAS_WORKSPACE_CONFIG:-}" ]; then
+    export CUBLAS_WORKSPACE_CONFIG
+fi
 
 # Check whether FP8 is supported
 WITH_FP8=

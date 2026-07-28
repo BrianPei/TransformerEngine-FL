@@ -21,9 +21,6 @@ container_options: >-
 # later steps through GITHUB_ENV.
 setup_script: .github/scripts/setup_example.sh
 
-build_env:
-  NVTE_FRAMEWORK: pytorch
-
 device_types:
   - example
 
@@ -59,14 +56,8 @@ unit_test_matrix:
     runner: script
     path: qa/L1_pytorch_onnx_unittest/test.sh
 
-# Integration groups use the same common workflow. Put platform-specific
-# behavior in this environment or in setup_script, not in the workflow.
+# Integration groups use the same common workflow. Put test-specific
+# environment defaults in the test script, not in the workflow.
 integration_test_matrix:
   - name: pytorch_mcore_integration
     path: qa/L1_pytorch_mcore_integration/test.sh
-    env:
-      PLATFORM: example
-      TE_FL_PREFER: flagos
-      MCORE_REPO_URL: https://github.com/flagos-ai/Megatron-LM-FL.git
-      MCORE_REF: '<verified-commit-sha>'
-      DISTRIBUTED_BACKEND: nccl
