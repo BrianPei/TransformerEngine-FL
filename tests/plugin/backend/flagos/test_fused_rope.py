@@ -6,10 +6,11 @@ from __future__ import annotations
 
 from typing import Optional
 
+import pytest
 import torch
 
 from transformer_engine.plugin.core.ops import NVTE_QKV_Format
-from transformer_engine.plugin.test_utils import TestCase, get_available_backends, get_backend
+from transformer_engine.plugin.test_utils import get_backend
 
 
 def _triton_available() -> bool:
@@ -252,56 +253,216 @@ def _reference_qkv_backward(
     return out
 
 
-class _TorchRoPEBackend:
-    @staticmethod
-    def fused_rope_forward(
-        input,
+@pytest.fixture(scope="module")
+def flagos_backend():
+    if not torch.cuda.is_available():
+        pytest.skip("FlagOS fused RoPE requires a CUDA device")
+    if not _triton_available():
+        pytest.skip("FlagOS fused RoPE requires Triton")
+
+    try:
+        backend = get_backend("flagos")
+        for op_name in (
+            "fused_rope_forward",
+            "fused_rope_backward",
+            "fused_qkv_rope_forward",
+            "fused_qkv_rope_backward",
+        ):
+            getattr(backend, op_name)
+    except (NotImplementedError, RuntimeError) as exc:
+        pytest.skip(f"FlagOS fused RoPE backend is not available: {exc}")
+
+    return backend
+
+
+@pytest.mark.parametrize(
+    "qkv_format, shape, interleaved, cp_size, cp_rank, use_start",
+    [
+        (NVTE_QKV_Format.NVTE_SBHD, (5, 2, 3, 10), False, 1, 0, True),
+        (NVTE_QKV_Format.NVTE_BSHD, (2, 4, 2, 10), True, 2, 1, False),
+        (NVTE_QKV_Format.NVTE_SBHD, (4, 2, 2, 10), False, 2, 1, True),
+    ],
+)
+def test_fused_rope_sbhd_bshd_forward_backward(
+    flagos_backend,
+    qkv_format,
+    shape,
+    interleaved,
+    cp_size,
+    cp_rank,
+    use_start,
+):
+    torch.manual_seed(1234)
+    device = "cuda"
+    d2 = 6
+    freq_len = shape[0] if qkv_format == NVTE_QKV_Format.NVTE_SBHD else shape[1]
+    freq_len = max(freq_len * cp_size + 3, 12)
+    freqs = _make_freqs(freq_len, d2, device)
+    start_positions = None
+    if use_start:
+        batch = shape[1] if qkv_format == NVTE_QKV_Format.NVTE_SBHD else shape[0]
+        start_positions = torch.arange(batch, dtype=torch.int32, device=device) + 1
+
+    base = torch.randn(*shape[:-1], shape[-1] * 2, device=device)
+    tensor = base[..., ::2]
+    grad = torch.randn_like(tensor)
+    ref_fwd = _reference_rope(
+        tensor,
+        freqs,
+        qkv_format,
+        interleaved,
+        None,
+        start_positions,
+        cp_size,
+        cp_rank,
+        False,
+    )
+    ref_bwd = _reference_rope(
+        grad,
+        freqs,
+        qkv_format,
+        interleaved,
+        None,
+        start_positions,
+        cp_size,
+        cp_rank,
+        True,
+    )
+
+    out = flagos_backend.fused_rope_forward(
+        tensor,
         freqs,
         start_positions,
         qkv_format,
         interleaved,
-        cu_seqlens,
+        None,
         cp_size,
         cp_rank,
-    ):
-        return _reference_rope(
-            input,
-            freqs,
-            qkv_format,
-            interleaved,
-            cu_seqlens,
-            start_positions,
-            cp_size,
-            cp_rank,
-            False,
-        )
-
-    @staticmethod
-    def fused_rope_backward(
-        output_grads,
+    )
+    dx = flagos_backend.fused_rope_backward(
+        grad,
         freqs,
         start_positions,
         qkv_format,
         interleaved,
+        None,
+        cp_size,
+        cp_rank,
+    )
+
+    torch.testing.assert_close(out.float(), ref_fwd.float(), rtol=1e-4, atol=1e-4)
+    torch.testing.assert_close(dx.float(), ref_bwd.float(), rtol=1e-4, atol=1e-4)
+
+
+@pytest.mark.parametrize(
+    "cu_cpu, interleaved, cp_size, cp_rank, use_start",
+    [
+        (torch.tensor([0, 3, 8], dtype=torch.int32), True, 1, 0, True),
+        (torch.tensor([0, 8, 20], dtype=torch.int32), False, 2, 0, False),
+    ],
+)
+def test_fused_rope_thd_forward_backward(
+    flagos_backend,
+    cu_cpu,
+    interleaved,
+    cp_size,
+    cp_rank,
+    use_start,
+):
+    torch.manual_seed(2345)
+    device = "cuda"
+    cu_seqlens = cu_cpu.to(device)
+    local_cu = cu_cpu // cp_size
+    total_t = int(local_cu[-1].item())
+    h, d, d2 = 3, 10, 6
+    freq_len = max(int(cu_cpu[1:].sub(cu_cpu[:-1]).max().item()), 12)
+    freqs = _make_freqs(freq_len, d2, device)
+    start_positions = None
+    if use_start:
+        start_positions = torch.tensor([1, 0], dtype=torch.int32, device=device)
+
+    tensor = torch.randn(total_t, h, d, device=device)
+    grad = torch.randn_like(tensor)
+    ref_fwd = _reference_rope(
+        tensor,
+        freqs,
+        NVTE_QKV_Format.NVTE_THD,
+        interleaved,
+        cu_seqlens,
+        start_positions,
+        cp_size,
+        cp_rank,
+        False,
+    )
+    ref_bwd = _reference_rope(
+        grad,
+        freqs,
+        NVTE_QKV_Format.NVTE_THD,
+        interleaved,
+        cu_seqlens,
+        start_positions,
+        cp_size,
+        cp_rank,
+        True,
+    )
+
+    out = flagos_backend.fused_rope_forward(
+        tensor,
+        freqs,
+        start_positions,
+        NVTE_QKV_Format.NVTE_THD,
+        interleaved,
         cu_seqlens,
         cp_size,
         cp_rank,
-    ):
-        return _reference_rope(
-            output_grads,
-            freqs,
-            qkv_format,
-            interleaved,
-            cu_seqlens,
-            start_positions,
-            cp_size,
-            cp_rank,
-            True,
-        )
+    )
+    dx = flagos_backend.fused_rope_backward(
+        grad,
+        freqs,
+        start_positions,
+        NVTE_QKV_Format.NVTE_THD,
+        interleaved,
+        cu_seqlens,
+        cp_size,
+        cp_rank,
+    )
 
-    @staticmethod
-    def fused_qkv_rope_forward(
-        qkv_input,
+    torch.testing.assert_close(out.float(), ref_fwd.float(), rtol=1e-4, atol=1e-4)
+    torch.testing.assert_close(dx.float(), ref_bwd.float(), rtol=1e-4, atol=1e-4)
+
+
+@pytest.mark.parametrize(
+    "qkv_format, shape, interleaved, cp_size, cp_rank, use_start",
+    [
+        (NVTE_QKV_Format.NVTE_SBHD, (4, 2, 2, 32), False, 1, 0, True),
+        (NVTE_QKV_Format.NVTE_BSHD, (2, 4, 2, 32), True, 2, 1, False),
+    ],
+)
+def test_fused_qkv_rope_forward_backward(
+    flagos_backend,
+    qkv_format,
+    shape,
+    interleaved,
+    cp_size,
+    cp_rank,
+    use_start,
+):
+    torch.manual_seed(3456)
+    device = "cuda"
+    d2 = 6
+    qkv_split_arg_list = [16, 8, 8]
+    seq_len = shape[0] if qkv_format == NVTE_QKV_Format.NVTE_SBHD else shape[1]
+    freq_len = max(seq_len * cp_size + 3, 12)
+    q_freqs = _make_freqs(freq_len, d2, device)
+    k_freqs = _make_freqs(freq_len, d2, device) + 0.17
+    start_positions = None
+    if use_start:
+        batch = shape[1] if qkv_format == NVTE_QKV_Format.NVTE_SBHD else shape[0]
+        start_positions = torch.arange(batch, dtype=torch.int32, device=device)
+
+    qkv = torch.randn(*shape, device=device).contiguous()
+    ref_q, ref_k, ref_v = _reference_qkv_forward(
+        qkv,
         q_freqs,
         k_freqs,
         start_positions,
@@ -310,24 +471,15 @@ class _TorchRoPEBackend:
         interleaved,
         cp_size,
         cp_rank,
-    ):
-        return _reference_qkv_forward(
-            qkv_input,
-            q_freqs,
-            k_freqs,
-            start_positions,
-            qkv_split_arg_list,
-            qkv_format,
-            interleaved,
-            cp_size,
-            cp_rank,
-        )
+    )
 
-    @staticmethod
-    def fused_qkv_rope_backward(
-        q_grad_out,
-        k_grad_out,
-        v_grad_out,
+    q_grad = torch.randn_like(ref_q)
+    k_grad = torch.randn_like(ref_k)
+    v_grad = torch.randn_like(ref_v)
+    ref_bwd = _reference_qkv_backward(
+        q_grad,
+        k_grad,
+        v_grad,
         q_freqs,
         k_freqs,
         qkv_split_arg_list,
@@ -335,432 +487,33 @@ class _TorchRoPEBackend:
         interleaved,
         cp_size,
         cp_rank,
-    ):
-        return _reference_qkv_backward(
-            q_grad_out,
-            k_grad_out,
-            v_grad_out,
-            q_freqs,
-            k_freqs,
-            qkv_split_arg_list,
-            qkv_format,
-            interleaved,
-            cp_size,
-            cp_rank,
-        )
+    )
 
+    q_out, k_out, v_out = flagos_backend.fused_qkv_rope_forward(
+        qkv,
+        q_freqs,
+        k_freqs,
+        start_positions,
+        qkv_split_arg_list,
+        qkv_format,
+        interleaved,
+        cp_size,
+        cp_rank,
+    )
+    dqkv = flagos_backend.fused_qkv_rope_backward(
+        q_grad,
+        k_grad,
+        v_grad,
+        q_freqs,
+        k_freqs,
+        qkv_split_arg_list,
+        qkv_format,
+        interleaved,
+        cp_size,
+        cp_rank,
+    )
 
-class FusedRoPETests(TestCase):
-    def __init__(self, device="cpu"):
-        super().__init__(
-            "Fused RoPE",
-            "Test fused RoPE and fused QKV RoPE across CUDA, FlagOS, and torch reference",
-        )
-        self.backends = get_available_backends()
-        if "torch" not in self.backends:
-            self.backends.append("torch")
-        self.backends = [
-            backend for backend in self.backends if backend in ("cuda", "flagos", "torch")
-        ]
-        self.device = device
-
-    def _get_backend(self, backend_name):
-        if backend_name == "torch":
-            return _TorchRoPEBackend()
-        if self.device == "cpu":
-            raise NotImplementedError("fused RoPE requires a GPU device")
-        if backend_name == "flagos" and not _triton_available():
-            raise NotImplementedError("Triton is not installed")
-        return get_backend(backend_name)
-
-    def _iter_backends(self):
-        if not self.backends:
-            self.skipped += 1
-            print("    ⊘ no tested backend is registered")
-            return
-        for backend_name in self.backends:
-            try:
-                yield backend_name, self._get_backend(backend_name)
-            except NotImplementedError as exc:
-                self.skipped += 1
-                print(f"    ⊘ {backend_name} ({exc})")
-
-    def _compare_to_cuda(self, outputs, backend_name, labels, msg):
-        if "cuda" not in outputs or backend_name not in outputs:
-            return
-
-        try:
-            for actual, expected, label in zip(outputs[backend_name], outputs["cuda"], labels):
-                self.assert_close(
-                    actual.float(),
-                    expected.float(),
-                    rtol=1e-4,
-                    atol=1e-4,
-                    msg=f"{msg} {label} mismatch between {backend_name} and cuda",
-                )
-            print(f"    ✓ {backend_name} matches cuda")
-        except AssertionError as exc:
-            print(f"    ✗ {backend_name} vs cuda: {exc}")
-
-    def test_rope_sbhd_bshd_forward_backward(self):
-        print("\n  Testing fused_rope_forward/backward for SBHD and BSHD")
-        cases = [
-            (NVTE_QKV_Format.NVTE_SBHD, (5, 2, 3, 10), False, 1, 0, True),
-            (NVTE_QKV_Format.NVTE_BSHD, (2, 4, 2, 10), True, 2, 1, False),
-            (NVTE_QKV_Format.NVTE_SBHD, (4, 2, 2, 10), False, 2, 1, True),
-        ]
-
-        for qkv_format, shape, interleaved, cp_size, cp_rank, use_start in cases:
-            print(
-                f"\n  Testing fused_rope_forward/backward with {qkv_format.name}, "
-                f"interleaved={interleaved}, cp_size={cp_size}, "
-                f"start_positions={use_start}"
-            )
-            d2 = 6
-            freq_len = shape[0] if qkv_format == NVTE_QKV_Format.NVTE_SBHD else shape[1]
-            freq_len = max(freq_len * cp_size + 3, 12)
-            freqs = _make_freqs(freq_len, d2, self.device)
-            start_positions = None
-            if use_start:
-                batch = shape[1] if qkv_format == NVTE_QKV_Format.NVTE_SBHD else shape[0]
-                start_positions = torch.arange(batch, dtype=torch.int32, device=self.device) + 1
-
-            base = torch.randn(*shape[:-1], shape[-1] * 2, device=self.device)
-            tensor = base[..., ::2]
-            grad = torch.randn_like(tensor)
-            ref_fwd = _reference_rope(
-                tensor,
-                freqs,
-                qkv_format,
-                interleaved,
-                None,
-                start_positions,
-                cp_size,
-                cp_rank,
-                False,
-            )
-            ref_bwd = _reference_rope(
-                grad, freqs, qkv_format, interleaved, None, start_positions, cp_size, cp_rank, True
-            )
-
-            outputs = {}
-            for backend_name, backend in self._iter_backends():
-                try:
-                    out = backend.fused_rope_forward(
-                        tensor,
-                        freqs,
-                        start_positions,
-                        qkv_format,
-                        interleaved,
-                        None,
-                        cp_size,
-                        cp_rank,
-                    )
-                    dx = backend.fused_rope_backward(
-                        grad,
-                        freqs,
-                        start_positions,
-                        qkv_format,
-                        interleaved,
-                        None,
-                        cp_size,
-                        cp_rank,
-                    )
-                    self.assert_close(
-                        out.float(),
-                        ref_fwd.float(),
-                        rtol=1e-4,
-                        atol=1e-4,
-                        msg=f"fused_rope_forward mismatch for {backend_name}",
-                    )
-                    self.assert_close(
-                        dx.float(),
-                        ref_bwd.float(),
-                        rtol=1e-4,
-                        atol=1e-4,
-                        msg=f"fused_rope_backward mismatch for {backend_name}",
-                    )
-                    outputs[backend_name] = (out, dx)
-                    print(f"    ✓ {backend_name}")
-                except NotImplementedError as exc:
-                    self.skipped += 1
-                    print(f"    ⊘ {backend_name} ({exc})")
-                except RuntimeError as exc:
-                    if "is not available" in str(exc):
-                        self.skipped += 1
-                        print(f"    ⊘ {backend_name} ({exc})")
-                    else:
-                        self.failed += 1
-                        print(f"    ✗ {backend_name}: {exc}")
-                except Exception as exc:
-                    self.failed += 1
-                    print(f"    ✗ {backend_name}: {exc}")
-
-            self._compare_to_cuda(
-                outputs,
-                "flagos",
-                ("forward", "backward"),
-                f"{qkv_format.name} fused_rope",
-            )
-
-    def test_rope_thd_forward_backward(self):
-        print("\n  Testing fused_rope_forward/backward for THD")
-        cases = [
-            (torch.tensor([0, 3, 8], dtype=torch.int32), True, 1, 0, True),
-            (torch.tensor([0, 8, 20], dtype=torch.int32), False, 2, 0, False),
-        ]
-
-        for cu_cpu, interleaved, cp_size, cp_rank, use_start in cases:
-            print(
-                "\n  Testing fused_rope_forward/backward with NVTE_THD, "
-                f"interleaved={interleaved}, cp_size={cp_size}, "
-                f"start_positions={use_start}"
-            )
-            cu_seqlens = cu_cpu.to(self.device)
-            local_cu = cu_cpu // cp_size
-            total_t = int(local_cu[-1].item())
-            h, d, d2 = 3, 10, 6
-            freq_len = max(int(cu_cpu[1:].sub(cu_cpu[:-1]).max().item()), 12)
-            freqs = _make_freqs(freq_len, d2, self.device)
-            start_positions = None
-            if use_start:
-                start_positions = torch.tensor([1, 0], dtype=torch.int32, device=self.device)
-
-            tensor = torch.randn(total_t, h, d, device=self.device)
-            grad = torch.randn_like(tensor)
-            ref_fwd = _reference_rope(
-                tensor,
-                freqs,
-                NVTE_QKV_Format.NVTE_THD,
-                interleaved,
-                cu_seqlens,
-                start_positions,
-                cp_size,
-                cp_rank,
-                False,
-            )
-            ref_bwd = _reference_rope(
-                grad,
-                freqs,
-                NVTE_QKV_Format.NVTE_THD,
-                interleaved,
-                cu_seqlens,
-                start_positions,
-                cp_size,
-                cp_rank,
-                True,
-            )
-
-            outputs = {}
-            for backend_name, backend in self._iter_backends():
-                try:
-                    out = backend.fused_rope_forward(
-                        tensor,
-                        freqs,
-                        start_positions,
-                        NVTE_QKV_Format.NVTE_THD,
-                        interleaved,
-                        cu_seqlens,
-                        cp_size,
-                        cp_rank,
-                    )
-                    dx = backend.fused_rope_backward(
-                        grad,
-                        freqs,
-                        start_positions,
-                        NVTE_QKV_Format.NVTE_THD,
-                        interleaved,
-                        cu_seqlens,
-                        cp_size,
-                        cp_rank,
-                    )
-                    self.assert_close(
-                        out.float(),
-                        ref_fwd.float(),
-                        rtol=1e-4,
-                        atol=1e-4,
-                        msg=f"THD fused_rope_forward mismatch for {backend_name}",
-                    )
-                    self.assert_close(
-                        dx.float(),
-                        ref_bwd.float(),
-                        rtol=1e-4,
-                        atol=1e-4,
-                        msg=f"THD fused_rope_backward mismatch for {backend_name}",
-                    )
-                    outputs[backend_name] = (out, dx)
-                    print(f"    ✓ {backend_name}")
-                except NotImplementedError as exc:
-                    self.skipped += 1
-                    print(f"    ⊘ {backend_name} ({exc})")
-                except RuntimeError as exc:
-                    if "is not available" in str(exc):
-                        self.skipped += 1
-                        print(f"    ⊘ {backend_name} ({exc})")
-                    else:
-                        self.failed += 1
-                        print(f"    ✗ {backend_name}: {exc}")
-                except Exception as exc:
-                    self.failed += 1
-                    print(f"    ✗ {backend_name}: {exc}")
-
-            self._compare_to_cuda(
-                outputs,
-                "flagos",
-                ("forward", "backward"),
-                "THD fused_rope",
-            )
-
-    def test_qkv_rope_forward_backward(self):
-        print("\n  Testing fused_qkv_rope_forward/backward")
-        cases = [
-            (NVTE_QKV_Format.NVTE_SBHD, (4, 2, 2, 32), False, 1, 0, True),
-            (NVTE_QKV_Format.NVTE_BSHD, (2, 4, 2, 32), True, 2, 1, False),
-        ]
-        qkv_split_arg_list = [16, 8, 8]
-
-        for qkv_format, shape, interleaved, cp_size, cp_rank, use_start in cases:
-            print(
-                f"\n  Testing fused_qkv_rope_forward/backward with {qkv_format.name}, "
-                f"interleaved={interleaved}, cp_size={cp_size}, "
-                f"start_positions={use_start}"
-            )
-            d2 = 6
-            seq_len = shape[0] if qkv_format == NVTE_QKV_Format.NVTE_SBHD else shape[1]
-            freq_len = max(seq_len * cp_size + 3, 12)
-            q_freqs = _make_freqs(freq_len, d2, self.device)
-            k_freqs = _make_freqs(freq_len, d2, self.device) + 0.17
-            start_positions = None
-            if use_start:
-                batch = shape[1] if qkv_format == NVTE_QKV_Format.NVTE_SBHD else shape[0]
-                start_positions = torch.arange(batch, dtype=torch.int32, device=self.device)
-
-            qkv = torch.randn(*shape, device=self.device).contiguous()
-            ref_q, ref_k, ref_v = _reference_qkv_forward(
-                qkv,
-                q_freqs,
-                k_freqs,
-                start_positions,
-                qkv_split_arg_list,
-                qkv_format,
-                interleaved,
-                cp_size,
-                cp_rank,
-            )
-
-            q_grad = torch.randn_like(ref_q)
-            k_grad = torch.randn_like(ref_k)
-            v_grad = torch.randn_like(ref_v)
-            ref_bwd = _reference_qkv_backward(
-                q_grad,
-                k_grad,
-                v_grad,
-                q_freqs,
-                k_freqs,
-                qkv_split_arg_list,
-                qkv_format,
-                interleaved,
-                cp_size,
-                cp_rank,
-            )
-
-            outputs = {}
-            for backend_name, backend in self._iter_backends():
-                try:
-                    q_out, k_out, v_out = backend.fused_qkv_rope_forward(
-                        qkv,
-                        q_freqs,
-                        k_freqs,
-                        start_positions,
-                        qkv_split_arg_list,
-                        qkv_format,
-                        interleaved,
-                        cp_size,
-                        cp_rank,
-                    )
-                    dqkv = backend.fused_qkv_rope_backward(
-                        q_grad,
-                        k_grad,
-                        v_grad,
-                        q_freqs,
-                        k_freqs,
-                        qkv_split_arg_list,
-                        qkv_format,
-                        interleaved,
-                        cp_size,
-                        cp_rank,
-                    )
-                    self.assert_close(
-                        q_out.float(),
-                        ref_q.float(),
-                        rtol=1e-4,
-                        atol=1e-4,
-                        msg=f"fused_qkv_rope_forward Q mismatch for {backend_name}",
-                    )
-                    self.assert_close(
-                        k_out.float(),
-                        ref_k.float(),
-                        rtol=1e-4,
-                        atol=1e-4,
-                        msg=f"fused_qkv_rope_forward K mismatch for {backend_name}",
-                    )
-                    self.assert_close(
-                        v_out.float(),
-                        ref_v.float(),
-                        rtol=1e-4,
-                        atol=1e-4,
-                        msg=f"fused_qkv_rope_forward V mismatch for {backend_name}",
-                    )
-                    self.assert_close(
-                        dqkv.float(),
-                        ref_bwd.float(),
-                        rtol=1e-4,
-                        atol=1e-4,
-                        msg=f"fused_qkv_rope_backward mismatch for {backend_name}",
-                    )
-                    outputs[backend_name] = (q_out, k_out, v_out, dqkv)
-                    print(f"    ✓ {backend_name}")
-                except NotImplementedError as exc:
-                    self.skipped += 1
-                    print(f"    ⊘ {backend_name} ({exc})")
-                except RuntimeError as exc:
-                    if "is not available" in str(exc):
-                        self.skipped += 1
-                        print(f"    ⊘ {backend_name} ({exc})")
-                    else:
-                        self.failed += 1
-                        print(f"    ✗ {backend_name}: {exc}")
-                except Exception as exc:
-                    self.failed += 1
-                    print(f"    ✗ {backend_name}: {exc}")
-
-            self._compare_to_cuda(
-                outputs,
-                "flagos",
-                ("Q forward", "K forward", "V forward", "backward"),
-                f"{qkv_format.name} fused_qkv_rope",
-            )
-
-    def run_all_tests(self):
-        print("\n" + "=" * 60)
-        print("Testing Fused RoPE")
-        print("=" * 60)
-        print(f"Available backends: {', '.join(self.backends) or 'none'}")
-
-        self.test_rope_sbhd_bshd_forward_backward()
-        self.test_rope_thd_forward_backward()
-        self.test_qkv_rope_forward_backward()
-
-        return self.report()
-
-
-def main():
-    device = "cuda" if torch.cuda.is_available() else "cpu"
-    print(f"Using device: {device}")
-    test_suite = FusedRoPETests(device=device)
-    success = test_suite.run_all_tests()
-    return 0 if success else 1
-
-
-if __name__ == "__main__":
-    exit(main())
+    torch.testing.assert_close(q_out.float(), ref_q.float(), rtol=1e-4, atol=1e-4)
+    torch.testing.assert_close(k_out.float(), ref_k.float(), rtol=1e-4, atol=1e-4)
+    torch.testing.assert_close(v_out.float(), ref_v.float(), rtol=1e-4, atol=1e-4)
+    torch.testing.assert_close(dqkv.float(), ref_bwd.float(), rtol=1e-4, atol=1e-4)
