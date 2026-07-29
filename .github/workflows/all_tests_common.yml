@@ -6,7 +6,7 @@ on:
       platform:
         required: true
         type: string
-        description: Platform name (e.g., cuda, default)
+        description: Platform configuration name under .github/configs
       run_unit_tests:
         required: false
         type: boolean
@@ -41,6 +41,8 @@ jobs:
       test_env_script: ${{ steps.config.outputs.test_env_script }}
       backend_check_module: ${{ steps.config.outputs.backend_check_module }}
       backend_check_required_symbols: ${{ steps.config.outputs.backend_check_required_symbols }}
+      unit_test_matrix: ${{ steps.config.outputs.unit_test_matrix }}
+      integration_test_matrix: ${{ steps.config.outputs.integration_test_matrix }}
     steps:
       - name: Checkout source code
         uses: actions/checkout@v4
@@ -117,6 +119,20 @@ jobs:
           BACKEND_CHECK_REQUIRED_SYMBOLS=$(yq '.backend_check.required_symbols // [] | tojson(0)' "$CONFIG_FILE")
           echo "backend_check_required_symbols=$BACKEND_CHECK_REQUIRED_SYMBOLS" >> $GITHUB_OUTPUT
 
+          # Read test matrices. Defaults preserve the historical common workflow behavior.
+          UNIT_TEST_MATRIX=$(yq '.unit_test_matrix // [
+            {"name":"pytorch_debug","path":"qa/L0_pytorch_debug_unittest/test.sh","test_type":"debug"},
+            {"name":"pytorch_unittest","path":"qa/L0_pytorch_unittest/test.sh","test_type":"unittest"},
+            {"name":"pytorch_distributed_unittest","path":"qa/L1_pytorch_distributed_unittest/test.sh","test_type":"unittest"},
+            {"name":"pytorch_onnx_unittest","path":"qa/L1_pytorch_onnx_unittest/test.sh","test_type":"unittest"}
+          ] | tojson(0)' "$CONFIG_FILE")
+          echo "unit_test_matrix=$UNIT_TEST_MATRIX" >> $GITHUB_OUTPUT
+
+          INTEGRATION_TEST_MATRIX=$(yq '.integration_test_matrix // [
+            {"name":"pytorch_mcore_integration","path":"qa/L1_pytorch_mcore_integration/test.sh","test_type":"integration"}
+          ] | tojson(0)' "$CONFIG_FILE")
+          echo "integration_test_matrix=$INTEGRATION_TEST_MATRIX" >> $GITHUB_OUTPUT
+
   unit_tests:
     name: unit_tests
     if: inputs.run_unit_tests
@@ -144,6 +160,7 @@ jobs:
       test_env_script: ${{ needs.checkout_and_config.outputs.test_env_script }}
       backend_check_module: ${{ needs.checkout_and_config.outputs.backend_check_module }}
       backend_check_required_symbols: ${{ needs.checkout_and_config.outputs.backend_check_required_symbols }}
+      unit_test_matrix: ${{ needs.checkout_and_config.outputs.unit_test_matrix }}
 
   unit_tests_complete:
     name: unit_tests_complete
@@ -189,6 +206,7 @@ jobs:
       test_env_script: ${{ needs.checkout_and_config.outputs.test_env_script }}
       backend_check_module: ${{ needs.checkout_and_config.outputs.backend_check_module }}
       backend_check_required_symbols: ${{ needs.checkout_and_config.outputs.backend_check_required_symbols }}
+      integration_test_matrix: ${{ needs.checkout_and_config.outputs.integration_test_matrix }}
 
   integration_tests_complete:
     name: integration_tests_complete

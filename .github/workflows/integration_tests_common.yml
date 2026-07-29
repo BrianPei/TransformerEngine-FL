@@ -63,6 +63,13 @@ on:
         required: false
         type: string
         default: '[]'
+      integration_test_matrix:
+        required: false
+        type: string
+        default: >-
+          [
+            {"name":"pytorch_mcore_integration","path":"qa/L1_pytorch_mcore_integration/test.sh","test_type":"integration"}
+          ]
 
 jobs:
   integration_test:
@@ -73,10 +80,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        test_group:
-          - name: pytorch_mcore_integration
-            path: "qa/L1_pytorch_mcore_integration/test.sh"
-            test_type: "integration"
+        test_group: ${{ fromJson(inputs.integration_test_matrix) }}
     name: integration-${{ inputs.device }}-${{ matrix.test_group.name }}
     container:
       image: ${{ inputs.image }}

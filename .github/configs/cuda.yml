@@ -50,6 +50,8 @@ checkout:
 test_env_script: |
   source /opt/miniconda3/etc/profile.d/conda.sh
   conda activate flagscale-train
+  export PATH=${CUDA_HOME}/bin:$PATH
+  export LD_LIBRARY_PATH=${CUDA_HOME}/lib:${LD_LIBRARY_PATH:-}
 
 # Backend/API sanity check used by common unit workflow.
 backend_check:

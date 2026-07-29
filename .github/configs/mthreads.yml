@@ -51,6 +51,8 @@ checkout:
 # Runtime environment activation used by common workflows before tests.
 test_env_script: |
   echo "MThreads image uses system Python: $(which python3)"
+  export PATH=${MUSA_HOME}/bin:$PATH
+  export LD_LIBRARY_PATH=/usr/lib:/usr/lib/x86_64-linux-gnu:${MUSA_HOME}/lib:/usr/local/openmpi/lib:${LD_LIBRARY_PATH:-}
 
 # Backend/API sanity check used by common unit workflow.
 backend_check:

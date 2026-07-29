@@ -63,6 +63,16 @@ on:
         required: false
         type: string
         default: '[]'
+      unit_test_matrix:
+        required: false
+        type: string
+        default: >-
+          [
+            {"name":"pytorch_debug","path":"qa/L0_pytorch_debug_unittest/test.sh","test_type":"debug"},
+            {"name":"pytorch_unittest","path":"qa/L0_pytorch_unittest/test.sh","test_type":"unittest"},
+            {"name":"pytorch_distributed_unittest","path":"qa/L1_pytorch_distributed_unittest/test.sh","test_type":"unittest"},
+            {"name":"pytorch_onnx_unittest","path":"qa/L1_pytorch_onnx_unittest/test.sh","test_type":"unittest"}
+          ]
 
 jobs:
   unit_test:
@@ -73,19 +83,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        test_group:
-          - name: pytorch_debug
-            path: "qa/L0_pytorch_debug_unittest/test.sh"
-            test_type: "debug"
-          - name: pytorch_unittest
-            path: "qa/L0_pytorch_unittest/test.sh"
-            test_type: "unittest"
-          - name: pytorch_distributed_unittest
-            path: "qa/L1_pytorch_distributed_unittest/test.sh"
-            test_type: "unittest"
-          - name: pytorch_onnx_unittest
-            path: "qa/L1_pytorch_onnx_unittest/test.sh"
-            test_type: "unittest"
+        test_group: ${{ fromJson(inputs.unit_test_matrix) }}
     name: unit-${{ inputs.device }}-${{ matrix.test_group.name }}
     container:
       image: ${{ inputs.image }}
@@ -161,9 +159,7 @@ jobs:
           export TE_PATH=$GITHUB_WORKSPACE
           export TE_LIB_PATH=$(python3 -c "import site; print(site.getsitepackages()[0])")
           export PYTHONPATH=$GITHUB_WORKSPACE:${PYTHONPATH:-}
-          export PATH=${CUDA_HOME:-/usr/local/cuda}/bin:$PATH
-          export LD_LIBRARY_PATH=${CUDA_HOME:-/usr/local/cuda}/lib:${LD_LIBRARY_PATH:-}
-          
+
           # check envs before running tests
           echo "TE_PATH=$TE_PATH"
           echo "TE_LIB_PATH=$TE_LIB_PATH"

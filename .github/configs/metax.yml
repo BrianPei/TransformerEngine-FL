@@ -58,6 +58,8 @@ checkout:
 test_env_script: |
   source /opt/conda/etc/profile.d/conda.sh
   conda activate base
+  export PATH=${CUDA_HOME}/bin:$PATH
+  export LD_LIBRARY_PATH=${CUDA_HOME}/lib:${LD_LIBRARY_PATH:-}
 
 # Backend/API sanity check used by common unit workflow.
 backend_check:
