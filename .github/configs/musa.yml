@@ -11,7 +11,7 @@ ci_image: harbor.baai.ac.cn/flagos-dev/transformerengine-fl:20260729-mthreads-de
 # Runner labels for self-hosted MooreThreads node
 # Adjust this label to match the actual GitHub Actions runner label.
 runner_labels:
-  - mt-8g-cicd-megatron
+  - mt-8g-cicd-te
 
 # Container volumes
 container_volumes:
