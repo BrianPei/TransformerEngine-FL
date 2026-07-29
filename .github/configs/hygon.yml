@@ -82,4 +82,4 @@ unit_test_matrix:
 integration_test_matrix: []
 
 device_types:
-  - dcu
+  - bw1000
