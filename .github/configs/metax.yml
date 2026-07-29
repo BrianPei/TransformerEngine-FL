@@ -44,6 +44,28 @@ container_options: >-
 # Platform-specific environment setup script
 setup_script: .github/scripts/setup_metax.sh
 
+# Source checkout behavior
+checkout:
+  pre_script: |
+    git config --global --unset-all credential.helper 2>/dev/null || true
+    git config --system --unset-all credential.helper 2>/dev/null || true
+  fetch_depth: 0
+  submodules: 'false'
+  set_safe_directory: true
+  attempts: 1
+
+# Runtime environment activation used by common workflows before tests.
+test_env_script: |
+  source /opt/conda/etc/profile.d/conda.sh
+  conda activate base
+
+# Backend/API sanity check used by common unit workflow.
+backend_check:
+  module: transformer_engine_torch
+  required_symbols:
+    - multi_tensor_scale
+    - multi_tensor_compute_scale_and_scale_inv
+
 # Build environment variables (platform-specific)
 build_env:
   TE_FL_SKIP_CUDA: '1'

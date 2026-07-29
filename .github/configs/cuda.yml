@@ -37,6 +37,27 @@ container_options: >-
 # Platform-specific environment setup script
 setup_script: .github/scripts/setup_cuda.sh
 
+# Source checkout behavior
+checkout:
+  pre_script: |
+    /usr/bin/git config --global safe.directory '*'
+  fetch_depth: 0
+  submodules: recursive
+  set_safe_directory: true
+  attempts: 3
+
+# Runtime environment activation used by common workflows before tests.
+test_env_script: |
+  source /opt/miniconda3/etc/profile.d/conda.sh
+  conda activate flagscale-train
+
+# Backend/API sanity check used by common unit workflow.
+backend_check:
+  module: transformer_engine_torch
+  required_symbols:
+    - multi_tensor_scale
+    - multi_tensor_compute_scale_and_scale_inv
+
 # Build environment variables (platform-specific)
 build_env:
   TE_FL_SKIP_CUDA: '0'

@@ -31,6 +31,38 @@ on:
         required: false
         type: string
         default: '{}'
+      checkout_pre_script:
+        required: false
+        type: string
+        default: ''
+      checkout_fetch_depth:
+        required: false
+        type: string
+        default: '0'
+      checkout_submodules:
+        required: false
+        type: string
+        default: 'false'
+      checkout_set_safe_directory:
+        required: false
+        type: string
+        default: 'true'
+      checkout_attempts:
+        required: false
+        type: string
+        default: '1'
+      test_env_script:
+        required: false
+        type: string
+        default: ''
+      backend_check_module:
+        required: false
+        type: string
+        default: ''
+      backend_check_required_symbols:
+        required: false
+        type: string
+        default: '[]'
 
 jobs:
   integration_test:
@@ -52,53 +84,41 @@ jobs:
       options: --pull never ${{ inputs.container_options }}
 
     steps:
-      # Cuda requires git safe.directory configuration and 3 checkout attempts to handle submodule-heavy repos
-      - name: Configure Git Safe Directory on Cuda
-        if: inputs.platform == 'cuda'
-        run: /usr/bin/git config --global safe.directory '*'
-
-      - name: Checkout Source Code on Cuda (attempt 1)
-        id: checkout1
-        if: inputs.platform == 'cuda'
-        uses: actions/checkout@v4
-        continue-on-error: true
-        with:
-          fetch-depth: 0
-          submodules: recursive
-          set-safe-directory: true
-
-      - name: Checkout Source Code on Cuda (attempt 2)
-        id: checkout2
-        if: inputs.platform == 'cuda' && steps.checkout1.outcome == 'failure'
-        uses: actions/checkout@v4
-        continue-on-error: true
-        with:
-          fetch-depth: 0
-          submodules: recursive
-          set-safe-directory: true
-
-      - name: Checkout Source Code on Cuda (attempt 3)
-        id: checkout3
-        if: inputs.platform == 'cuda' && steps.checkout2.outcome == 'failure'
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-          submodules: recursive
-          set-safe-directory: true
-
-      # Metax requires to clean vscode-remote-container
-      - name: Configure Clean Git Env on Metax
-        if: inputs.platform == 'metax'
+      - name: Pre Checkout Setup
+        if: inputs.checkout_pre_script != ''
         run: |
-          git config --global --unset-all credential.helper 2>/dev/null || true
-          git config --system --unset-all credential.helper 2>/dev/null || true
+          cat > /tmp/tefl_pre_checkout.sh <<'EOF'
+          ${{ inputs.checkout_pre_script }}
+          EOF
+          bash /tmp/tefl_pre_checkout.sh
 
-      # Metax no need submodules
-      - name: Checkout Source Code on Metax
-        if: inputs.platform == 'metax'
+      - name: Checkout Source Code (attempt 1)
+        id: checkout1
+        uses: actions/checkout@v4
+        continue-on-error: ${{ fromJson(inputs.checkout_attempts) > 1 }}
+        with:
+          fetch-depth: ${{ inputs.checkout_fetch_depth }}
+          submodules: ${{ inputs.checkout_submodules }}
+          set-safe-directory: ${{ inputs.checkout_set_safe_directory }}
+
+      - name: Checkout Source Code (attempt 2)
+        id: checkout2
+        if: fromJson(inputs.checkout_attempts) > 1 && steps.checkout1.outcome == 'failure'
+        uses: actions/checkout@v4
+        continue-on-error: ${{ fromJson(inputs.checkout_attempts) > 2 }}
+        with:
+          fetch-depth: ${{ inputs.checkout_fetch_depth }}
+          submodules: ${{ inputs.checkout_submodules }}
+          set-safe-directory: ${{ inputs.checkout_set_safe_directory }}
+
+      - name: Checkout Source Code (attempt 3)
+        id: checkout3
+        if: fromJson(inputs.checkout_attempts) > 2 && steps.checkout2.outcome == 'failure'
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0
+          fetch-depth: ${{ inputs.checkout_fetch_depth }}
+          submodules: ${{ inputs.checkout_submodules }}
+          set-safe-directory: ${{ inputs.checkout_set_safe_directory }}
       
       - name: Environment Setup
         if: inputs.setup_script != ''
@@ -114,15 +134,25 @@ jobs:
         run: |
           set -euo pipefail
 
-          # Activate conda environment
-          if ${{inputs.platform == 'metax'}}; then
-            source /opt/conda/etc/profile.d/conda.sh
-            conda activate base
-          else
-            source /opt/miniconda3/etc/profile.d/conda.sh
-            conda activate flagscale-train
+          # Load platform-specific environment variables
+          while IFS='=' read -r key value; do
+            [ -n "$key" ] && export "$key=$value"
+          done < <(echo '${{ inputs.build_env }}' | python3 -c "
+          import json, sys
+          env = json.load(sys.stdin)
+          for k, v in env.items():
+              print(f'{k}={v}')
+          ")
+
+          # Activate/configure the platform runtime environment.
+          cat > /tmp/tefl_test_env.sh <<'EOF'
+          ${{ inputs.test_env_script }}
+          EOF
+          if [ -s /tmp/tefl_test_env.sh ]; then
+            source /tmp/tefl_test_env.sh
           fi
           echo "PATH=$PATH" >> $GITHUB_ENV
+          export PYTHONPATH=$GITHUB_WORKSPACE:${PYTHONPATH:-}
           export TE_LIB_PATH=$(python -c "import site; print(site.getsitepackages()[0])")/transformer_engine
 
           echo "=== Running L1 PyTorch Megatron-FL MCore Integration Test ==="

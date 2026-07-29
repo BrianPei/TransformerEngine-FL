@@ -33,6 +33,14 @@ jobs:
       device_types: ${{ steps.config.outputs.device_types }}
       setup_script: ${{ steps.config.outputs.setup_script }}
       build_env: ${{ steps.config.outputs.build_env }}
+      checkout_pre_script: ${{ steps.config.outputs.checkout_pre_script }}
+      checkout_fetch_depth: ${{ steps.config.outputs.checkout_fetch_depth }}
+      checkout_submodules: ${{ steps.config.outputs.checkout_submodules }}
+      checkout_set_safe_directory: ${{ steps.config.outputs.checkout_set_safe_directory }}
+      checkout_attempts: ${{ steps.config.outputs.checkout_attempts }}
+      test_env_script: ${{ steps.config.outputs.test_env_script }}
+      backend_check_module: ${{ steps.config.outputs.backend_check_module }}
+      backend_check_required_symbols: ${{ steps.config.outputs.backend_check_required_symbols }}
     steps:
       - name: Checkout source code
         uses: actions/checkout@v4
@@ -79,6 +87,36 @@ jobs:
           BUILD_ENV=$(yq '.build_env // {} | tojson(0)' "$CONFIG_FILE")
           echo "build_env=$BUILD_ENV" >> $GITHUB_OUTPUT
 
+          # Read source checkout behavior
+          CHECKOUT_PRE_SCRIPT=$(yq '.checkout.pre_script // ""' "$CONFIG_FILE")
+          {
+            echo "checkout_pre_script<<EOF"
+            echo "$CHECKOUT_PRE_SCRIPT"
+            echo "EOF"
+          } >> $GITHUB_OUTPUT
+          CHECKOUT_FETCH_DEPTH=$(yq '.checkout.fetch_depth // 0' "$CONFIG_FILE")
+          echo "checkout_fetch_depth=$CHECKOUT_FETCH_DEPTH" >> $GITHUB_OUTPUT
+          CHECKOUT_SUBMODULES=$(yq '.checkout.submodules // "false"' "$CONFIG_FILE")
+          echo "checkout_submodules=$CHECKOUT_SUBMODULES" >> $GITHUB_OUTPUT
+          CHECKOUT_SET_SAFE_DIRECTORY=$(yq '.checkout.set_safe_directory // true' "$CONFIG_FILE")
+          echo "checkout_set_safe_directory=$CHECKOUT_SET_SAFE_DIRECTORY" >> $GITHUB_OUTPUT
+          CHECKOUT_ATTEMPTS=$(yq '.checkout.attempts // 1' "$CONFIG_FILE")
+          echo "checkout_attempts=$CHECKOUT_ATTEMPTS" >> $GITHUB_OUTPUT
+
+          # Read runtime test environment script
+          TEST_ENV_SCRIPT=$(yq '.test_env_script // ""' "$CONFIG_FILE")
+          {
+            echo "test_env_script<<EOF"
+            echo "$TEST_ENV_SCRIPT"
+            echo "EOF"
+          } >> $GITHUB_OUTPUT
+
+          # Read backend/API sanity-check configuration
+          BACKEND_CHECK_MODULE=$(yq '.backend_check.module // ""' "$CONFIG_FILE")
+          echo "backend_check_module=$BACKEND_CHECK_MODULE" >> $GITHUB_OUTPUT
+          BACKEND_CHECK_REQUIRED_SYMBOLS=$(yq '.backend_check.required_symbols // [] | tojson(0)' "$CONFIG_FILE")
+          echo "backend_check_required_symbols=$BACKEND_CHECK_REQUIRED_SYMBOLS" >> $GITHUB_OUTPUT
+
   unit_tests:
     name: unit_tests
     if: inputs.run_unit_tests
@@ -98,6 +136,14 @@ jobs:
       container_options: ${{ needs.checkout_and_config.outputs.container_options }}
       setup_script: ${{ needs.checkout_and_config.outputs.setup_script }}
       build_env: ${{ needs.checkout_and_config.outputs.build_env }}
+      checkout_pre_script: ${{ needs.checkout_and_config.outputs.checkout_pre_script }}
+      checkout_fetch_depth: ${{ needs.checkout_and_config.outputs.checkout_fetch_depth }}
+      checkout_submodules: ${{ needs.checkout_and_config.outputs.checkout_submodules }}
+      checkout_set_safe_directory: ${{ needs.checkout_and_config.outputs.checkout_set_safe_directory }}
+      checkout_attempts: ${{ needs.checkout_and_config.outputs.checkout_attempts }}
+      test_env_script: ${{ needs.checkout_and_config.outputs.test_env_script }}
+      backend_check_module: ${{ needs.checkout_and_config.outputs.backend_check_module }}
+      backend_check_required_symbols: ${{ needs.checkout_and_config.outputs.backend_check_required_symbols }}
 
   unit_tests_complete:
     name: unit_tests_complete
@@ -135,6 +181,14 @@ jobs:
       container_options: ${{ needs.checkout_and_config.outputs.container_options }}
       setup_script: ${{ needs.checkout_and_config.outputs.setup_script }}
       build_env: ${{ needs.checkout_and_config.outputs.build_env }}
+      checkout_pre_script: ${{ needs.checkout_and_config.outputs.checkout_pre_script }}
+      checkout_fetch_depth: ${{ needs.checkout_and_config.outputs.checkout_fetch_depth }}
+      checkout_submodules: ${{ needs.checkout_and_config.outputs.checkout_submodules }}
+      checkout_set_safe_directory: ${{ needs.checkout_and_config.outputs.checkout_set_safe_directory }}
+      checkout_attempts: ${{ needs.checkout_and_config.outputs.checkout_attempts }}
+      test_env_script: ${{ needs.checkout_and_config.outputs.test_env_script }}
+      backend_check_module: ${{ needs.checkout_and_config.outputs.backend_check_module }}
+      backend_check_required_symbols: ${{ needs.checkout_and_config.outputs.backend_check_required_symbols }}
 
   integration_tests_complete:
     name: integration_tests_complete
