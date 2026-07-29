@@ -1,0 +1,89 @@
+# Hygon DCU / DTK configuration for TransformerEngine-FL plugin QA.
+
+hardware_name: hygon
+display_name: 'Hygon DCU (DTK)'
+checkout_submodules: 'false'
+
+ci_image: harbor.baai.ac.cn/flagos-dev/transformerengine-fl:manual-20260717-hygon-dev
+
+runner_labels:
+  - self-hosted
+  - Linux
+  - X64
+  - hygon
+  - dcu
+
+container_volumes:
+  - /opt/hyhal:/opt/hyhal
+
+container_options: >-
+  --privileged
+  --ipc=host
+  --shm-size=100g
+  --ulimit memlock=-1
+  --ulimit stack=67108864
+  --user root
+  --device=/dev/kfd
+  --device=/dev/dri
+  --group-add video
+
+setup_script: .github/scripts/setup_hygon.sh
+
+build_env:
+  PLATFORM: hygon
+  TE_FL_SKIP_CUDA: '1'
+  TE_FL_PREFER: vendor
+  NVTE_FRAMEWORK: pytorch
+  NVTE_FLASH_ATTN: '0'
+  NVTE_FUSED_ATTN: '0'
+  NVTE_UNFUSED_ATTN: '1'
+  NVTE_UnfusedDPA_Emulate_FP8: '1'
+  PYTHONDONTWRITEBYTECODE: '1'
+
+coverage:
+  enabled: false
+  required: false
+  python: python3
+  sources:
+    - transformer_engine
+  include:
+    - transformer_engine/pytorch/*
+    - transformer_engine/debug/*
+    - transformer_engine/plugin/*
+  omit:
+    - '*/setup.py'
+    - '*/transformer_engine/plugin/core/_build_config.py'
+
+unit_test_matrix:
+  - name: pytorch_debug
+    runner: script
+    path: qa/plugin/hygon/test.sh
+    args: [debug]
+    env:
+      XML_LOG_DIR: logs/L0_pytorch_debug_unittest-hygon
+
+  - name: pytorch_unittest
+    runner: script
+    path: qa/plugin/hygon/test.sh
+    args: [unittest]
+    env:
+      XML_LOG_DIR: logs/L0_pytorch_unittest-hygon
+
+  - name: pytorch_distributed_unittest
+    runner: script
+    path: qa/plugin/hygon/test.sh
+    args: [distributed]
+    env:
+      XML_LOG_DIR: logs/L1_pytorch_distributed_unittest-hygon
+
+  - name: pytorch_onnx_unittest
+    runner: script
+    path: qa/plugin/hygon/test.sh
+    args: [onnx]
+    env:
+      XML_LOG_DIR: logs/L1_pytorch_onnx_unittest-hygon
+
+integration_test_matrix: []
+
+device_types:
+  - dcu

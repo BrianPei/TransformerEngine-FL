@@ -42,8 +42,13 @@ def _run_script(group: dict[str, Any]) -> int:
     if not script_path.is_file():
         raise SystemExit(f"Test script does not exist: {script_path}")
     command = ["bash", str(script_path)]
+    command.extend(_expand(str(arg)) for arg in group.get("args", []))
+    script_env = os.environ.copy()
+    script_env.update(
+        {str(key): _expand(str(value)) for key, value in group.get("env", {}).items()}
+    )
     print(f"[RUN] {shlex.join(command)}", flush=True)
-    return subprocess.run(command, cwd=REPO_ROOT, check=False).returncode
+    return subprocess.run(command, cwd=REPO_ROOT, env=script_env, check=False).returncode
 
 
 def _pytest_command(use_platform_runner: bool) -> list[str]:
