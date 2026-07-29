@@ -27,6 +27,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       ci_image: ${{ steps.config.outputs.ci_image }}
+      container_pull_policy: ${{ steps.config.outputs.container_pull_policy }}
       runs_on: ${{ steps.config.outputs.runs_on }}
       container_volumes: ${{ steps.config.outputs.container_volumes }}
       container_options: ${{ steps.config.outputs.container_options }}
@@ -62,6 +63,9 @@ jobs:
           # Read CI image
           CI_IMAGE=$(yq '.ci_image' "$CONFIG_FILE")
           echo "ci_image=$CI_IMAGE" >> $GITHUB_OUTPUT
+
+          CONTAINER_PULL_POLICY=$(yq '.container_pull_policy // "never"' "$CONFIG_FILE")
+          echo "container_pull_policy=$CONTAINER_PULL_POLICY" >> $GITHUB_OUTPUT
 
           # Read runner labels and format as JSON array
           RUNS_ON=$(yq '.runner_labels | tojson(0)' "$CONFIG_FILE")
@@ -132,6 +136,7 @@ jobs:
       platform: ${{ inputs.platform }}
       device: ${{ matrix.device }}
       image: ${{ needs.checkout_and_config.outputs.ci_image }}
+      container_pull_policy: ${{ needs.checkout_and_config.outputs.container_pull_policy }}
       runs_on: ${{ needs.checkout_and_config.outputs.runs_on }}
       container_volumes: ${{ needs.checkout_and_config.outputs.container_volumes }}
       container_options: ${{ needs.checkout_and_config.outputs.container_options }}
@@ -178,6 +183,7 @@ jobs:
     with:
       device: ${{ matrix.device }}
       image: ${{ needs.checkout_and_config.outputs.ci_image }}
+      container_pull_policy: ${{ needs.checkout_and_config.outputs.container_pull_policy }}
       runs_on: ${{ needs.checkout_and_config.outputs.runs_on }}
       container_volumes: ${{ needs.checkout_and_config.outputs.container_volumes }}
       container_options: ${{ needs.checkout_and_config.outputs.container_options }}

@@ -6,6 +6,7 @@ display_name: 'Example Accelerator'
 checkout_submodules: 'false'
 
 ci_image: registry.example.com/transformer-engine:latest
+container_pull_policy: never
 
 runner_labels:
   - example-runner

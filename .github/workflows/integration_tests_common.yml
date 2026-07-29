@@ -9,6 +9,10 @@ on:
       image:
         required: true
         type: string
+      container_pull_policy:
+        required: false
+        type: string
+        default: never
       runs_on:
         required: true
         type: string
@@ -44,7 +48,7 @@ jobs:
     container:
       image: ${{ inputs.image }}
       volumes: ${{ fromJson(inputs.container_volumes) }}
-      options: --pull never ${{ inputs.container_options }}
+      options: --pull ${{ inputs.container_pull_policy }} ${{ inputs.container_options }}
 
     steps:
       - name: Prepare Checkout Environment
