@@ -22,7 +22,6 @@ container_volumes:
 container_options: >-
   --runtime=mthreads
   --ipc=host
-  --network=host
   --privileged=true
   --shm-size=100gb
   --ulimit memlock=-1
