@@ -192,7 +192,7 @@ jobs:
         timeout-minutes: 60
 
       - name: Upload coverage artifact
-        if: always() && inputs.coverage_enabled
+        if: ${{ !cancelled() }} && inputs.coverage_enabled
         uses: actions/upload-artifact@v4
         continue-on-error: true
         with:
@@ -205,7 +205,7 @@ jobs:
   aggregate_coverage:
     name: unit-${{ inputs.device }}-pytorch-unittest-coverage
     needs: unit_test
-    if: always() && inputs.coverage_enabled
+    if: ${{ !cancelled() }} && inputs.coverage_enabled
     defaults:
       run:
         shell: bash
