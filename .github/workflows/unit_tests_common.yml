@@ -237,7 +237,7 @@ jobs:
   aggregate_coverage:
     name: unit-${{ inputs.device }}-pytorch-unittest-coverage
     needs: unit_test
-    if: always()
+    if: ${{ !cancelled() }}
     defaults:
       run:
         shell: bash
