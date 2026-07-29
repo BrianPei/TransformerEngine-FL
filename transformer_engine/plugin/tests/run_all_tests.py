@@ -11,6 +11,7 @@ from test_softmax import SoftmaxTests
 from test_optimizer import OptimizerTests
 from test_flash_attention import FlashAttentionTests
 from test_te_general_grouped import grouped_gemmTests
+from test_fused_rope import FusedRoPETests
 from test_policy import run_all_tests
 
 
@@ -30,6 +31,7 @@ def main():
         OptimizerTests(device=device),
         FlashAttentionTests(device=device),
         grouped_gemmTests(device=device),
+        FusedRoPETests(device=device),
     ]
 
     results = []
