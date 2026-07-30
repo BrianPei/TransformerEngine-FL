@@ -239,14 +239,6 @@ jobs:
           COVERAGE_PYTHON: ${{ inputs.coverage_python }}
         run: |
           set -euo pipefail
-          if ! "$COVERAGE_PYTHON" -c "import importlib.metadata as m; import coverage; print('[coverage] coverage', m.version('coverage'))"; then
-            echo "WARNING: coverage is enabled but the CI image does not provide coverage" >&2
-            echo "coverage_aggregated=false" >> "$GITHUB_OUTPUT"
-            if [ "$COVERAGE_REQUIRED" = "true" ]; then
-              exit 1
-            fi
-            exit 0
-          fi
 
           mkdir -p coverage-raw
           coverage_count=0
@@ -259,6 +251,15 @@ jobs:
           if [ "$coverage_count" -eq 0 ]; then
             echo "coverage_aggregated=false" >> "$GITHUB_OUTPUT"
             echo "WARNING: No raw coverage files found for aggregation"
+            if [ "$COVERAGE_REQUIRED" = "true" ]; then
+              exit 1
+            fi
+            exit 0
+          fi
+
+          if ! "$COVERAGE_PYTHON" -c "import importlib.metadata as m; import coverage; print('[coverage] coverage', m.version('coverage'))"; then
+            echo "coverage_aggregated=false" >> "$GITHUB_OUTPUT"
+            echo "WARNING: Raw coverage files exist, but the CI image does not provide coverage" >&2
             if [ "$COVERAGE_REQUIRED" = "true" ]; then
               exit 1
             fi
