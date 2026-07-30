@@ -9,7 +9,7 @@ ci_image: harbor.baai.ac.cn/flagos-dev/transformerengine-fl:85c2523-ascend-dev
 
 # Runner labels for the self-hosted Ascend node
 runner_labels:
-  - hw-8g-cicd-te
+  - hw-4g-cicd-te
 
 # Container volumes
 container_volumes:
