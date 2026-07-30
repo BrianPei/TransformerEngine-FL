@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# MooreThreads MUSA Platform Environment Setup Script
+# MUSA Platform Environment Setup Script
 # Called by unit_tests_common.yml / integration_tests_common.yml for MUSA platforms.
 set -euo pipefail
 
@@ -36,4 +36,4 @@ print(
 )
 PY
 
-echo "===== MThreads Environment Setup Complete ====="
+echo "===== MUSA Environment Setup Complete ====="

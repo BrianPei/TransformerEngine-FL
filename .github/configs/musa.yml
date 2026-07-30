@@ -37,7 +37,7 @@ container_options: >-
   -e LD_LIBRARY_PATH=/usr/lib:/usr/lib/x86_64-linux-gnu:/usr/local/musa/lib:/usr/local/openmpi/lib:$LD_LIBRARY_PATH
 
 # Platform-specific environment setup script
-setup_script: .github/scripts/setup_mthreads.sh
+setup_script: .github/scripts/setup_musa.sh
 
 # Source checkout behavior
 checkout:

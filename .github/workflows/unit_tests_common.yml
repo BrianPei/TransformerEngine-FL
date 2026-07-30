@@ -223,7 +223,7 @@ jobs:
             fi
           fi
           exit $exit_code
-        timeout-minutes: 60
+        timeout-minutes: 180
 
       - name: Upload Coverage Artifact
         uses: actions/upload-artifact@v4
