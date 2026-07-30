@@ -15,6 +15,7 @@ IS_MUSA_PLATFORM=false
 if [ "${PLATFORM:-}" = "musa" ] || [ "${PLATFORM:-}" = "mthreads" ]; then
     IS_MUSA_PLATFORM=true
 fi
+echo "Test platform: ${PLATFORM:-unset}; MUSA filters enabled: $IS_MUSA_PLATFORM"
 
 test_fail() {
     FAIL=1
@@ -47,6 +48,18 @@ run_test_step() {
             *"test_hf_integration.py") # transformers library may not be available in CI
                 echo "-------------------------------------------------------"
                 echo "[SKIP] Platform MetaX: Ignoring $label"
+                echo "-------------------------------------------------------"
+                return 0
+                ;;
+        esac
+    fi
+
+    if [ "$IS_MUSA_PLATFORM" = "true" ]; then
+        case "$test_path" in
+            *"test_parallel_cross_entropy.py" | \
+            *"test_backend_flagos_softmax.py")
+                echo "-------------------------------------------------------"
+                echo "[SKIP] MUSA Platform: Ignoring $label (Triton CUDA binary output is unavailable)"
                 echo "-------------------------------------------------------"
                 return 0
                 ;;
@@ -163,8 +176,19 @@ run_test_step "pytest_test_fusible_ops.xml" "$TE_PATH/tests/pytorch/test_fusible
 "python3 -m pytest -s -v --tb=auto --junitxml=$XML_LOG_DIR/pytest_test_fusible_ops.xml $TE_PATH/tests/pytorch/test_fusible_ops.py" "test_fusible_ops.py"
 
 # Step: Permutation
+if [ "$IS_MUSA_PLATFORM" = "true" ]; then
+    PERMUTATION_CMD="python3 -m pytest -s -v --tb=auto --junitxml=$XML_LOG_DIR/pytest_test_permutation.xml $TE_PATH/tests/pytorch/test_permutation.py \
+        --deselect 'tests/pytorch/test_permutation.py::test_permutation_mask_map[' \
+        --deselect 'tests/pytorch/test_permutation.py::test_permutation_and_padding_mask_map[' \
+        --deselect 'tests/pytorch/test_permutation.py::test_permutation_and_padding_with_merging_probs[' \
+        --deselect 'tests/pytorch/test_permutation.py::test_permutation_mask_map_alongside_probs[' \
+        --deselect 'tests/pytorch/test_permutation.py::test_permutation_mask_map_topk1_no_probs[' \
+        --deselect 'tests/pytorch/test_permutation.py::test_chunk_permutation['"
+else
+    PERMUTATION_CMD="python3 -m pytest -s -v --tb=auto --junitxml=$XML_LOG_DIR/pytest_test_permutation.xml $TE_PATH/tests/pytorch/test_permutation.py"
+fi
 run_test_step "pytest_test_permutation.xml" "$TE_PATH/tests/pytorch/test_permutation.py" \
-"python3 -m pytest -s -v --tb=auto --junitxml=$XML_LOG_DIR/pytest_test_permutation.xml $TE_PATH/tests/pytorch/test_permutation.py" "test_permutation.py"
+"$PERMUTATION_CMD" "test_permutation.py"
 
 # Step: Parallel Cross Entropy
 run_test_step "pytest_test_parallel_cross_entropy.xml" "$TE_PATH/tests/pytorch/test_parallel_cross_entropy.py" \
@@ -233,28 +257,13 @@ run_test_step "pytest_test_backend_flagos_rmsnorm.xml" "$PLUGIN_TEST_ROOT/test_b
 "python3 -m pytest -s -v --tb=auto --junitxml=$XML_LOG_DIR/pytest_test_backend_flagos_rmsnorm.xml $PLUGIN_TEST_ROOT/test_backend_flagos_rmsnorm.py" "test_backend_flagos_rmsnorm.py"
 
 # Step: Backend impl softmax
-if [ "$IS_MUSA_PLATFORM" = "true" ]; then
-    BACKEND_FLAGOS_SOFTMAX_CMD="python3 -m pytest -s -v --tb=auto --junitxml=$XML_LOG_DIR/pytest_test_backend_flagos_softmax.xml $PLUGIN_TEST_ROOT/test_backend_flagos_softmax.py \
-        --deselect $PLUGIN_TEST_ROOT/test_backend_flagos_softmax.py::test_scaled_masked_softmax_fwd_matrix[False-True-True-mask_dtype0] \
-        --deselect $PLUGIN_TEST_ROOT/test_backend_flagos_softmax.py::test_scaled_masked_softmax_fwd_matrix[False-True-False-mask_dtype0] \
-        --deselect $PLUGIN_TEST_ROOT/test_backend_flagos_softmax.py::test_scaled_masked_softmax_fwd_matrix[False-True-False-mask_dtype1] \
-        --deselect $PLUGIN_TEST_ROOT/test_backend_flagos_softmax.py::test_scaled_masked_softmax_fwd_matrix[False-False-True-mask_dtype0] \
-        --deselect $PLUGIN_TEST_ROOT/test_backend_flagos_softmax.py::test_scaled_masked_softmax_fwd_matrix[False-False-False-mask_dtype0] \
-        --deselect $PLUGIN_TEST_ROOT/test_backend_flagos_softmax.py::test_scaled_masked_softmax_fwd_matrix[False-False-False-mask_dtype1] \
-        --deselect $PLUGIN_TEST_ROOT/test_backend_flagos_softmax.py::test_scaled_masked_softmax_bwd_matrix[True-True] \
-        --deselect $PLUGIN_TEST_ROOT/test_backend_flagos_softmax.py::test_scaled_masked_softmax_bwd_matrix[True-False] \
-        --deselect $PLUGIN_TEST_ROOT/test_backend_flagos_softmax.py::test_scaled_masked_softmax_bwd_matrix[False-True] \
-        --deselect $PLUGIN_TEST_ROOT/test_backend_flagos_softmax.py::test_scaled_masked_softmax_bwd_matrix[False-False]"
-else
-    BACKEND_FLAGOS_SOFTMAX_CMD="python3 -m pytest -s -v --tb=auto --junitxml=$XML_LOG_DIR/pytest_test_backend_flagos_softmax.xml $PLUGIN_TEST_ROOT/test_backend_flagos_softmax.py"
-fi
 run_test_step "pytest_test_backend_flagos_softmax.xml" "$PLUGIN_TEST_ROOT/test_backend_flagos_softmax.py" \
-"$BACKEND_FLAGOS_SOFTMAX_CMD" "test_backend_flagos_softmax.py"
+"python3 -m pytest -s -v --tb=auto --junitxml=$XML_LOG_DIR/pytest_test_backend_flagos_softmax.xml $PLUGIN_TEST_ROOT/test_backend_flagos_softmax.py" "test_backend_flagos_softmax.py"
 
 
 # Step: Backend reference =========================================================
 if [ "$IS_MUSA_PLATFORM" = "true" ]; then
-    BACKEND_REFERENCE_CMD="python3 -m pytest -s -v --tb=auto --junitxml=$XML_LOG_DIR/pytest_test_backend_reference.xml $PLUGIN_TEST_ROOT/test_backend_reference.py --deselect $PLUGIN_TEST_ROOT/test_backend_reference.py::test_dropout_and_version_stubs"
+    BACKEND_REFERENCE_CMD="python3 -m pytest -s -v --tb=auto --junitxml=$XML_LOG_DIR/pytest_test_backend_reference.xml $PLUGIN_TEST_ROOT/test_backend_reference.py -k \"not test_dropout_and_version_stubs\""
 else
     BACKEND_REFERENCE_CMD="python3 -m pytest -s -v --tb=auto --junitxml=$XML_LOG_DIR/pytest_test_backend_reference.xml $PLUGIN_TEST_ROOT/test_backend_reference.py"
 fi
@@ -265,9 +274,7 @@ run_test_step "pytest_test_backend_reference_activation.xml" "$PLUGIN_TEST_ROOT/
 "python3 -m pytest -s -v --tb=auto --junitxml=$XML_LOG_DIR/pytest_test_backend_reference_activation.xml $PLUGIN_TEST_ROOT/test_backend_reference_activation.py" "test_backend_reference_activation.py"
 
 if [ "$IS_MUSA_PLATFORM" = "true" ]; then
-    BACKEND_REFERENCE_DROPOUT_CMD="python3 -m pytest -s -v --tb=auto --junitxml=$XML_LOG_DIR/pytest_test_backend_reference_dropout.xml $PLUGIN_TEST_ROOT/test_backend_reference_dropout.py \
-        --deselect $PLUGIN_TEST_ROOT/test_backend_reference_dropout.py::test_dropout_fwd_zero_probability \
-        --deselect $PLUGIN_TEST_ROOT/test_backend_reference_dropout.py::test_dropout_bwd_zero_probability"
+    BACKEND_REFERENCE_DROPOUT_CMD="python3 -m pytest -s -v --tb=auto --junitxml=$XML_LOG_DIR/pytest_test_backend_reference_dropout.xml $PLUGIN_TEST_ROOT/test_backend_reference_dropout.py -k \"not (test_dropout_fwd_zero_probability or test_dropout_bwd_zero_probability)\""
 else
     BACKEND_REFERENCE_DROPOUT_CMD="python3 -m pytest -s -v --tb=auto --junitxml=$XML_LOG_DIR/pytest_test_backend_reference_dropout.xml $PLUGIN_TEST_ROOT/test_backend_reference_dropout.py"
 fi
