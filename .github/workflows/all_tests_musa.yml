@@ -2,9 +2,9 @@ name: musa_tests
 
 on:
   push:
-    branches: ["musa-dev","main"]
+    branches: ["main"]
   pull_request:
-    branches: ["musa-dev", "main"]
+    branches: ["main"]
   workflow_dispatch:
 
 concurrency:
