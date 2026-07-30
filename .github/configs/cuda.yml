@@ -19,7 +19,7 @@ runner_labels:
 
 # Runner labels for online env
 runner_labels:
-  - nv-8g-cicd-te
+  - nv-4g-cicd-te
 
 # Container volumes
 container_volumes:
