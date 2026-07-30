@@ -91,7 +91,7 @@ def general_gemm_torch(
     if gelu and gelu_in is not None:
         pass
 
-    if bias is not None:
+    if bias is not None and not grad:
         if bias.device != target_device:
             bias = bias.to(target_device)
         out = out + bias
@@ -121,7 +121,7 @@ def general_gemm_torch(
 
     bias_grad = None
     if grad and bias is not None:
-        pass
+        bias_grad = B.sum(dim=0)
 
     extra_output_ret = None
 

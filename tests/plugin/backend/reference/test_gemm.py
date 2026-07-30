@@ -303,3 +303,38 @@ def test_gemm_accumulator_destinations():
     )
     assert res_c is D_c
     assert D_c.item() == 2.0
+
+
+# ==============================================================================
+# Part 4: Backward Pass Tests
+# ==============================================================================
+
+
+def test_gemm_backward_bias_grad():
+    """Verify fused bias-gradient behavior when grad=True and bias is provided."""
+    A = torch.randn(3, 2, dtype=torch.float32)
+    B = torch.randn(4, 3, dtype=torch.float32)
+    bias = torch.ones(B.shape[1], dtype=torch.float32)
+
+    res, bias_grad, _, _ = general_gemm_torch(
+        A=A,
+        transA=False,
+        B=B,
+        transB=False,
+        D=None,
+        quantizer=None,
+        output_dtype=None,
+        bias=bias,
+        bias_type=None,
+        gelu=False,
+        gelu_in=None,
+        grad=True,
+        workspace=torch.empty(1),
+        workspace_size=0,
+        accumulate=False,
+        use_split_accumulator=False,
+    )
+
+    assert bias_grad is not None
+    assert torch.allclose(bias_grad, B.sum(dim=0))
+    assert torch.allclose(res, torch.mm(B, A))
