@@ -42,10 +42,10 @@ setup_script: .github/scripts/setup_mthreads.sh
 # Source checkout behavior
 checkout:
   pre_script: ''
-  fetch_depth: 0
+  fetch_depth: 1
   submodules: 'false'
   set_safe_directory: true
-  attempts: 1
+  attempts: 3
 
 # Runtime environment activation used by common workflows before tests.
 test_env_script: |
@@ -84,6 +84,14 @@ device_types:
   - s5000
 
 # Test matrix configuration
+# MUSA does not provide CUDA/NCCL or ONNX export support for tex custom ops.
+# Keep its CI matrix to the backend-agnostic debug suite until the remaining
+# CUDA-oriented test groups have MUSA-specific coverage and expectations.
+unit_test_matrix:
+  - name: pytorch_debug
+    path: qa/L0_pytorch_debug_unittest/test.sh
+    test_type: debug
+
 test_matrix:
   unit:
     devices:
