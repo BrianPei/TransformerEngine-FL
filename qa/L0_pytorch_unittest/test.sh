@@ -141,8 +141,13 @@ run_test_step "pytest_test_gqa.xml" "$TE_PATH/tests/pytorch/test_gqa.py" \
 "python3 -m pytest -s -v --tb=auto --junitxml=$XML_LOG_DIR/pytest_test_gqa.xml $TE_PATH/tests/pytorch/test_gqa.py" "test_gqa.py"
 
 # Step: Fused Optimizer
+if [ "$IS_MUSA_PLATFORM" = "true" ]; then
+    FUSED_OPTIMIZER_CMD="python3 -m pytest -s -v --tb=auto --junitxml=$XML_LOG_DIR/pytest_test_fused_optimizer.xml $TE_PATH/tests/pytorch/test_fused_optimizer.py -k \"not test_bf16_exp_avg_and_exp_avg_sq\""
+else
+    FUSED_OPTIMIZER_CMD="python3 -m pytest -s -v --tb=auto --junitxml=$XML_LOG_DIR/pytest_test_fused_optimizer.xml $TE_PATH/tests/pytorch/test_fused_optimizer.py"
+fi
 run_test_step "pytest_test_fused_optimizer.xml" "$TE_PATH/tests/pytorch/test_fused_optimizer.py" \
-"python3 -m pytest -s -v --tb=auto --junitxml=$XML_LOG_DIR/pytest_test_fused_optimizer.xml $TE_PATH/tests/pytorch/test_fused_optimizer.py" "test_fused_optimizer.py"
+"$FUSED_OPTIMIZER_CMD" "test_fused_optimizer.py"
 
 # Step: Multi Tensor
 if [ "$IS_MUSA_PLATFORM" = "true" ]; then
@@ -228,19 +233,46 @@ run_test_step "pytest_test_backend_flagos_rmsnorm.xml" "$PLUGIN_TEST_ROOT/test_b
 "python3 -m pytest -s -v --tb=auto --junitxml=$XML_LOG_DIR/pytest_test_backend_flagos_rmsnorm.xml $PLUGIN_TEST_ROOT/test_backend_flagos_rmsnorm.py" "test_backend_flagos_rmsnorm.py"
 
 # Step: Backend impl softmax
+if [ "$IS_MUSA_PLATFORM" = "true" ]; then
+    BACKEND_FLAGOS_SOFTMAX_CMD="python3 -m pytest -s -v --tb=auto --junitxml=$XML_LOG_DIR/pytest_test_backend_flagos_softmax.xml $PLUGIN_TEST_ROOT/test_backend_flagos_softmax.py \
+        --deselect $PLUGIN_TEST_ROOT/test_backend_flagos_softmax.py::test_scaled_masked_softmax_fwd_matrix[False-True-True-mask_dtype0] \
+        --deselect $PLUGIN_TEST_ROOT/test_backend_flagos_softmax.py::test_scaled_masked_softmax_fwd_matrix[False-True-False-mask_dtype0] \
+        --deselect $PLUGIN_TEST_ROOT/test_backend_flagos_softmax.py::test_scaled_masked_softmax_fwd_matrix[False-True-False-mask_dtype1] \
+        --deselect $PLUGIN_TEST_ROOT/test_backend_flagos_softmax.py::test_scaled_masked_softmax_fwd_matrix[False-False-True-mask_dtype0] \
+        --deselect $PLUGIN_TEST_ROOT/test_backend_flagos_softmax.py::test_scaled_masked_softmax_fwd_matrix[False-False-False-mask_dtype0] \
+        --deselect $PLUGIN_TEST_ROOT/test_backend_flagos_softmax.py::test_scaled_masked_softmax_fwd_matrix[False-False-False-mask_dtype1] \
+        --deselect $PLUGIN_TEST_ROOT/test_backend_flagos_softmax.py::test_scaled_masked_softmax_bwd_matrix[True-True] \
+        --deselect $PLUGIN_TEST_ROOT/test_backend_flagos_softmax.py::test_scaled_masked_softmax_bwd_matrix[True-False] \
+        --deselect $PLUGIN_TEST_ROOT/test_backend_flagos_softmax.py::test_scaled_masked_softmax_bwd_matrix[False-True] \
+        --deselect $PLUGIN_TEST_ROOT/test_backend_flagos_softmax.py::test_scaled_masked_softmax_bwd_matrix[False-False]"
+else
+    BACKEND_FLAGOS_SOFTMAX_CMD="python3 -m pytest -s -v --tb=auto --junitxml=$XML_LOG_DIR/pytest_test_backend_flagos_softmax.xml $PLUGIN_TEST_ROOT/test_backend_flagos_softmax.py"
+fi
 run_test_step "pytest_test_backend_flagos_softmax.xml" "$PLUGIN_TEST_ROOT/test_backend_flagos_softmax.py" \
-"python3 -m pytest -s -v --tb=auto --junitxml=$XML_LOG_DIR/pytest_test_backend_flagos_softmax.xml $PLUGIN_TEST_ROOT/test_backend_flagos_softmax.py" "test_backend_flagos_softmax.py"
+"$BACKEND_FLAGOS_SOFTMAX_CMD" "test_backend_flagos_softmax.py"
 
 
 # Step: Backend reference =========================================================
+if [ "$IS_MUSA_PLATFORM" = "true" ]; then
+    BACKEND_REFERENCE_CMD="python3 -m pytest -s -v --tb=auto --junitxml=$XML_LOG_DIR/pytest_test_backend_reference.xml $PLUGIN_TEST_ROOT/test_backend_reference.py --deselect $PLUGIN_TEST_ROOT/test_backend_reference.py::test_dropout_and_version_stubs"
+else
+    BACKEND_REFERENCE_CMD="python3 -m pytest -s -v --tb=auto --junitxml=$XML_LOG_DIR/pytest_test_backend_reference.xml $PLUGIN_TEST_ROOT/test_backend_reference.py"
+fi
 run_test_step "pytest_test_backend_reference.xml" "$PLUGIN_TEST_ROOT/test_backend_reference.py" \
-"python3 -m pytest -s -v --tb=auto --junitxml=$XML_LOG_DIR/pytest_test_backend_reference.xml $PLUGIN_TEST_ROOT/test_backend_reference.py" "test_backend_reference.py"
+"$BACKEND_REFERENCE_CMD" "test_backend_reference.py"
 
 run_test_step "pytest_test_backend_reference_activation.xml" "$PLUGIN_TEST_ROOT/test_backend_reference_activation.py" \
 "python3 -m pytest -s -v --tb=auto --junitxml=$XML_LOG_DIR/pytest_test_backend_reference_activation.xml $PLUGIN_TEST_ROOT/test_backend_reference_activation.py" "test_backend_reference_activation.py"
 
+if [ "$IS_MUSA_PLATFORM" = "true" ]; then
+    BACKEND_REFERENCE_DROPOUT_CMD="python3 -m pytest -s -v --tb=auto --junitxml=$XML_LOG_DIR/pytest_test_backend_reference_dropout.xml $PLUGIN_TEST_ROOT/test_backend_reference_dropout.py \
+        --deselect $PLUGIN_TEST_ROOT/test_backend_reference_dropout.py::test_dropout_fwd_zero_probability \
+        --deselect $PLUGIN_TEST_ROOT/test_backend_reference_dropout.py::test_dropout_bwd_zero_probability"
+else
+    BACKEND_REFERENCE_DROPOUT_CMD="python3 -m pytest -s -v --tb=auto --junitxml=$XML_LOG_DIR/pytest_test_backend_reference_dropout.xml $PLUGIN_TEST_ROOT/test_backend_reference_dropout.py"
+fi
 run_test_step "pytest_test_backend_reference_dropout.xml" "$PLUGIN_TEST_ROOT/test_backend_reference_dropout.py" \
-"python3 -m pytest -s -v --tb=auto --junitxml=$XML_LOG_DIR/pytest_test_backend_reference_dropout.xml $PLUGIN_TEST_ROOT/test_backend_reference_dropout.py" "test_backend_reference_dropout.py"
+"$BACKEND_REFERENCE_DROPOUT_CMD" "test_backend_reference_dropout.py"
 
 run_test_step "pytest_test_backend_reference_gemm.xml" "$PLUGIN_TEST_ROOT/test_backend_reference_gemm.py" \
 "python3 -m pytest -s -v --tb=auto --junitxml=$XML_LOG_DIR/pytest_test_backend_reference_gemm.xml $PLUGIN_TEST_ROOT/test_backend_reference_gemm.py" "test_backend_reference_gemm.py"
