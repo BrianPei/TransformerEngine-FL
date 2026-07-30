@@ -37,7 +37,7 @@ build_env:
   PYTHONDONTWRITEBYTECODE: '1'
 
 coverage:
-  enabled: false
+  enabled: true
   required: false
   python: python3
   sources:
