@@ -19,7 +19,8 @@ tests/
 |   |-- backend/
 |   |   |-- reference/           Reference backend-specific behavior
 |   |   |-- flagos/              FlagOS backend-specific behavior
-|   |   `-- npu/                 NPU device tests and upstream-test adapter
+|   |   |-- npu/                 NPU device tests and upstream-test adapter
+|   |   `-- hygon/              Hygon/DTK bootstrap and reference runner
 |   |-- conftest.py              Shared plugin fixtures
 |   |-- run_upstream.py          Runs upstream tests through an adapter
 |   `-- utils.py                 Small shared plugin test utilities
@@ -215,7 +216,7 @@ mkdir -p "$XML_LOG_DIR"
 
 python3 -m pytest -v tests/plugin/plugin/test_policy.py
 bash qa/L0_pytorch_unittest/test.sh
-bash qa/plugin/hygon/test.sh unittest
+bash tests/plugin/backend/hygon/run_native.sh unittest
 ```
 
 The current Hygon workflow is a DCU-hosted reference-backend baseline. It sets

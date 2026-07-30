@@ -5,7 +5,7 @@ set -euo pipefail
 WORKSPACE="${GITHUB_WORKSPACE:-$(pwd)}"
 
 echo "===== Load Hygon/DTK runtime environment ====="
-source "$WORKSPACE/qa/plugin/hygon/set_env.sh"
+source "$WORKSPACE/tests/plugin/backend/hygon/set_env.sh"
 
 echo "===== Verify Hygon device visibility ====="
 if [ "${HYGON_REQUIRE_DEVICE:-1}" = "1" ] && ! command -v hy-smi >/dev/null 2>&1; then
@@ -69,10 +69,24 @@ echo "===== Install Hygon QA dependencies ====="
 if [ "${HYGON_SKIP_DEP_INSTALL:-0}" = "1" ]; then
     echo "Skipping Python dependency installation because HYGON_SKIP_DEP_INSTALL=1"
 else
-    "$PYTHON_BIN" -m pip install pytest==8.2.1 expecttest
+    missing_modules=()
+    for module_name in pytest expecttest coverage pytest_cov; do
+        if ! "$PYTHON_BIN" -c "import importlib; importlib.import_module('$module_name')" >/dev/null 2>&1; then
+            missing_modules+=("$module_name")
+        fi
+    done
+
+    if [ "${#missing_modules[@]}" -gt 0 ]; then
+        echo "Missing Hygon QA modules: ${missing_modules[*]}"
+        "$PYTHON_BIN" -m pip install pytest==8.2.1 expecttest coverage pytest-cov
+    else
+        echo "Hygon QA dependencies are already available in the image"
+    fi
 
     # ONNX dependencies are installed only by the ONNX test group.
 fi
+
+"$PYTHON_BIN" -c "import coverage, pytest_cov; print('coverage dependencies: ready')"
 
 if [ "${HYGON_INSTALL_TE:-0}" = "1" ]; then
     echo "===== Install TransformerEngine-FL Python layer ====="

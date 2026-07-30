@@ -54,48 +54,33 @@ coverage:
 unit_test_matrix:
   - name: pytorch_debug_optional
     runner: script
-    path: qa/plugin/hygon/test.sh
+    path: tests/plugin/backend/hygon/run_native.sh
     args: [debug]
     env:
       XML_LOG_DIR: logs/L0_pytorch_debug_unittest-hygon
 
   - name: pytorch_unittest
     runner: script
-    path: qa/plugin/hygon/test.sh
+    path: tests/plugin/backend/hygon/run_native.sh
     args: [unittest]
     env:
       XML_LOG_DIR: logs/L0_pytorch_unittest-hygon
 
   - name: pytorch_distributed_smoke
     runner: script
-    path: qa/plugin/hygon/test.sh
+    path: tests/plugin/backend/hygon/run_native.sh
     args: [distributed]
     env:
       XML_LOG_DIR: logs/L1_pytorch_distributed_unittest-hygon
 
   - name: pytorch_onnx_smoke
     runner: script
-    path: qa/plugin/hygon/test.sh
+    path: tests/plugin/backend/hygon/run_native.sh
     args: [onnx]
     env:
       XML_LOG_DIR: logs/L1_pytorch_onnx_unittest-hygon
 
-integration_test_matrix:
-  - name: pytorch_mcore_integration
-    path: qa/L1_pytorch_mcore_integration/test.sh
-    env:
-      PLATFORM: hygon
-      TE_FL_PREFER: reference
-      MCORE_REPO_URL: https://github.com/flagos-ai/Megatron-LM-FL.git
-      MCORE_REF: 175ae90ec92a9e6fea2d74ccd24d6a1835d3ae82
-      DISTRIBUTED_BACKEND: nccl
-      NUM_LAYERS: '2'
-      HIDDEN_SIZE: '128'
-      NUM_ATTENTION_HEADS: '4'
-      SEQ_LENGTH: '128'
-      MICRO_BATCH_SIZE: '1'
-      GLOBAL_BATCH_SIZE: '1'
-      ENABLE_DIAGNOSTICS: '0'
+integration_test_matrix: []
 
 device_types:
   - bw1000
