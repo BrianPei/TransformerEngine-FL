@@ -117,10 +117,6 @@ jobs:
             python3 -m pytest -q -x -p no:warnings "${test_file}"
             pytest_exit=$?
             set -e
-            if [ "$pytest_exit" -eq 5 ]; then
-              echo "=== Skipping ${test_file}: no pytest tests collected ==="
-              continue
-            fi
             if [ "$pytest_exit" -ne 0 ]; then
               exit "$pytest_exit"
             fi

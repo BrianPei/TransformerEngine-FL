@@ -338,3 +338,129 @@ def test_gemm_backward_bias_grad():
     assert bias_grad is not None
     assert torch.allclose(bias_grad, B.sum(dim=0))
     assert torch.allclose(res, torch.mm(B, A))
+
+
+def test_gemm_backward_no_bias():
+    """Verify that grad=True with bias=None returns no bias gradient."""
+    A = torch.randn(3, 2, dtype=torch.float32)
+    B = torch.randn(4, 3, dtype=torch.float32)
+
+    res, bias_grad, _, _ = general_gemm_torch(
+        A=A,
+        transA=False,
+        B=B,
+        transB=False,
+        D=None,
+        quantizer=None,
+        output_dtype=None,
+        bias=None,
+        bias_type=None,
+        gelu=False,
+        gelu_in=None,
+        grad=True,
+        workspace=torch.empty(1),
+        workspace_size=0,
+        accumulate=False,
+        use_split_accumulator=False,
+    )
+
+    assert bias_grad is None
+    assert torch.allclose(res, torch.mm(B, A))
+
+
+def test_gemm_backward_with_gelu():
+    """Verify backward GELU uses the saved forward activation."""
+    A = torch.randn(3, 2, dtype=torch.float32)
+    B = torch.randn(4, 3, dtype=torch.float32)
+    gelu_in = torch.randn(4, 2, dtype=torch.float32)
+    saved_gelu_in = gelu_in.clone()
+
+    res, _, gelu_in_ret, _ = general_gemm_torch(
+        A=A,
+        transA=False,
+        B=B,
+        transB=False,
+        D=None,
+        quantizer=None,
+        output_dtype=None,
+        bias=None,
+        bias_type=None,
+        gelu=True,
+        gelu_in=gelu_in,
+        grad=True,
+        workspace=torch.empty(1),
+        workspace_size=0,
+        accumulate=False,
+        use_split_accumulator=False,
+    )
+
+    assert gelu_in_ret is None
+    x = saved_gelu_in
+    sqrt_2_over_pi = 0.7978845608028654
+    u = sqrt_2_over_pi * (x + 0.044715 * x.pow(3))
+    tanh_u = torch.tanh(u)
+    gelu_deriv = 0.5 * (1.0 + tanh_u) + 0.5 * x * (1.0 - tanh_u.pow(2)) * sqrt_2_over_pi * (
+        1.0 + 3.0 * 0.044715 * x.pow(2)
+    )
+    expected = torch.mm(B, A) * gelu_deriv
+    assert torch.allclose(res, expected, atol=1e-6)
+
+
+def test_gemm_backward_bias_grad_with_alpha():
+    """Verify alpha scales the output but not the fused bias gradient."""
+    A = torch.randn(3, 2, dtype=torch.float32)
+    B = torch.randn(4, 3, dtype=torch.float32)
+    bias = torch.ones(B.shape[1], dtype=torch.float32)
+
+    res, bias_grad, _, _ = general_gemm_torch(
+        A=A,
+        transA=False,
+        B=B,
+        transB=False,
+        D=None,
+        quantizer=None,
+        output_dtype=None,
+        bias=bias,
+        bias_type=None,
+        gelu=False,
+        gelu_in=None,
+        grad=True,
+        workspace=torch.empty(1),
+        workspace_size=0,
+        accumulate=False,
+        use_split_accumulator=False,
+        alpha=0.5,
+    )
+
+    assert torch.allclose(bias_grad, B.sum(dim=0).to(dtype=res.dtype))
+    assert torch.allclose(res, torch.mm(B, A) * 0.5)
+
+
+def test_gemm_backward_bias_grad_3d_input():
+    """Verify bias gradients flatten leading dimensions of B."""
+    A = torch.randn(4, 2, dtype=torch.float32)
+    B = torch.randn(2, 3, 4, dtype=torch.float32)
+    bias = torch.ones(B.shape[-1], dtype=torch.float32)
+
+    res, bias_grad, _, _ = general_gemm_torch(
+        A=A,
+        transA=False,
+        B=B,
+        transB=False,
+        D=None,
+        quantizer=None,
+        output_dtype=None,
+        bias=bias,
+        bias_type=None,
+        gelu=False,
+        gelu_in=None,
+        grad=True,
+        workspace=torch.empty(1),
+        workspace_size=0,
+        accumulate=False,
+        use_split_accumulator=False,
+    )
+
+    flattened = B.reshape(-1, B.shape[-1])
+    assert torch.allclose(bias_grad, flattened.sum(dim=0).to(dtype=res.dtype))
+    assert res.shape == (2, 3, 2)

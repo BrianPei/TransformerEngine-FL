@@ -28,13 +28,14 @@ setup_script: .github/scripts/setup_hygon.sh
 build_env:
   PLATFORM: hygon
   TE_FL_SKIP_CUDA: '1'
-  TE_FL_PREFER: vendor
+  TE_FL_PREFER: reference
   NVTE_FRAMEWORK: pytorch
   NVTE_FLASH_ATTN: '0'
   NVTE_FUSED_ATTN: '0'
   NVTE_UNFUSED_ATTN: '1'
   NVTE_UnfusedDPA_Emulate_FP8: '1'
   PYTHONDONTWRITEBYTECODE: '1'
+  HYGON_REQUIRE_DEVICE: '1'
 
 coverage:
   enabled: true
@@ -51,7 +52,7 @@ coverage:
     - '*/transformer_engine/plugin/core/_build_config.py'
 
 unit_test_matrix:
-  - name: pytorch_debug
+  - name: pytorch_debug_optional
     runner: script
     path: qa/plugin/hygon/test.sh
     args: [debug]
@@ -65,14 +66,14 @@ unit_test_matrix:
     env:
       XML_LOG_DIR: logs/L0_pytorch_unittest-hygon
 
-  - name: pytorch_distributed_unittest
+  - name: pytorch_distributed_smoke
     runner: script
     path: qa/plugin/hygon/test.sh
     args: [distributed]
     env:
       XML_LOG_DIR: logs/L1_pytorch_distributed_unittest-hygon
 
-  - name: pytorch_onnx_unittest
+  - name: pytorch_onnx_smoke
     runner: script
     path: qa/plugin/hygon/test.sh
     args: [onnx]
@@ -84,7 +85,7 @@ integration_test_matrix:
     path: qa/L1_pytorch_mcore_integration/test.sh
     env:
       PLATFORM: hygon
-      TE_FL_PREFER: vendor
+      TE_FL_PREFER: reference
       MCORE_REPO_URL: https://github.com/flagos-ai/Megatron-LM-FL.git
       MCORE_REF: 175ae90ec92a9e6fea2d74ccd24d6a1835d3ae82
       DISTRIBUTED_BACKEND: nccl

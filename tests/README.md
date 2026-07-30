@@ -218,6 +218,12 @@ bash qa/L0_pytorch_unittest/test.sh
 bash qa/plugin/hygon/test.sh unittest
 ```
 
+The current Hygon workflow is a DCU-hosted reference-backend baseline. It sets
+`TE_FL_PREFER=reference` and verifies that `generic_gemm` selects
+`reference.torch`. The debug group is optional, while the distributed and ONNX
+groups are smoke subsets; they do not claim complete Hygon vendor-backend
+coverage.
+
 For an upstream test that needs the Ascend compatibility adapter:
 
 ```bash

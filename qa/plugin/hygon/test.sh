@@ -62,8 +62,8 @@ install_python_package() {
     fi
 
     if [ "${HYGON_SKIP_DEP_INSTALL:-0}" = "1" ]; then
-        echo "WARNING: Python module '$module_name' is missing; HYGON_SKIP_DEP_INSTALL=1 so pip install is skipped"
-        return 0
+        echo "ERROR: Python module '$module_name' is missing and dependency installation is disabled" >&2
+        return 1
     fi
 
     "$PYTHON" -m pip install "$package_spec"

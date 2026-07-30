@@ -8,14 +8,18 @@ echo "===== Load Hygon/DTK runtime environment ====="
 source "$WORKSPACE/qa/plugin/hygon/set_env.sh"
 
 echo "===== Verify Hygon device visibility ====="
-if command -v hy-smi >/dev/null 2>&1; then
-    hy-smi || true
+if [ "${HYGON_REQUIRE_DEVICE:-1}" = "1" ] && ! command -v hy-smi >/dev/null 2>&1; then
+    echo "ERROR: hy-smi is unavailable in the Hygon CI image" >&2
+    exit 1
+elif command -v hy-smi >/dev/null 2>&1; then
+    hy-smi
 else
-    echo "WARNING: hy-smi is unavailable in this environment"
+    echo "WARNING: hy-smi is unavailable; device verification is disabled"
 fi
 
 echo "===== Verify Python runtime ====="
 "$PYTHON_BIN" - <<'PY'
+import os
 import sys
 
 print("python:", sys.executable)
@@ -27,6 +31,38 @@ except ModuleNotFoundError as exc:
     raise SystemExit(f"PyTorch is required in the Hygon CI image: {exc}") from exc
 
 print("torch:", torch.__version__)
+
+if os.environ.get("HYGON_REQUIRE_DEVICE", "1") == "1":
+    if not torch.cuda.is_available():
+        raise SystemExit("Hygon DCU is not visible through torch.cuda")
+
+    device_count = torch.cuda.device_count()
+    if device_count < 1:
+        raise SystemExit("torch.cuda reports zero Hygon devices")
+
+    device = torch.device("cuda")
+    lhs = torch.ones((2, 2), device=device)
+    rhs = torch.full((2, 2), 2.0, device=device)
+    result = lhs @ rhs
+    if not torch.allclose(result.cpu(), torch.full((2, 2), 4.0)):
+        raise SystemExit("Hygon DCU matrix-multiplication smoke test failed")
+
+    print("cuda_device_count:", device_count)
+    print("cuda_device_name:", torch.cuda.get_device_name(0))
+    print("matmul_smoke: passed")
+PY
+
+echo "===== Verify reference backend selection ====="
+"$PYTHON_BIN" - <<'PY'
+from transformer_engine.plugin.core import get_manager
+
+manager = get_manager()
+selected_impl = manager.get_selected_impl_id("generic_gemm")
+if selected_impl != "reference.torch":
+    raise SystemExit(
+        f"Expected generic_gemm to use reference.torch, selected {selected_impl!r}"
+    )
+print("generic_gemm_impl:", selected_impl)
 PY
 
 echo "===== Install Hygon QA dependencies ====="
@@ -35,9 +71,7 @@ if [ "${HYGON_SKIP_DEP_INSTALL:-0}" = "1" ]; then
 else
     "$PYTHON_BIN" -m pip install pytest==8.2.1 expecttest
 
-    if [ "${HYGON_INSTALL_ONNX_DEPS:-1}" = "1" ]; then
-        "$PYTHON_BIN" -m pip install onnxruntime onnxruntime_extensions
-    fi
+    # ONNX dependencies are installed only by the ONNX test group.
 fi
 
 if [ "${HYGON_INSTALL_TE:-0}" = "1" ]; then
@@ -64,6 +98,7 @@ if [ -n "${GITHUB_ENV:-}" ]; then
         echo "NVTE_FUSED_ATTN=$NVTE_FUSED_ATTN"
         echo "NVTE_UNFUSED_ATTN=$NVTE_UNFUSED_ATTN"
         echo "NVTE_UnfusedDPA_Emulate_FP8=$NVTE_UnfusedDPA_Emulate_FP8"
+        echo "HYGON_REQUIRE_DEVICE=${HYGON_REQUIRE_DEVICE:-1}"
     } >> "$GITHUB_ENV"
 fi
 
