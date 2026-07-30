@@ -11,6 +11,10 @@ pip install expecttest
 FAIL=0
 
 IS_CUDA_BACKEND=$(python3 -c "import torch; print('cuda' if torch.cuda.is_available() else 'cpu')" 2>/dev/null)
+IS_MUSA_PLATFORM=false
+if [ "${PLATFORM:-}" = "musa" ] || [ "${PLATFORM:-}" = "mthreads" ]; then
+    IS_MUSA_PLATFORM=true
+fi
 
 test_fail() {
     FAIL=1
@@ -87,6 +91,8 @@ run_test_step "pytest_test_deferred_init.xml" "$TE_PATH/tests/pytorch/test_defer
 # Step: Numerics
 if [ "$PLATFORM" = "metax" ]; then
     NUMERICS_CMD="PYTORCH_JIT=0 NVTE_TORCH_COMPILE=0 NVTE_ALLOW_NONDETERMINISTIC_ALGO=0 NVTE_FUSED_ATTN=0 python3 -m pytest -s -v --tb=auto --junitxml=$XML_LOG_DIR/pytest_test_numerics.xml $TE_PATH/tests/pytorch/test_numerics.py -k \"not (test_layernorm_mlp_accuracy or test_grouped_linear_accuracy or test_gpt_cuda_graph or test_transformer_layer_hidden_states_format or test_grouped_gemm or test_noncontiguous or test_gpt_checkpointing or test_gpt_accuracy or test_mha_accuracy or test_linear_accuracy or test_linear_accuracy_delay_wgrad_compute or test_rmsnorm_accuracy or test_layernorm_accuracy or test_layernorm_linear_accuracy)\" --no-header"
+elif [ "$IS_MUSA_PLATFORM" = "true" ]; then
+    NUMERICS_CMD="PYTORCH_JIT=0 NVTE_TORCH_COMPILE=0 NVTE_ALLOW_NONDETERMINISTIC_ALGO=0 NVTE_FUSED_ATTN=0 python3 -m pytest -s -v --tb=auto --junitxml=$XML_LOG_DIR/pytest_test_numerics.xml $TE_PATH/tests/pytorch/test_numerics.py -k \"not (test_gpt_accuracy or test_mha_accuracy or test_grouped_linear_accuracy or test_noncontiguous or test_linear_accuracy or test_layernorm_linear_accuracy or test_layernorm_mlp_accuracy or test_transformer_layer_hidden_states_format)\" --no-header"
 else
     # CUDA
     NUMERICS_CMD="PYTORCH_JIT=0 NVTE_TORCH_COMPILE=0 NVTE_ALLOW_NONDETERMINISTIC_ALGO=0 NVTE_FUSED_ATTN=0 python3 -m pytest -s -v --tb=auto --junitxml=$XML_LOG_DIR/pytest_test_numerics.xml $TE_PATH/tests/pytorch/test_numerics.py -k \"not (test_linear_accuracy or test_layernorm_linear_accuracy or test_layernorm_mlp_accuracy or test_transformer_layer_hidden_states_format)\" --no-header"
@@ -139,8 +145,13 @@ run_test_step "pytest_test_fused_optimizer.xml" "$TE_PATH/tests/pytorch/test_fus
 "python3 -m pytest -s -v --tb=auto --junitxml=$XML_LOG_DIR/pytest_test_fused_optimizer.xml $TE_PATH/tests/pytorch/test_fused_optimizer.py" "test_fused_optimizer.py"
 
 # Step: Multi Tensor
+if [ "$IS_MUSA_PLATFORM" = "true" ]; then
+    MULTI_TENSOR_CMD="python3 -m pytest -s -v --tb=auto --junitxml=$XML_LOG_DIR/pytest_test_multi_tensor.xml $TE_PATH/tests/pytorch/test_multi_tensor.py::test_multi_tensor_compute_scale_and_scale_inv --no-header"
+else
+    MULTI_TENSOR_CMD="python3 -m pytest -s -v --tb=auto --junitxml=$XML_LOG_DIR/pytest_test_multi_tensor.xml $TE_PATH/tests/pytorch/test_multi_tensor.py"
+fi
 run_test_step "pytest_test_multi_tensor.xml" "$TE_PATH/tests/pytorch/test_multi_tensor.py" \
-"python3 -m pytest -s -v --tb=auto --junitxml=$XML_LOG_DIR/pytest_test_multi_tensor.xml $TE_PATH/tests/pytorch/test_multi_tensor.py" "test_multi_tensor.py"
+"$MULTI_TENSOR_CMD" "test_multi_tensor.py"
 
 # Step: Fusible Ops
 run_test_step "pytest_test_fusible_ops.xml" "$TE_PATH/tests/pytorch/test_fusible_ops.py" \

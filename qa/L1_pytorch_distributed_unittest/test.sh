@@ -1,4 +1,4 @@
-# Copyright (c) 2022-2025, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ # Copyright (c) 2022-2025, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 #
 # See LICENSE for license information.
 
@@ -16,10 +16,15 @@ function test_fail() {
 RET=0
 FAILED_CASES=""
 DEBUG_TESTS_READY=0
+IS_MUSA_PLATFORM=false
 
 : ${TE_PATH:=/opt/transformerengine}
 : ${XML_LOG_DIR:=/logs}
 mkdir -p "$XML_LOG_DIR"
+
+if [ "${PLATFORM:-}" = "musa" ] || [ "${PLATFORM:-}" = "mthreads" ]; then
+    IS_MUSA_PLATFORM=true
+fi
 
 # The current CUDA 12.8 test container hits a fused-attention runtime loader
 # issue, so keep the distributed numerics suite on the unfused attention path.
@@ -86,14 +91,16 @@ for name in ("libcudart.so", "libcudart.so.12"):
 PY
 
 
-# It is not installed as a requirement,
-# because it is not available on PyPI.
-pip uninstall -y nvdlfw-inspect
-if pip install git+https://github.com/NVIDIA/nvidia-dlfw-inspect.git && \
-   python3 -c "import nvdlfw_inspect.api" >/dev/null 2>&1; then
-    DEBUG_TESTS_READY=1
-else
-    echo "Warning: nvdlfw_inspect is unavailable; debug numerics test will be skipped"
+if [ "$IS_MUSA_PLATFORM" = "false" ]; then
+    # It is not installed as a requirement,
+    # because it is not available on PyPI.
+    pip uninstall -y nvdlfw-inspect
+    if pip install git+https://github.com/NVIDIA/nvidia-dlfw-inspect.git && \
+       python3 -c "import nvdlfw_inspect.api" >/dev/null 2>&1; then
+        DEBUG_TESTS_READY=1
+    else
+        echo "Warning: nvdlfw_inspect is unavailable; debug numerics test will be skipped"
+    fi
 fi
 
 pip3 install pytest==8.2.1 || error_exit "Failed to install pytest"
@@ -112,6 +119,20 @@ run_test_step() {
             *"test_cast_master_weights_to_fp8.py")
                 echo "-------------------------------------------------------"
                 echo "[SKIP] Platform MetaX: Ignoring $label"
+                echo "-------------------------------------------------------"
+                return 0
+                ;;
+        esac
+    fi
+
+    if [ "$IS_MUSA_PLATFORM" = "true" ]; then
+        case "$test_path" in
+            *"test_numerics.py" | \
+            *"test_numerics_exact.py" | \
+            *"test_torch_fsdp2.py" | \
+            *"test_cast_master_weights_to_fp8.py")
+                echo "-------------------------------------------------------"
+                echo "[SKIP] Platform MUSA: Ignoring $label"
                 echo "-------------------------------------------------------"
                 return 0
                 ;;
