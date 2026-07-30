@@ -239,7 +239,6 @@ jobs:
           COVERAGE_PYTHON: ${{ inputs.coverage_python }}
         run: |
           set -euo pipefail
-          "$COVERAGE_PYTHON" -c "import importlib.metadata as m; import coverage; print('[coverage] coverage', m.version('coverage'))"
 
           mkdir -p coverage-raw
           coverage_count=0
@@ -258,6 +257,7 @@ jobs:
             exit 0
           fi
 
+          "$COVERAGE_PYTHON" -c "import importlib.metadata as m; import coverage; print('[coverage] coverage', m.version('coverage'))"
           "$COVERAGE_PYTHON" -m coverage combine coverage-raw
           coverage_name="coverage-${{ inputs.platform }}-${{ inputs.device }}-pytorch-unittest.json"
           coverage_command=(
