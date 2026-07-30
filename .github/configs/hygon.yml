@@ -7,7 +7,7 @@ checkout_submodules: 'false'
 ci_image: harbor.baai.ac.cn/flagos-dev/transformerengine-fl:manual-20260717-hygon-dev
 
 runner_labels:
-  - hg-8g-cicd-te
+  - hg-4g-cicd-te
 
 container_volumes:
   - /opt/hyhal:/opt/hyhal
