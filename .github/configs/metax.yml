@@ -21,7 +21,7 @@ ci_image: harbor.baai.ac.cn/flagscale/megatron-lm-with-te:202603231839
 
 # Runner labels for online env
 runner_labels:
-  - mx-4g-cicd-te
+  - mx-8g-cicd-te
 
 # Container volumes
 container_volumes:
