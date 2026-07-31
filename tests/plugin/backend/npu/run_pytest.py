@@ -9,14 +9,14 @@ from __future__ import annotations
 
 import sys
 
-from adapter import apply
+from npu_patch import apply_ascend_npu_patch
 
 
 def main(argv: list[str] | None = None) -> int:
-    # The adapter must run before pytest imports and collects the selected
+    # The compatibility patch must run before pytest imports and collects the selected
     # tests, because some upstream tests import CUDA-oriented helpers at
     # module load time.
-    apply()
+    apply_ascend_npu_patch()
 
     import pytest
 

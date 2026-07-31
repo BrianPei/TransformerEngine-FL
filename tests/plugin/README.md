@@ -14,9 +14,9 @@ The test layout follows the implementation boundary:
   backend-local pytest entry point used to run selected upstream tests.
 
 Ascend tests that need runtime compatibility setup are launched through
-`backend/npu/run_pytest.py`. The launcher applies the NPU adapter before pytest
-collects tests. Platform-specific behavior stays in `backend/npu/` and is not
-added to the common CI workflow.
+`backend/npu/run_pytest.py`. The launcher applies the NPU runtime patch before
+pytest collects tests. Platform-specific behavior stays in `backend/npu/` and
+is not added to the common CI workflow.
 
 Metax and other platforms that do not need an import-time adapter continue to
 use the normal `python -m pytest` path.
