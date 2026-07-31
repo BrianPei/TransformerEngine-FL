@@ -118,6 +118,7 @@ def main(argv=None, namespace=None):
     parser = argparse.ArgumentParser()
     parser.add_argument("-l", "--layer-type", type=str)
     parser.add_argument("--quantization", type=str, default=None)
+    parser.add_argument("--test-suite", choices=("full", "ascend_smoke"), default="full")
     args = parser.parse_args(argv, namespace)
 
     # Quantization scheme
@@ -136,7 +137,7 @@ def main(argv=None, namespace=None):
         BATCH_SIZE = 128
         HIDDEN_SIZE = 512
 
-    if bool(int(os.getenv("NVTE_ASCEND_DISTRIBUTED_NUMERICS_SUBSET", "0"))):
+    if args.test_suite == "ascend_smoke":
         test_dict = [test_ascend_distributed_numerics_subset]
     else:
         test_dict = [
