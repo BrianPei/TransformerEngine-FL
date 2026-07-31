@@ -953,7 +953,6 @@ def _test_export_multihead_attention(
         attention_type=attention_type,
         fuse_qkv_params=fuse_qkv_params,
         return_bias=True,
-        device=te_device_type(),
     )
 
     inp_context = (hidden_states_context, attention_mask, encoder_output)

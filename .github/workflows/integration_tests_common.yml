@@ -69,12 +69,9 @@ jobs:
         run: bash "$GITHUB_WORKSPACE/${{ inputs.setup_script }}"
 
       - name: Execute Tests
-        env:
-          TE_PATH: ${{ github.workspace }}
         run: |
           set -euo pipefail
           export TE_LIB_PATH="${TE_LIB_PATH:-$(python3 -c 'import site; print(site.getsitepackages()[0])')/transformer_engine}"
-          export PYTHONPATH="$GITHUB_WORKSPACE:${PYTHONPATH:-}"
           test -f "${{ matrix.test_group.path }}"
           bash "${{ matrix.test_group.path }}"
         timeout-minutes: 30
