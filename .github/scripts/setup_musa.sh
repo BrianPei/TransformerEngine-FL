@@ -34,12 +34,9 @@ if missing:
     raise RuntimeError(f"Missing MUSA CI image dependencies: {', '.join(missing)}")
 PY
 
-echo "===== Step 2: Install TransformerEngine-FL Python Layer ====="
+echo "===== Step 2: Verify Checked-out TransformerEngine-FL Python Layer ====="
 cd "${GITHUB_WORKSPACE}"
-TE_FL_SKIP_CUDA=1 \
-SKIP_CUDA_BUILD=1 \
-NVTE_FRAMEWORK=pytorch \
-python3 -m pip install --no-build-isolation --no-cache-dir --no-deps -e .
+python3 -c "import transformer_engine; print('transformer_engine:', transformer_engine.__file__)"
 
 echo "===== Step 3: Verify MUSA Runtime ====="
 python3 - <<'PY'
