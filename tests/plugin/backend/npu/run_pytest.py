@@ -3,29 +3,25 @@
 #
 # See LICENSE for license information.
 
-"""Compatibility entry point for running upstream TE tests on Ascend/NPU."""
+"""Run pytest with the Ascend backend compatibility layer enabled."""
 
-import os
-from pathlib import Path
+from __future__ import annotations
+
 import sys
 
-os.environ.setdefault("PLATFORM", "ascend")
-os.environ.setdefault("TE_FL_SKIP_CUDA", "1")
-os.environ.setdefault("NVTE_FRAMEWORK", "pytorch")
-os.environ.setdefault("TORCHDYNAMO_DISABLE", "1")
-
-PLUGIN_TEST_ROOT = Path(__file__).resolve().parents[2]
-sys.path.insert(0, str(PLUGIN_TEST_ROOT))
-
-from run_upstream import main
+from adapter import apply
 
 
-raise SystemExit(
-    main(
-        [
-            "--adapter",
-            str(Path(__file__).with_name("adapter.py")),
-            *sys.argv[1:],
-        ]
-    )
-)
+def main(argv: list[str] | None = None) -> int:
+    # The adapter must run before pytest imports and collects the selected
+    # tests, because some upstream tests import CUDA-oriented helpers at
+    # module load time.
+    apply()
+
+    import pytest
+
+    return pytest.main(sys.argv[1:] if argv is None else argv)
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
