@@ -10,9 +10,11 @@ import pytest
 import torch
 import transformer_engine.pytorch as te
 
-if os.environ.get("PLATFORM") == "ascend":
+_ASCEND_NUMERICS_SUBSET = bool(int(os.getenv("NVTE_ASCEND_DISTRIBUTED_NUMERICS_SUBSET", "0")))
+
+if os.environ.get("PLATFORM") == "ascend" and not _ASCEND_NUMERICS_SUBSET:
     pytest.skip(
-        "Ascend distributed numerics are skipped; communication backend tests are out of scope.",
+        "Ascend distributed numerics require NVTE_ASCEND_DISTRIBUTED_NUMERICS_SUBSET=1.",
         allow_module_level=True,
     )
 
@@ -40,7 +42,7 @@ fp8_block_scaling_available, reason_for_no_fp8_block_scaling = te.is_fp8_block_s
 nvfp4_available, reason_for_no_nvfp4 = te.is_nvfp4_available(return_reason=True)
 
 TEST_ROOT = Path(__file__).parent.resolve()
-NUM_PROCS: int = min(4, torch.cuda.device_count())
+NUM_PROCS: int = min(2 if _ASCEND_NUMERICS_SUBSET else 4, torch.cuda.device_count())
 LAUNCH_CMD = ["torchrun", f"--nproc_per_node={NUM_PROCS}"]
 
 

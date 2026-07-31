@@ -55,7 +55,14 @@ then
         "$TE_PATH/tests/pytorch/attention/test_cp_utils.py"
 fi
 
-echo "Skipping Ascend communication and distributed numerics tests."
+NVTE_FLASH_ATTN=0 \
+NVTE_FUSED_ATTN=0 \
+NVTE_UNFUSED_ATTN=1 \
+NVTE_ASCEND_DISTRIBUTED_NUMERICS_SUBSET=1 \
+    run_pytest_step "distributed non-FP8 numerics" "pytest_distributed_numerics_none.xml" true \
+        "$TE_PATH/tests/pytorch/distributed/test_numerics.py::test_distributed[None]"
+
+echo "Skipping Ascend HCCL communication tests."
 
 if [ "$FAIL" -ne 0 ]; then
     echo "Some tests failed."
