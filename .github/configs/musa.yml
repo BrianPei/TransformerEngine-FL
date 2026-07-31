@@ -6,7 +6,7 @@ hardware_name: mthreads
 display_name: 'MooreThreads MUSA Tests'
 
 # CI image for MooreThreads MUSA dev env
-ci_image: harbor.baai.ac.cn/flagos-dev/transformerengine-fl:20260729-mthreads-dev
+ci_image: harbor.baai.ac.cn/flagos-dev/transformerengine-fl:f826afe-musa-dev
 
 # Runner labels for self-hosted MooreThreads node
 # Adjust this label to match the actual GitHub Actions runner label.
@@ -34,6 +34,8 @@ container_options: >-
   -e MUSA_HOME=/usr/local/musa
   -e TORCH_DEVICE_BACKEND_AUTOLOAD=0
   -e TE_FL_ENABLE_MUSA_CUDA_COMPAT=1
+  -e PIP_NO_INDEX=1
+  -e PIP_DISABLE_PIP_VERSION_CHECK=1
   -e LD_LIBRARY_PATH=/usr/lib:/usr/lib/x86_64-linux-gnu:/usr/local/musa/lib:/usr/local/openmpi/lib:$LD_LIBRARY_PATH
 
 # Platform-specific environment setup script

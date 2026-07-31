@@ -59,7 +59,7 @@ run_test_step() {
             *"test_parallel_cross_entropy.py" | \
             *"test_backend_flagos_softmax.py")
                 echo "-------------------------------------------------------"
-                echo "[SKIP] MUSA Platform: Ignoring $label (Triton CUDA binary output is unavailable)"
+                echo "[SKIP] MUSA Platform: Ignoring $label (Triton MUSA binary output is unavailable)"
                 echo "-------------------------------------------------------"
                 return 0
                 ;;

@@ -10,15 +10,36 @@ export LD_LIBRARY_PATH=/usr/lib:/usr/lib/x86_64-linux-gnu:/usr/local/musa/lib:/u
 export MUSA_HOME=${MUSA_HOME:-/usr/local/musa}
 export CUDA_HOME=${CUDA_HOME:-/usr/local/musa}
 
-echo "===== Step 1: Install Required Python Tools ====="
-python3 -m pip install --no-cache-dir nvdlfw-inspect expecttest || true
+echo "===== Step 1: Verify Image Dependencies ====="
+python3 - <<'PY'
+from importlib import metadata
+
+required = (
+    "pytest",
+    "expecttest",
+    "nvdlfw-inspect",
+    "onnxruntime",
+    "onnxruntime-extensions",
+    "coverage",
+    "pytest-cov",
+)
+missing = []
+for package in required:
+    try:
+        print(f"{package}=={metadata.version(package)}")
+    except metadata.PackageNotFoundError:
+        missing.append(package)
+
+if missing:
+    raise RuntimeError(f"Missing MUSA CI image dependencies: {', '.join(missing)}")
+PY
 
 echo "===== Step 2: Install TransformerEngine-FL Python Layer ====="
 cd "${GITHUB_WORKSPACE}"
 TE_FL_SKIP_CUDA=1 \
 SKIP_CUDA_BUILD=1 \
 NVTE_FRAMEWORK=pytorch \
-python3 -m pip install --no-build-isolation --no-cache-dir -e .
+python3 -m pip install --no-build-isolation --no-cache-dir --no-deps -e .
 
 echo "===== Step 3: Verify MUSA Runtime ====="
 python3 - <<'PY'
