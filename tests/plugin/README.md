@@ -10,9 +10,13 @@ The test layout follows the implementation boundary:
 - `backend/`: shared backend contracts and operation suites.
 - `backend/reference/`: reference backend tests.
 - `backend/flagos/`: FlagOS backend tests that do not require a specific device.
-- `backend/npu/`: Ascend NPU vendor backend-specific tests.
+- `backend/npu/`: Ascend NPU tests, runtime compatibility patches, and the
+  backend-local pytest entry point used to run selected upstream tests.
 
-All pytest suites use the normal `python -m pytest` entry point. Platform runtime
-compatibility belongs to the corresponding implementation under
-`transformer_engine/plugin/core/backends/vendor/`, not to a test-only launcher
-or the common CI workflow.
+Ascend tests that need runtime compatibility setup are launched through
+`backend/npu/run_pytest.py`. The launcher applies the NPU runtime patch before
+pytest collects tests. Platform-specific behavior stays in `backend/npu/` and
+is not added to the common CI workflow.
+
+Metax and other platforms that do not need an import-time adapter continue to
+use the normal `python -m pytest` path.
