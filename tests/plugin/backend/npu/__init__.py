@@ -1,1 +1,1 @@
-"""NPU tests and upstream Transformer Engine test adapters."""
+"""Ascend NPU vendor backend tests."""

@@ -46,13 +46,6 @@ def _run_script(group: dict[str, Any]) -> int:
     return subprocess.run(command, cwd=REPO_ROOT, check=False).returncode
 
 
-def _pytest_command(use_platform_runner: bool) -> list[str]:
-    platform_command = os.environ.get("TE_TEST_PYTEST_COMMAND")
-    if use_platform_runner and platform_command:
-        return [_expand(part) for part in shlex.split(platform_command)]
-    return [sys.executable, "-m", "pytest"]
-
-
 def _run_pytest(group: dict[str, Any]) -> int:
     steps = group.get("steps")
     if not isinstance(steps, list) or not steps:
@@ -85,7 +78,7 @@ def _run_pytest(group: dict[str, Any]) -> int:
             failed = True
             continue
 
-        command = _pytest_command(bool(step.get("use_platform_runner", True)))
+        command = [sys.executable, "-m", "pytest"]
         command.extend(group_args)
         command.extend(_expand(str(arg)) for arg in step.get("args", []))
         if step.get("junit"):

@@ -13,17 +13,6 @@ test_fail() {
     echo "Error: sub-test failed: $1"
 }
 
-pytest_command() {
-    local -n out=$1
-
-    if [ -n "${TE_TEST_PYTEST_COMMAND:-}" ]; then
-        # shellcheck disable=SC2206
-        out=(${TE_TEST_PYTEST_COMMAND})
-    else
-        out=(python3 -m pytest)
-    fi
-}
-
 require_modules() {
     python3 - "$@" <<'PY'
 import importlib
@@ -47,8 +36,7 @@ run_pytest_step() {
     local junit=$2
     shift 2
 
-    local cmd=()
-    pytest_command cmd
+    local cmd=(python3 -m pytest)
     cmd+=(-v -s --tb=auto "--junitxml=$XML_LOG_DIR/$junit")
     cmd+=("$@")
 

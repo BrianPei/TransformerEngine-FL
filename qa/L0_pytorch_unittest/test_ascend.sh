@@ -13,26 +13,12 @@ test_fail() {
     echo "Error: sub-test failed: $1"
 }
 
-pytest_command() {
-    local use_platform_runner=$1
-    local -n out=$2
-
-    if [ "$use_platform_runner" = "true" ] && [ -n "${TE_TEST_PYTEST_COMMAND:-}" ]; then
-        # shellcheck disable=SC2206
-        out=(${TE_TEST_PYTEST_COMMAND})
-    else
-        out=(python3 -m pytest)
-    fi
-}
-
 run_pytest_step() {
     local label=$1
     local junit=$2
-    local use_platform_runner=$3
-    shift 3
+    shift 2
 
-    local cmd=()
-    pytest_command "$use_platform_runner" cmd
+    local cmd=(python3 -m pytest)
     cmd+=(-v -s --tb=short "--junitxml=$XML_LOG_DIR/$junit")
     cmd+=("$@")
 
@@ -49,33 +35,33 @@ run_pytest_step_with_unfused_attention() {
     NVTE_FLASH_ATTN=0 \
     NVTE_FUSED_ATTN=0 \
     NVTE_UNFUSED_ATTN=1 \
-        run_pytest_step "$label" "$junit" true "$@"
+        run_pytest_step "$label" "$junit" "$@"
 }
 
-run_pytest_step "Ascend vendor NPU backend tests" "pytest_ascend_vendor_npu.xml" false \
+run_pytest_step "Ascend vendor NPU backend tests" "pytest_ascend_vendor_npu.xml" \
     "$TE_PATH/tests/plugin/backend/npu/test_backend_npu.py"
 
 PLUGIN_TEST_ROOT="$TE_PATH/tests/plugin"
 
-run_pytest_step "plugin policy" "pytest_test_plugin_policy.xml" false \
+run_pytest_step "plugin policy" "pytest_test_plugin_policy.xml" \
     "$PLUGIN_TEST_ROOT/plugin/test_policy.py"
 
-run_pytest_step "plugin manager" "pytest_test_plugin_manager.xml" false \
+run_pytest_step "plugin manager" "pytest_test_plugin_manager.xml" \
     "$PLUGIN_TEST_ROOT/plugin/test_manager.py"
 
-run_pytest_step "FlagOS backend lifecycle" "pytest_test_backend_flagos.xml" false \
+run_pytest_step "FlagOS backend lifecycle" "pytest_test_backend_flagos.xml" \
     "$PLUGIN_TEST_ROOT/backend/flagos/test_lifecycle.py"
 
-run_pytest_step "reference backend lifecycle" "pytest_test_backend_reference.xml" false \
+run_pytest_step "reference backend lifecycle" "pytest_test_backend_reference.xml" \
     "$PLUGIN_TEST_ROOT/backend/reference/test_lifecycle.py"
 
-run_pytest_step "reference activation operations" "pytest_test_backend_reference_activation.xml" false \
+run_pytest_step "reference activation operations" "pytest_test_backend_reference_activation.xml" \
     "$PLUGIN_TEST_ROOT/backend/reference/test_activation.py"
 
-run_pytest_step "reference dropout operations" "pytest_test_backend_reference_dropout.xml" false \
+run_pytest_step "reference dropout operations" "pytest_test_backend_reference_dropout.xml" \
     "$PLUGIN_TEST_ROOT/backend/reference/test_dropout.py"
 
-run_pytest_step "reference GEMM operations" "pytest_test_backend_reference_gemm.xml" false \
+run_pytest_step "reference GEMM operations" "pytest_test_backend_reference_gemm.xml" \
     "$PLUGIN_TEST_ROOT/backend/reference/test_gemm.py"
 
 run_pytest_step_with_unfused_attention "shared portable sanity tests" "pytest_shared_sanity_portable.xml" \
