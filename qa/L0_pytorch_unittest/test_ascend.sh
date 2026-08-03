@@ -46,6 +46,12 @@ run_pytest_step_with_unfused_attention() {
     local junit=$2
     shift 2
 
+    if [ -z "${TE_TEST_PYTEST_COMMAND:-}" ]; then
+        echo "-------------------------------------------------------"
+        echo "[SKIP] $label: Ascend shared PyTorch tests require the NPU pytest runner"
+        return
+    fi
+
     NVTE_FLASH_ATTN=0 \
     NVTE_FUSED_ATTN=0 \
     NVTE_UNFUSED_ATTN=1 \

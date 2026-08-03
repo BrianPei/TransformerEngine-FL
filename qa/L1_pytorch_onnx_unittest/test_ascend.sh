@@ -6,6 +6,11 @@ set -u
 : "${XML_LOG_DIR:=$TE_PATH/logs/L1_pytorch_onnx_unittest-ascend}"
 mkdir -p "$XML_LOG_DIR"
 
+if [ -z "${TE_TEST_PYTEST_COMMAND:-}" ]; then
+    echo "Skipping Ascend ONNX export tests; NPU pytest runner is not configured."
+    exit 0
+fi
+
 FAIL=0
 
 test_fail() {

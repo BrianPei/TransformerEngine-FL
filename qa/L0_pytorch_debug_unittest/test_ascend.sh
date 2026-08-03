@@ -10,6 +10,11 @@ mkdir -p "$XML_LOG_DIR"
 
 export TORCHDYNAMO_DISABLE="${TORCHDYNAMO_DISABLE:-1}"
 
+if [ -z "${TE_TEST_PYTEST_COMMAND:-}" ]; then
+    echo "Skipping Ascend PyTorch debug tests; NPU pytest runner is not configured."
+    exit 0
+fi
+
 FAIL=0
 
 test_fail() {

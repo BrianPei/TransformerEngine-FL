@@ -55,11 +55,16 @@ then
         "$TE_PATH/tests/pytorch/attention/test_cp_utils.py"
 fi
 
-NVTE_FLASH_ATTN=0 \
-NVTE_FUSED_ATTN=0 \
-NVTE_UNFUSED_ATTN=1 \
-    run_pytest_step "distributed non-FP8 numerics" "pytest_distributed_numerics_none.xml" true \
-        "$TE_PATH/tests/pytorch/distributed/test_numerics.py::test_ascend_distributed_smoke"
+if [ -n "${TE_TEST_PYTEST_COMMAND:-}" ]; then
+    NVTE_FLASH_ATTN=0 \
+    NVTE_FUSED_ATTN=0 \
+    NVTE_UNFUSED_ATTN=1 \
+        run_pytest_step "distributed non-FP8 numerics" "pytest_distributed_numerics_none.xml" true \
+            "$TE_PATH/tests/pytorch/distributed/test_numerics.py::test_ascend_distributed_smoke"
+else
+    echo "-------------------------------------------------------"
+    echo "[SKIP] distributed non-FP8 numerics: Ascend shared PyTorch tests require the NPU pytest runner"
+fi
 
 echo "Skipping Ascend HCCL communication tests."
 

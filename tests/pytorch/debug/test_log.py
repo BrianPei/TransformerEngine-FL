@@ -69,9 +69,11 @@ all_stats = []
 for r in recipes:
     for stat in bare_stats:
         for columnwise_postfix in ["", "_columnwise"]:
-            if r == "fp8_current_scaling" and not fp8_available:
-                continue
-            if r == "fp8_block_scaling" and not fp8_block_scaling_available:
+            if (
+                r in ["fp8_current_scaling", "fp8_block_scaling"]
+                and torch.cuda.get_device_capability()[0] < 9
+            ):
+                # hopper is needed for current-scaling, block-scaling
                 continue
             if r == "mxfp8" and not mxfp8_available:
                 continue
