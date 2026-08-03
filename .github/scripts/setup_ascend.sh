@@ -48,7 +48,6 @@ if [ -n "${GITHUB_ENV:-}" ]; then
         echo "PYTORCH_NPU_ALLOC_CONF=$PYTORCH_NPU_ALLOC_CONF"
         echo "PATH=$PATH"
         echo "LD_LIBRARY_PATH=${LD_LIBRARY_PATH:-}"
-        echo "TE_TEST_PYTEST_COMMAND=python3 $WORKSPACE/tests/plugin/backend/npu/run_pytest.py"
     } >> "$GITHUB_ENV"
 fi
 
