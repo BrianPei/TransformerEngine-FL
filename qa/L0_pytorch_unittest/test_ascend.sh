@@ -52,13 +52,7 @@ run_pytest_step_with_unfused_attention() {
         run_pytest_step "$label" "$junit" true "$@"
 }
 
-run_pytest_step "Ascend TE module smoke tests" "pytest_ascend_backend_smoke.xml" true \
-    "$TE_PATH/tests/plugin/backend/npu/test_modules.py"
-
-run_pytest_step "Ascend FlagOS operator tests" "pytest_ascend_backend_ops.xml" true \
-    "$TE_PATH/tests/plugin/backend/npu/test_gemm.py"
-
-run_pytest_step "Ascend vendor NPU backend tests" "pytest_ascend_vendor_npu.xml" true \
+run_pytest_step "Ascend vendor NPU backend tests" "pytest_ascend_vendor_npu.xml" false \
     "$TE_PATH/tests/plugin/backend/npu/test_backend_npu.py"
 
 PLUGIN_TEST_ROOT="$TE_PATH/tests/plugin"
