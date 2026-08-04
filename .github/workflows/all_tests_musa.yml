@@ -18,7 +18,7 @@ jobs:
     with:
       platform: musa
       run_unit_tests: true
-      run_integration_tests: false
+      run_integration_tests: true
 
   all_tests:
     needs: run_tests

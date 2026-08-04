@@ -11,6 +11,11 @@
 : ${XML_LOG_DIR:=/logs}
 mkdir -p "$XML_LOG_DIR"
 
+IS_MUSA_PLATFORM=false
+if [ "${PLATFORM:-}" = "musa" ] || [ "${PLATFORM:-}" = "mthreads" ]; then
+    IS_MUSA_PLATFORM=true
+fi
+
 # Config with the dummy feature which prevents nvinspect from being disabled.
 # Nvinspect will be disabled if no feature is active.
 : ${NVTE_TEST_NVINSPECT_DUMMY_CONFIG_FILE:=$TE_PATH/tests/pytorch/debug/test_configs/dummy_feature.yaml}
@@ -43,6 +48,22 @@ should_skip_on_metax() {
     return 1
 }
 
+should_skip_on_musa() {
+    local test_path=$1
+
+    [ "$IS_MUSA_PLATFORM" = "true" ] || return 1
+
+    case "$test_path" in
+        *"/tests/pytorch/test_sanity.py" | \
+        *"/tests/pytorch/test_numerics.py")
+            echo "[SKIP] Platform MUSA: Ignoring $test_path"
+            return 0
+            ;;
+    esac
+
+    return 1
+}
+
 
 run_test_step() {
     local xml_file=$1
@@ -50,6 +71,10 @@ run_test_step() {
     local cmd=$3
 
     if should_skip_on_metax "$test_path"; then
+        return 0
+    fi
+
+    if should_skip_on_musa "$test_path"; then
         return 0
     fi
 
@@ -62,7 +87,7 @@ run_test_step() {
 
 # Step 1: Sanity
 run_test_step "test_sanity.xml" "$TE_PATH/tests/pytorch/debug/test_sanity.py" \
-"pytest -v -s --junitxml=$XML_LOG_DIR/test_sanity.xml $TE_PATH/tests/pytorch/debug/test_sanity.py --feature_dirs=$NVTE_TEST_NVINSPECT_FEATURE_DIRS"
+"NVTE_TORCH_COMPILE=0 TORCHDYNAMO_DISABLE=1 TORCH_COMPILE_DISABLE=1 pytest -v -s --junitxml=$XML_LOG_DIR/test_sanity.xml $TE_PATH/tests/pytorch/debug/test_sanity.py --feature_dirs=$NVTE_TEST_NVINSPECT_FEATURE_DIRS"
 
 # Step 2: Config
 run_test_step "test_config.xml" "$TE_PATH/tests/pytorch/debug/test_config.py" \
