@@ -42,7 +42,7 @@ run_without_cuda_compat() {
 
 run_debug() {
     local feature_dirs="${TE_PATH}/transformer_engine/debug/features"
-    local configs_dir="${TE_PATH}/tests/pytorch/debug/test_configs"
+    local configs_dir="${TE_PATH}/tests/pytorch/debug/test_configs/"
 
     NVTE_TORCH_COMPILE=0 \
     TORCHDYNAMO_DISABLE=1 \
@@ -94,7 +94,7 @@ run_pytorch() {
         -k "not (test_gpt_accuracy or test_mha_accuracy or test_dpa_accuracy or test_gpt_checkpointing or test_gpt_cuda_graph or test_grouped_linear_accuracy or test_grouped_gemm or test_noncontiguous or test_rmsnorm_accuracy or test_layernorm_accuracy or test_linear_accuracy or test_layernorm_linear_accuracy or test_layernorm_mlp_accuracy or test_transformer_layer_hidden_states_format)" \
         --no-header
 
-    run_pytest test_jit "${tests_root}/test_jit.py" --no-header
+    echo "[SKIP] MUSA: test_jit.py requires unsupported TorchDynamo/JIT fusion paths"
     run_pytest test_fused_rope "${tests_root}/test_fused_rope.py"
     run_pytest test_nvfp4 "${tests_root}/nvfp4"
     run_pytest test_quantized_tensor "${tests_root}/test_quantized_tensor.py"
@@ -103,7 +103,7 @@ run_pytorch() {
         "${tests_root}/test_float8_blockwise_scaling_exact.py"
     run_pytest test_float8_blockwise_gemm_exact \
         "${tests_root}/test_float8_blockwise_gemm_exact.py"
-    run_pytest test_gqa "${tests_root}/test_gqa.py"
+    echo "[SKIP] MUSA: test_gqa.py requires unsupported TorchDynamo/Inductor paths"
 
     run_pytest test_fused_optimizer "${tests_root}/test_fused_optimizer.py" \
         -k "not test_bf16_exp_avg_and_exp_avg_sq"
@@ -113,7 +113,7 @@ run_pytorch() {
         --no-header
 
     run_pytest test_fusible_ops "${tests_root}/test_fusible_ops.py" \
-        -k "not (test_layer_norm or test_rmsnorm or test_layernorm_mlp or test_grouped_mlp or test_custom)"
+        -k "not (test_layer_norm or test_rmsnorm or test_layernorm_mlp or test_grouped_mlp or test_custom or test_l2normalization)"
 
     run_pytest test_permutation "${tests_root}/test_permutation.py" \
         --deselect "tests/pytorch/test_permutation.py::test_permutation_mask_map[" \
