@@ -2,7 +2,7 @@
 
 hardware_name: mthreads
 display_name: 'MooreThreads MUSA Tests'
-checkout_submodules: 'false'
+checkout_submodules: recursive
 
 # CI image for MooreThreads MUSA dev env
 ci_image: harbor.baai.ac.cn/flagos-dev/transformerengine-fl:f826afe-musa-dev

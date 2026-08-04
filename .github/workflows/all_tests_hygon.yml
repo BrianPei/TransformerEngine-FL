@@ -1,0 +1,14 @@
+name: hygon_tests
+
+on:
+  workflow_dispatch:
+
+jobs:
+  select_hygon_branch:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Select the Hygon development branch
+        run: |
+          echo "This entry registers Hygon tests in the Actions page."
+          echo "Run it again and select Hygon-dev from the branch list."
+          exit 1
