@@ -9,6 +9,29 @@ export PATH=/usr/local/musa/bin:${PATH}
 export LD_LIBRARY_PATH=/usr/lib:/usr/lib/x86_64-linux-gnu:/usr/local/musa/lib:/usr/local/openmpi/lib:${LD_LIBRARY_PATH:-}
 export MUSA_HOME=${MUSA_HOME:-/usr/local/musa}
 export CUDA_HOME=${CUDA_HOME:-/usr/local/musa}
+export TE_FL_SKIP_CUDA="${TE_FL_SKIP_CUDA:-1}"
+export SKIP_CUDA_BUILD="${SKIP_CUDA_BUILD:-1}"
+export NVTE_WITH_CUDA="${NVTE_WITH_CUDA:-0}"
+export NVTE_WITH_MACA="${NVTE_WITH_MACA:-0}"
+export NVTE_FRAMEWORK="${NVTE_FRAMEWORK:-pytorch}"
+export TE_FL_ENABLE_MUSA_CUDA_COMPAT="${TE_FL_ENABLE_MUSA_CUDA_COMPAT:-1}"
+export TORCH_DEVICE_BACKEND_AUTOLOAD="${TORCH_DEVICE_BACKEND_AUTOLOAD:-0}"
+
+if [ -n "${GITHUB_ENV:-}" ]; then
+    {
+        echo "PATH=$PATH"
+        echo "LD_LIBRARY_PATH=$LD_LIBRARY_PATH"
+        echo "MUSA_HOME=$MUSA_HOME"
+        echo "CUDA_HOME=$CUDA_HOME"
+        echo "TE_FL_SKIP_CUDA=$TE_FL_SKIP_CUDA"
+        echo "SKIP_CUDA_BUILD=$SKIP_CUDA_BUILD"
+        echo "NVTE_WITH_CUDA=$NVTE_WITH_CUDA"
+        echo "NVTE_WITH_MACA=$NVTE_WITH_MACA"
+        echo "NVTE_FRAMEWORK=$NVTE_FRAMEWORK"
+        echo "TE_FL_ENABLE_MUSA_CUDA_COMPAT=$TE_FL_ENABLE_MUSA_CUDA_COMPAT"
+        echo "TORCH_DEVICE_BACKEND_AUTOLOAD=$TORCH_DEVICE_BACKEND_AUTOLOAD"
+    } >> "$GITHUB_ENV"
+fi
 
 echo "===== Step 1: Verify Image Dependencies ====="
 python3 - <<'PY'
