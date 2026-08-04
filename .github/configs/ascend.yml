@@ -6,10 +6,11 @@ display_name: 'Huawei Ascend NPU'
 
 # CI image for the Ascend environment
 ci_image: harbor.baai.ac.cn/flagos-dev/transformerengine-fl:85c2523-ascend-dev
+container_pull_policy: always
 
 # Runner labels for the self-hosted Ascend node
 runner_labels:
-  - hw-8g-cicd-te
+  - hw-4g-cicd-te
 
 # Container volumes
 container_volumes:
@@ -34,46 +35,6 @@ container_options: >-
 
 # Platform-specific environment setup script
 setup_script: .github/scripts/setup_ascend.sh
-
-# Source checkout behavior
-checkout:
-  pre_script: ''
-  fetch_depth: 0
-  submodules: 'false'
-  set_safe_directory: true
-  attempts: 1
-
-# Runtime environment activation used by common workflows before tests.
-test_env_script: |
-  if [ -f /opt/conda/etc/profile.d/conda.sh ]; then
-    source /opt/conda/etc/profile.d/conda.sh
-    conda activate "${CONDA_ENV:-base}"
-  elif [ -f /opt/miniconda3/etc/profile.d/conda.sh ]; then
-    source /opt/miniconda3/etc/profile.d/conda.sh
-    conda activate "${CONDA_ENV:-flagscale-train}"
-  fi
-  if [ -f /usr/local/Ascend/ascend-toolkit/set_env.sh ]; then
-    source /usr/local/Ascend/ascend-toolkit/set_env.sh
-  elif [ -f /usr/local/Ascend/latest/set_env.sh ]; then
-    source /usr/local/Ascend/latest/set_env.sh
-  fi
-
-# Backend/API sanity check used by common unit workflow.
-backend_check:
-  module: transformer_engine_torch
-  required_symbols: []
-
-# Build environment variables (platform-specific)
-build_env:
-  PLATFORM: ascend
-  TE_FL_SKIP_CUDA: '1'
-  NVTE_FRAMEWORK: pytorch
-  NVTE_WITH_CUDA: '0'
-  NVTE_WITH_MACA: '0'
-  TE_WITH_NCCL: '0'
-  ASCEND_VISIBLE_DEVICES: '0,1,2,3'
-  ASCEND_RT_VISIBLE_DEVICES: '0,1,2,3'
-  PYTORCH_NPU_ALLOC_CONF: expandable_segments:True
 
 coverage:
   enabled: true

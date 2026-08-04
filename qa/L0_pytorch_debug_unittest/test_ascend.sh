@@ -43,6 +43,19 @@ run_pytest_step() {
     "${cmd[@]}" || test_fail "$label"
 }
 
+if [ -z "${TE_TEST_PYTEST_COMMAND:-}" ]; then
+    echo "Running Ascend PyTorch debug tests that do not require the NPU pytest runner."
+    run_pytest_step "debug config" "test_config.xml" \
+        "$TE_PATH/tests/pytorch/debug/test_config.py" \
+        "--feature_dirs=$NVTE_TEST_NVINSPECT_FEATURE_DIRS"
+
+    if [ "$FAIL" -ne 0 ]; then
+        echo "Some tests failed."
+        exit 1
+    fi
+    exit 0
+fi
+
 run_pytest_step "debug sanity" "test_sanity.xml" \
     "$TE_PATH/tests/pytorch/debug/test_sanity.py" \
     "--feature_dirs=$NVTE_TEST_NVINSPECT_FEATURE_DIRS"

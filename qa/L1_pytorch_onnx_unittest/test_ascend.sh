@@ -59,6 +59,15 @@ run_pytest_step() {
 
 if ! require_modules onnxruntime onnxruntime_extensions; then
     test_fail "ONNX export tests"
+elif [ -z "${TE_TEST_PYTEST_COMMAND:-}" ]; then
+    NVTE_FLASH_ATTN=0 \
+    NVTE_FUSED_ATTN=0 \
+    NVTE_UNFUSED_ATTN=1 \
+    NVTE_UnfusedDPA_Emulate_FP8=1 \
+        run_pytest_step "ONNX export tests that do not require the NPU pytest runner" \
+            "test_onnx_export.xml" \
+            "$TE_PATH/tests/pytorch/test_onnx_export.py::test_export_ctx_manager" \
+            "$TE_PATH/tests/pytorch/test_onnx_export.py::test_export_layernorm_zero_centered_gamma"
 else
     NVTE_FLASH_ATTN=0 \
     NVTE_FUSED_ATTN=0 \

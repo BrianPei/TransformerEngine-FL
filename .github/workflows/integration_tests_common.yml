@@ -3,15 +3,16 @@ name: Common Integration Tests
 on:
   workflow_call:
     inputs:
-      platform:
-        required: true
-        type: string
       device:
         required: true
         type: string
       image:
         required: true
         type: string
+      container_pull_policy:
+        required: false
+        type: string
+        default: never
       runs_on:
         required: true
         type: string
@@ -21,55 +22,17 @@ on:
       container_options:
         required: true
         type: string
-      # Platform-specific environment setup script path (from platform config)
       setup_script:
         required: false
         type: string
         default: ''
-      # Platform-specific build environment variables (JSON object from config)
-      build_env:
-        required: false
-        type: string
-        default: '{}'
-      checkout_pre_script:
-        required: false
-        type: string
-        default: ''
-      checkout_fetch_depth:
-        required: false
-        type: string
-        default: '0'
       checkout_submodules:
         required: false
         type: string
         default: 'false'
-      checkout_set_safe_directory:
-        required: false
+      test_matrix:
+        required: true
         type: string
-        default: 'true'
-      checkout_attempts:
-        required: false
-        type: string
-        default: '1'
-      test_env_script:
-        required: false
-        type: string
-        default: ''
-      backend_check_module:
-        required: false
-        type: string
-        default: ''
-      backend_check_required_symbols:
-        required: false
-        type: string
-        default: '[]'
-      integration_test_matrix:
-        required: false
-        type: string
-        default: >-
-          [
-            {"name":"pytorch_mcore_integration","path":"qa/L1_pytorch_mcore_integration/test.sh","test_type":"integration"}
-          ]
 
 jobs:
   integration_test:
@@ -80,89 +43,35 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        test_group: ${{ fromJson(inputs.integration_test_matrix) }}
+        test_group: ${{ fromJson(inputs.test_matrix) }}
     name: integration-${{ inputs.device }}-${{ matrix.test_group.name }}
     container:
       image: ${{ inputs.image }}
       volumes: ${{ fromJson(inputs.container_volumes) }}
-      options: --pull never ${{ inputs.container_options }}
+      options: --pull ${{ inputs.container_pull_policy }} ${{ inputs.container_options }}
 
     steps:
-      - name: Pre Checkout Setup
-        if: inputs.checkout_pre_script != ''
+      - name: Prepare Checkout Environment
         run: |
-          cat > /tmp/tefl_pre_checkout.sh <<'EOF'
-          ${{ inputs.checkout_pre_script }}
-          EOF
-          bash /tmp/tefl_pre_checkout.sh
+          /usr/bin/git config --global safe.directory '*'
+          /usr/bin/git config --global --unset-all credential.helper 2>/dev/null || true
+          /usr/bin/git config --system --unset-all credential.helper 2>/dev/null || true
 
-      - name: Checkout Source Code (attempt 1)
-        id: checkout1
-        uses: actions/checkout@v4
-        continue-on-error: ${{ fromJson(inputs.checkout_attempts) > 1 }}
-        with:
-          fetch-depth: ${{ inputs.checkout_fetch_depth }}
-          submodules: ${{ inputs.checkout_submodules }}
-          set-safe-directory: ${{ inputs.checkout_set_safe_directory }}
-
-      - name: Checkout Source Code (attempt 2)
-        id: checkout2
-        if: fromJson(inputs.checkout_attempts) > 1 && steps.checkout1.outcome == 'failure'
-        uses: actions/checkout@v4
-        continue-on-error: ${{ fromJson(inputs.checkout_attempts) > 2 }}
-        with:
-          fetch-depth: ${{ inputs.checkout_fetch_depth }}
-          submodules: ${{ inputs.checkout_submodules }}
-          set-safe-directory: ${{ inputs.checkout_set_safe_directory }}
-
-      - name: Checkout Source Code (attempt 3)
-        id: checkout3
-        if: fromJson(inputs.checkout_attempts) > 2 && steps.checkout2.outcome == 'failure'
+      - name: Checkout Source Code
         uses: actions/checkout@v4
         with:
-          fetch-depth: ${{ inputs.checkout_fetch_depth }}
+          fetch-depth: 0
           submodules: ${{ inputs.checkout_submodules }}
-          set-safe-directory: ${{ inputs.checkout_set_safe_directory }}
-      
+          set-safe-directory: true
+
       - name: Environment Setup
         if: inputs.setup_script != ''
-        run: |
-          bash $GITHUB_WORKSPACE/${{ inputs.setup_script }}
+        run: bash "$GITHUB_WORKSPACE/${{ inputs.setup_script }}"
 
       - name: Execute Tests
-        env:
-          TE_PATH: ${{ github.workspace }}
-          TE_FL_PREFER: vendor
-          MCORE_REPO_URL: https://github.com/flagos-ai/Megatron-LM-FL.git
-          MCORE_REF: main
         run: |
           set -euo pipefail
-
-          # Load platform-specific environment variables
-          while IFS='=' read -r key value; do
-            [ -n "$key" ] && export "$key=$value"
-          done < <(echo '${{ inputs.build_env }}' | python3 -c "
-          import json, sys
-          env = json.load(sys.stdin)
-          for k, v in env.items():
-              print(f'{k}={v}')
-          ")
-
-          # Activate/configure the platform runtime environment.
-          cat > /tmp/tefl_test_env.sh <<'EOF'
-          ${{ inputs.test_env_script }}
-          EOF
-          if [ -s /tmp/tefl_test_env.sh ]; then
-            source /tmp/tefl_test_env.sh
-          fi
-          echo "PATH=$PATH" >> $GITHUB_ENV
-          export PYTHONPATH=$GITHUB_WORKSPACE:${PYTHONPATH:-}
-          export TE_LIB_PATH=$(python -c "import site; print(site.getsitepackages()[0])")/transformer_engine
-
-          echo "=== Running L1 PyTorch Megatron-FL MCore Integration Test ==="
-          # python3 --version
-          # pip list | grep -E "regex|six|torch" || true
-
-          bash ${{ matrix.test_group.path }}
+          export TE_LIB_PATH="${TE_LIB_PATH:-$(python3 -c 'import site; print(site.getsitepackages()[0])')/transformer_engine}"
+          test -f "${{ matrix.test_group.path }}"
+          bash "${{ matrix.test_group.path }}"
         timeout-minutes: 30
-        

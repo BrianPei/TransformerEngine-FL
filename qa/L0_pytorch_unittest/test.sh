@@ -11,11 +11,6 @@ pip install expecttest
 FAIL=0
 
 IS_CUDA_BACKEND=$(python3 -c "import torch; print('cuda' if torch.cuda.is_available() else 'cpu')" 2>/dev/null)
-IS_MUSA_PLATFORM=false
-if [ "${PLATFORM:-}" = "musa" ] || [ "${PLATFORM:-}" = "mthreads" ]; then
-    IS_MUSA_PLATFORM=true
-fi
-echo "Test platform: ${PLATFORM:-unset}; MUSA filters enabled: $IS_MUSA_PLATFORM"
 
 test_fail() {
     FAIL=1
@@ -48,18 +43,6 @@ run_test_step() {
             *"test_hf_integration.py") # transformers library may not be available in CI
                 echo "-------------------------------------------------------"
                 echo "[SKIP] Platform MetaX: Ignoring $label"
-                echo "-------------------------------------------------------"
-                return 0
-                ;;
-        esac
-    fi
-
-    if [ "$IS_MUSA_PLATFORM" = "true" ]; then
-        case "$test_path" in
-            *"test_parallel_cross_entropy.py" | \
-            *"test_backend_flagos_softmax.py")
-                echo "-------------------------------------------------------"
-                echo "[SKIP] MUSA Platform: Ignoring $label (Triton MUSA binary output is unavailable)"
                 echo "-------------------------------------------------------"
                 return 0
                 ;;
@@ -104,8 +87,6 @@ run_test_step "pytest_test_deferred_init.xml" "$TE_PATH/tests/pytorch/test_defer
 # Step: Numerics
 if [ "$PLATFORM" = "metax" ]; then
     NUMERICS_CMD="PYTORCH_JIT=0 NVTE_TORCH_COMPILE=0 NVTE_ALLOW_NONDETERMINISTIC_ALGO=0 NVTE_FUSED_ATTN=0 python3 -m pytest -s -v --tb=auto --junitxml=$XML_LOG_DIR/pytest_test_numerics.xml $TE_PATH/tests/pytorch/test_numerics.py -k \"not (test_layernorm_mlp_accuracy or test_grouped_linear_accuracy or test_gpt_cuda_graph or test_transformer_layer_hidden_states_format or test_grouped_gemm or test_noncontiguous or test_gpt_checkpointing or test_gpt_accuracy or test_mha_accuracy or test_linear_accuracy or test_linear_accuracy_delay_wgrad_compute or test_rmsnorm_accuracy or test_layernorm_accuracy or test_layernorm_linear_accuracy)\" --no-header"
-elif [ "$IS_MUSA_PLATFORM" = "true" ]; then
-    NUMERICS_CMD="PYTORCH_JIT=0 NVTE_TORCH_COMPILE=0 NVTE_ALLOW_NONDETERMINISTIC_ALGO=0 NVTE_FUSED_ATTN=0 python3 -m pytest -s -v --tb=auto --junitxml=$XML_LOG_DIR/pytest_test_numerics.xml $TE_PATH/tests/pytorch/test_numerics.py -k \"not (test_gpt_accuracy or test_mha_accuracy or test_grouped_linear_accuracy or test_noncontiguous or test_linear_accuracy or test_layernorm_linear_accuracy or test_layernorm_mlp_accuracy or test_transformer_layer_hidden_states_format)\" --no-header"
 else
     # CUDA
     NUMERICS_CMD="PYTORCH_JIT=0 NVTE_TORCH_COMPILE=0 NVTE_ALLOW_NONDETERMINISTIC_ALGO=0 NVTE_FUSED_ATTN=0 python3 -m pytest -s -v --tb=auto --junitxml=$XML_LOG_DIR/pytest_test_numerics.xml $TE_PATH/tests/pytorch/test_numerics.py -k \"not (test_linear_accuracy or test_layernorm_linear_accuracy or test_layernorm_mlp_accuracy or test_transformer_layer_hidden_states_format)\" --no-header"
@@ -154,41 +135,20 @@ run_test_step "pytest_test_gqa.xml" "$TE_PATH/tests/pytorch/test_gqa.py" \
 "python3 -m pytest -s -v --tb=auto --junitxml=$XML_LOG_DIR/pytest_test_gqa.xml $TE_PATH/tests/pytorch/test_gqa.py" "test_gqa.py"
 
 # Step: Fused Optimizer
-if [ "$IS_MUSA_PLATFORM" = "true" ]; then
-    FUSED_OPTIMIZER_CMD="python3 -m pytest -s -v --tb=auto --junitxml=$XML_LOG_DIR/pytest_test_fused_optimizer.xml $TE_PATH/tests/pytorch/test_fused_optimizer.py -k \"not test_bf16_exp_avg_and_exp_avg_sq\""
-else
-    FUSED_OPTIMIZER_CMD="python3 -m pytest -s -v --tb=auto --junitxml=$XML_LOG_DIR/pytest_test_fused_optimizer.xml $TE_PATH/tests/pytorch/test_fused_optimizer.py"
-fi
 run_test_step "pytest_test_fused_optimizer.xml" "$TE_PATH/tests/pytorch/test_fused_optimizer.py" \
-"$FUSED_OPTIMIZER_CMD" "test_fused_optimizer.py"
+"python3 -m pytest -s -v --tb=auto --junitxml=$XML_LOG_DIR/pytest_test_fused_optimizer.xml $TE_PATH/tests/pytorch/test_fused_optimizer.py" "test_fused_optimizer.py"
 
 # Step: Multi Tensor
-if [ "$IS_MUSA_PLATFORM" = "true" ]; then
-    MULTI_TENSOR_CMD="python3 -m pytest -s -v --tb=auto --junitxml=$XML_LOG_DIR/pytest_test_multi_tensor.xml $TE_PATH/tests/pytorch/test_multi_tensor.py::test_multi_tensor_compute_scale_and_scale_inv --no-header"
-else
-    MULTI_TENSOR_CMD="python3 -m pytest -s -v --tb=auto --junitxml=$XML_LOG_DIR/pytest_test_multi_tensor.xml $TE_PATH/tests/pytorch/test_multi_tensor.py"
-fi
 run_test_step "pytest_test_multi_tensor.xml" "$TE_PATH/tests/pytorch/test_multi_tensor.py" \
-"$MULTI_TENSOR_CMD" "test_multi_tensor.py"
+"python3 -m pytest -s -v --tb=auto --junitxml=$XML_LOG_DIR/pytest_test_multi_tensor.xml $TE_PATH/tests/pytorch/test_multi_tensor.py" "test_multi_tensor.py"
 
 # Step: Fusible Ops
 run_test_step "pytest_test_fusible_ops.xml" "$TE_PATH/tests/pytorch/test_fusible_ops.py" \
 "python3 -m pytest -s -v --tb=auto --junitxml=$XML_LOG_DIR/pytest_test_fusible_ops.xml $TE_PATH/tests/pytorch/test_fusible_ops.py" "test_fusible_ops.py"
 
 # Step: Permutation
-if [ "$IS_MUSA_PLATFORM" = "true" ]; then
-    PERMUTATION_CMD="python3 -m pytest -s -v --tb=auto --junitxml=$XML_LOG_DIR/pytest_test_permutation.xml $TE_PATH/tests/pytorch/test_permutation.py \
-        --deselect 'tests/pytorch/test_permutation.py::test_permutation_mask_map[' \
-        --deselect 'tests/pytorch/test_permutation.py::test_permutation_and_padding_mask_map[' \
-        --deselect 'tests/pytorch/test_permutation.py::test_permutation_and_padding_with_merging_probs[' \
-        --deselect 'tests/pytorch/test_permutation.py::test_permutation_mask_map_alongside_probs[' \
-        --deselect 'tests/pytorch/test_permutation.py::test_permutation_mask_map_topk1_no_probs[' \
-        --deselect 'tests/pytorch/test_permutation.py::test_chunk_permutation['"
-else
-    PERMUTATION_CMD="python3 -m pytest -s -v --tb=auto --junitxml=$XML_LOG_DIR/pytest_test_permutation.xml $TE_PATH/tests/pytorch/test_permutation.py"
-fi
 run_test_step "pytest_test_permutation.xml" "$TE_PATH/tests/pytorch/test_permutation.py" \
-"$PERMUTATION_CMD" "test_permutation.py"
+"python3 -m pytest -s -v --tb=auto --junitxml=$XML_LOG_DIR/pytest_test_permutation.xml $TE_PATH/tests/pytorch/test_permutation.py" "test_permutation.py"
 
 # Step: Parallel Cross Entropy
 run_test_step "pytest_test_parallel_cross_entropy.xml" "$TE_PATH/tests/pytorch/test_parallel_cross_entropy.py" \
@@ -221,15 +181,15 @@ run_test_step "pytest_test_checkpoint.xml" "$TE_PATH/tests/pytorch/test_checkpoi
 # ==============================================================================
 # New Step: Plugin Core
 # ==============================================================================
-PLUGIN_TEST_ROOT="$TE_PATH/transformer_engine/plugin/tests"
+PLUGIN_TEST_ROOT="$TE_PATH/tests/plugin"
 
 # Step: Plugin Policy
-run_test_step "pytest_test_plugin_policy.xml" "$PLUGIN_TEST_ROOT/test_plugin_policy.py" \
-"python3 -m pytest -s -v --tb=auto --junitxml=$XML_LOG_DIR/pytest_test_plugin_policy.xml $PLUGIN_TEST_ROOT/test_plugin_policy.py" "test_plugin_policy.py"
+run_test_step "pytest_test_plugin_policy.xml" "$PLUGIN_TEST_ROOT/plugin/test_policy.py" \
+"python3 -m pytest -s -v --tb=auto --junitxml=$XML_LOG_DIR/pytest_test_plugin_policy.xml $PLUGIN_TEST_ROOT/plugin/test_policy.py" "test_policy.py"
 
 # Step: Plugin manager
-run_test_step "pytest_test_plugin_manager.xml" "$PLUGIN_TEST_ROOT/test_plugin_manager.py" \
-"python3 -m pytest -s -v --tb=auto --junitxml=$XML_LOG_DIR/pytest_test_plugin_manager.xml $PLUGIN_TEST_ROOT/test_plugin_manager.py" "test_plugin_manager.py"
+run_test_step "pytest_test_plugin_manager.xml" "$PLUGIN_TEST_ROOT/plugin/test_manager.py" \
+"python3 -m pytest -s -v --tb=auto --junitxml=$XML_LOG_DIR/pytest_test_plugin_manager.xml $PLUGIN_TEST_ROOT/plugin/test_manager.py" "test_manager.py"
 
 
 # ==============================================================================
@@ -237,52 +197,42 @@ run_test_step "pytest_test_plugin_manager.xml" "$PLUGIN_TEST_ROOT/test_plugin_ma
 # ==============================================================================
 
 # Step: Backend flagos =========================================================
-run_test_step "pytest_test_backend_flagos.xml" "$PLUGIN_TEST_ROOT/test_backend_flagos.py" \
-"python3 -m pytest -s -v --tb=auto --junitxml=$XML_LOG_DIR/pytest_test_backend_flagos.xml $PLUGIN_TEST_ROOT/test_backend_flagos.py" "test_backend_flagos.py"
+run_test_step "pytest_test_backend_flagos.xml" "$PLUGIN_TEST_ROOT/backend/flagos/test_lifecycle.py" \
+"python3 -m pytest -s -v --tb=auto --junitxml=$XML_LOG_DIR/pytest_test_backend_flagos.xml $PLUGIN_TEST_ROOT/backend/flagos/test_lifecycle.py" "test_lifecycle.py"
 
 # Step: Backend impl fused adam
-run_test_step "pytest_test_backend_flagos_fused_adam.xml" "$PLUGIN_TEST_ROOT/test_backend_flagos_fused_adam.py" \
-"python3 -m pytest -s -v --tb=auto --junitxml=$XML_LOG_DIR/pytest_test_backend_flagos_fused_adam.xml $PLUGIN_TEST_ROOT/test_backend_flagos_fused_adam.py" "test_backend_flagos_fused_adam.py"
+run_test_step "pytest_test_backend_flagos_fused_adam.xml" "$PLUGIN_TEST_ROOT/backend/flagos/test_optimizer.py" \
+"python3 -m pytest -s -v --tb=auto --junitxml=$XML_LOG_DIR/pytest_test_backend_flagos_fused_adam.xml $PLUGIN_TEST_ROOT/backend/flagos/test_optimizer.py" "test_optimizer.py"
 
 # Step: Backend impl gemm
-run_test_step "pytest_test_backend_flagos_gemm.xml" "$PLUGIN_TEST_ROOT/test_backend_flagos_gemm.py" \
-"python3 -m pytest -s -v --tb=auto --junitxml=$XML_LOG_DIR/pytest_test_backend_flagos_gemm.xml $PLUGIN_TEST_ROOT/test_backend_flagos_gemm.py" "test_backend_flagos_gemm.py"
+run_test_step "pytest_test_backend_flagos_gemm.xml" "$PLUGIN_TEST_ROOT/backend/flagos/test_gemm.py" \
+"python3 -m pytest -s -v --tb=auto --junitxml=$XML_LOG_DIR/pytest_test_backend_flagos_gemm.xml $PLUGIN_TEST_ROOT/backend/flagos/test_gemm.py" "test_gemm.py"
 
 # Step: Backend impl multi_tensor
-run_test_step "pytest_test_backend_flagos_multi_tensor.xml" "$PLUGIN_TEST_ROOT/test_backend_flagos_multi_tensor.py" \
-"python3 -m pytest -s -v --tb=auto --junitxml=$XML_LOG_DIR/pytest_test_backend_flagos_multi_tensor.xml $PLUGIN_TEST_ROOT/test_backend_flagos_multi_tensor.py" "test_backend_flagos_multi_tensor.py"
+run_test_step "pytest_test_backend_flagos_multi_tensor.xml" "$PLUGIN_TEST_ROOT/backend/flagos/test_multi_tensor.py" \
+"python3 -m pytest -s -v --tb=auto --junitxml=$XML_LOG_DIR/pytest_test_backend_flagos_multi_tensor.xml $PLUGIN_TEST_ROOT/backend/flagos/test_multi_tensor.py" "test_multi_tensor.py"
 
 # Step: Backend impl rmsnorm
-run_test_step "pytest_test_backend_flagos_rmsnorm.xml" "$PLUGIN_TEST_ROOT/test_backend_flagos_rmsnorm.py" \
-"python3 -m pytest -s -v --tb=auto --junitxml=$XML_LOG_DIR/pytest_test_backend_flagos_rmsnorm.xml $PLUGIN_TEST_ROOT/test_backend_flagos_rmsnorm.py" "test_backend_flagos_rmsnorm.py"
+run_test_step "pytest_test_backend_flagos_rmsnorm.xml" "$PLUGIN_TEST_ROOT/backend/flagos/test_rmsnorm.py" \
+"python3 -m pytest -s -v --tb=auto --junitxml=$XML_LOG_DIR/pytest_test_backend_flagos_rmsnorm.xml $PLUGIN_TEST_ROOT/backend/flagos/test_rmsnorm.py" "test_rmsnorm.py"
 
 # Step: Backend impl softmax
-run_test_step "pytest_test_backend_flagos_softmax.xml" "$PLUGIN_TEST_ROOT/test_backend_flagos_softmax.py" \
-"python3 -m pytest -s -v --tb=auto --junitxml=$XML_LOG_DIR/pytest_test_backend_flagos_softmax.xml $PLUGIN_TEST_ROOT/test_backend_flagos_softmax.py" "test_backend_flagos_softmax.py"
+run_test_step "pytest_test_backend_flagos_softmax.xml" "$PLUGIN_TEST_ROOT/backend/flagos/test_softmax.py" \
+"python3 -m pytest -s -v --tb=auto --junitxml=$XML_LOG_DIR/pytest_test_backend_flagos_softmax.xml $PLUGIN_TEST_ROOT/backend/flagos/test_softmax.py" "test_softmax.py"
 
 
 # Step: Backend reference =========================================================
-if [ "$IS_MUSA_PLATFORM" = "true" ]; then
-    BACKEND_REFERENCE_CMD="python3 -m pytest -s -v --tb=auto --junitxml=$XML_LOG_DIR/pytest_test_backend_reference.xml $PLUGIN_TEST_ROOT/test_backend_reference.py -k \"not test_dropout_and_version_stubs\""
-else
-    BACKEND_REFERENCE_CMD="python3 -m pytest -s -v --tb=auto --junitxml=$XML_LOG_DIR/pytest_test_backend_reference.xml $PLUGIN_TEST_ROOT/test_backend_reference.py"
-fi
-run_test_step "pytest_test_backend_reference.xml" "$PLUGIN_TEST_ROOT/test_backend_reference.py" \
-"$BACKEND_REFERENCE_CMD" "test_backend_reference.py"
+run_test_step "pytest_test_backend_reference.xml" "$PLUGIN_TEST_ROOT/backend/reference/test_lifecycle.py" \
+"python3 -m pytest -s -v --tb=auto --junitxml=$XML_LOG_DIR/pytest_test_backend_reference.xml $PLUGIN_TEST_ROOT/backend/reference/test_lifecycle.py" "test_lifecycle.py"
 
-run_test_step "pytest_test_backend_reference_activation.xml" "$PLUGIN_TEST_ROOT/test_backend_reference_activation.py" \
-"python3 -m pytest -s -v --tb=auto --junitxml=$XML_LOG_DIR/pytest_test_backend_reference_activation.xml $PLUGIN_TEST_ROOT/test_backend_reference_activation.py" "test_backend_reference_activation.py"
+run_test_step "pytest_test_backend_reference_activation.xml" "$PLUGIN_TEST_ROOT/backend/reference/test_activation.py" \
+"python3 -m pytest -s -v --tb=auto --junitxml=$XML_LOG_DIR/pytest_test_backend_reference_activation.xml $PLUGIN_TEST_ROOT/backend/reference/test_activation.py" "test_activation.py"
 
-if [ "$IS_MUSA_PLATFORM" = "true" ]; then
-    BACKEND_REFERENCE_DROPOUT_CMD="python3 -m pytest -s -v --tb=auto --junitxml=$XML_LOG_DIR/pytest_test_backend_reference_dropout.xml $PLUGIN_TEST_ROOT/test_backend_reference_dropout.py -k \"not (test_dropout_fwd_zero_probability or test_dropout_bwd_zero_probability)\""
-else
-    BACKEND_REFERENCE_DROPOUT_CMD="python3 -m pytest -s -v --tb=auto --junitxml=$XML_LOG_DIR/pytest_test_backend_reference_dropout.xml $PLUGIN_TEST_ROOT/test_backend_reference_dropout.py"
-fi
-run_test_step "pytest_test_backend_reference_dropout.xml" "$PLUGIN_TEST_ROOT/test_backend_reference_dropout.py" \
-"$BACKEND_REFERENCE_DROPOUT_CMD" "test_backend_reference_dropout.py"
+run_test_step "pytest_test_backend_reference_dropout.xml" "$PLUGIN_TEST_ROOT/backend/reference/test_dropout.py" \
+"python3 -m pytest -s -v --tb=auto --junitxml=$XML_LOG_DIR/pytest_test_backend_reference_dropout.xml $PLUGIN_TEST_ROOT/backend/reference/test_dropout.py" "test_dropout.py"
 
-run_test_step "pytest_test_backend_reference_gemm.xml" "$PLUGIN_TEST_ROOT/test_backend_reference_gemm.py" \
-"python3 -m pytest -s -v --tb=auto --junitxml=$XML_LOG_DIR/pytest_test_backend_reference_gemm.xml $PLUGIN_TEST_ROOT/test_backend_reference_gemm.py" "test_backend_reference_gemm.py"
+run_test_step "pytest_test_backend_reference_gemm.xml" "$PLUGIN_TEST_ROOT/backend/reference/test_gemm.py" \
+"python3 -m pytest -s -v --tb=auto --junitxml=$XML_LOG_DIR/pytest_test_backend_reference_gemm.xml $PLUGIN_TEST_ROOT/backend/reference/test_gemm.py" "test_gemm.py"
 
 if [ "$FAIL" -ne 0 ]; then
     echo "Some tests failed."

@@ -46,17 +46,20 @@ run_pytest_step_with_unfused_attention() {
     local junit=$2
     shift 2
 
+    if [ -z "${TE_TEST_PYTEST_COMMAND:-}" ]; then
+        echo "-------------------------------------------------------"
+        echo "[SKIP] $label: Ascend shared PyTorch tests require the NPU pytest runner"
+        return
+    fi
+
     NVTE_FLASH_ATTN=0 \
     NVTE_FUSED_ATTN=0 \
     NVTE_UNFUSED_ATTN=1 \
         run_pytest_step "$label" "$junit" true "$@"
 }
 
-run_pytest_step "Ascend TE module smoke tests" "pytest_ascend_backend_smoke.xml" true \
-    "$TE_PATH/tests/plugin/backend/npu/test_modules.py"
-
-run_pytest_step "Ascend FlagOS operator tests" "pytest_ascend_backend_ops.xml" true \
-    "$TE_PATH/tests/plugin/backend/npu/test_gemm.py"
+run_pytest_step "Ascend vendor NPU backend tests" "pytest_ascend_vendor_npu.xml" false \
+    "$TE_PATH/tests/plugin/backend/npu/test_backend_npu.py"
 
 PLUGIN_TEST_ROOT="$TE_PATH/tests/plugin"
 
