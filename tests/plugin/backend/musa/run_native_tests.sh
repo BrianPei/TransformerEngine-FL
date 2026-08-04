@@ -42,7 +42,7 @@ run_without_cuda_compat() {
 
 run_debug() {
     local feature_dirs="${TE_PATH}/transformer_engine/debug/features"
-    local configs_dir="${TE_PATH}/tests/pytorch/debug/test_configs"
+    local configs_dir="${TE_PATH}/tests/pytorch/debug/test_configs/"
 
     NVTE_TORCH_COMPILE=0 \
     TORCHDYNAMO_DISABLE=1 \
