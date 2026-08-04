@@ -7,6 +7,16 @@ WORKSPACE="${GITHUB_WORKSPACE:-$(pwd)}"
 echo "===== Load Hygon/DTK runtime environment ====="
 source "$WORKSPACE/tests/plugin/backend/hygon/set_env.sh"
 
+# Hygon CI is a reference-backend baseline. Force the selection policy here so
+# inherited shell state cannot silently fall back to FlagOS.
+export TE_FL_SKIP_CUDA=1
+export TE_FL_PREFER=reference
+export NVTE_FRAMEWORK=pytorch
+export NVTE_FLASH_ATTN=0
+export NVTE_FUSED_ATTN=0
+export NVTE_UNFUSED_ATTN=1
+export NVTE_UnfusedDPA_Emulate_FP8=1
+
 echo "===== Verify Hygon device visibility ====="
 if [ "${HYGON_REQUIRE_DEVICE:-1}" = "1" ] && ! command -v hy-smi >/dev/null 2>&1; then
     echo "ERROR: hy-smi is unavailable in the Hygon CI image" >&2
