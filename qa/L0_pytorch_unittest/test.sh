@@ -11,10 +11,6 @@ pip install expecttest
 FAIL=0
 
 IS_CUDA_BACKEND=$(python3 -c "import torch; print('cuda' if torch.cuda.is_available() else 'cpu')" 2>/dev/null)
-IS_MUSA_PLATFORM=false
-if [ "${PLATFORM:-}" = "musa" ] || [ "${PLATFORM:-}" = "mthreads" ]; then
-    IS_MUSA_PLATFORM=true
-fi
 
 test_fail() {
     FAIL=1
@@ -53,23 +49,6 @@ run_test_step() {
         esac
     fi
 
-    if [ "$IS_MUSA_PLATFORM" = "true" ]; then
-        case "$test_path" in
-            *"test_parallel_cross_entropy.py" | \
-            *"test_backend_flagos_softmax.py" | \
-            *"test_cuda_graphs.py" | \
-            *"backend/flagos/test_gemm.py" | \
-            *"backend/reference/test_gemm.py" | \
-            *"backend/flagos/test_lifecycle.py" | \
-            *"backend/reference/test_dropout.py")
-                echo "-------------------------------------------------------"
-                echo "[SKIP] Platform MUSA: Ignoring $label"
-                echo "-------------------------------------------------------"
-                return 0
-                ;;
-        esac
-    fi
-
     if [[ "$IS_CUDA_BACKEND" == *"cuda"* ]]; then
         # transformers library may not be available in CI
         if [[ "$test_path" == *"test_checkpoint.py" || "$test_path" == *"test_cpu_offloading.py" || "$test_path" == *"test_cpu_offloading_v1.py" || "$test_path" == *"test_attention.py" || "$test_path" == *"attention/test_kv_cache.py" || "$test_path" == *"test_hf_integration.py" ]]; then
@@ -91,8 +70,6 @@ run_test_step() {
 # Step: Sanity
 if [ "$PLATFORM" = "metax" ]; then
     SANITY_CMD="python3 -m pytest -s -v --tb=auto --junitxml=$XML_LOG_DIR/pytest_test_sanity.xml $TE_PATH/tests/pytorch/test_sanity.py -k \"not (test_sanity_layernorm_mlp or test_sanity_gpt or test_sanity_bert or test_sanity_T5 or test_sanity_amp_and_nvfuser or test_sanity_drop_path or test_sanity_fused_qkv_params or test_sanity_gradient_accumulation_fusion or test_inference_mode or test_sanity_normalization_amp or test_sanity_layernorm_linear or test_sanity_linear_with_zero_tokens or test_sanity_grouped_linear)\" --no-header"
-elif [ "$IS_MUSA_PLATFORM" = "true" ]; then
-    SANITY_CMD="python3 -m pytest -s -v --tb=auto --junitxml=$XML_LOG_DIR/pytest_test_sanity.xml $TE_PATH/tests/pytorch/test_sanity.py -k \"not (test_sanity_gpt or test_sanity_gpt_126m or test_sanity_bert or test_sanity_T5 or test_sanity_layernorm_mlp or test_sanity_amp_and_nvfuser or test_sanity_drop_path or test_sanity_fused_qkv_params or test_sanity_gradient_accumulation_fusion or test_inference_mode or test_sanity_normalization_amp or test_sanity_layernorm_linear or test_sanity_linear_with_zero_tokens or test_sanity_grouped_linear)\" --no-header"
 else
     SANITY_CMD="python3 -m pytest -s -v --tb=auto --junitxml=$XML_LOG_DIR/pytest_test_sanity.xml $TE_PATH/tests/pytorch/test_sanity.py --no-header"
 fi
@@ -110,8 +87,6 @@ run_test_step "pytest_test_deferred_init.xml" "$TE_PATH/tests/pytorch/test_defer
 # Step: Numerics
 if [ "$PLATFORM" = "metax" ]; then
     NUMERICS_CMD="PYTORCH_JIT=0 NVTE_TORCH_COMPILE=0 NVTE_ALLOW_NONDETERMINISTIC_ALGO=0 NVTE_FUSED_ATTN=0 python3 -m pytest -s -v --tb=auto --junitxml=$XML_LOG_DIR/pytest_test_numerics.xml $TE_PATH/tests/pytorch/test_numerics.py -k \"not (test_layernorm_mlp_accuracy or test_grouped_linear_accuracy or test_gpt_cuda_graph or test_transformer_layer_hidden_states_format or test_grouped_gemm or test_noncontiguous or test_gpt_checkpointing or test_gpt_accuracy or test_mha_accuracy or test_linear_accuracy or test_linear_accuracy_delay_wgrad_compute or test_rmsnorm_accuracy or test_layernorm_accuracy or test_layernorm_linear_accuracy)\" --no-header"
-elif [ "$IS_MUSA_PLATFORM" = "true" ]; then
-    NUMERICS_CMD="PYTORCH_JIT=0 NVTE_TORCH_COMPILE=0 NVTE_ALLOW_NONDETERMINISTIC_ALGO=0 NVTE_FUSED_ATTN=0 python3 -m pytest -s -v --tb=auto --junitxml=$XML_LOG_DIR/pytest_test_numerics.xml $TE_PATH/tests/pytorch/test_numerics.py -k \"not (test_gpt_accuracy or test_mha_accuracy or test_dpa_accuracy or test_gpt_checkpointing or test_gpt_cuda_graph or test_grouped_linear_accuracy or test_grouped_gemm or test_noncontiguous or test_rmsnorm_accuracy or test_layernorm_accuracy or test_linear_accuracy or test_layernorm_linear_accuracy or test_layernorm_mlp_accuracy or test_transformer_layer_hidden_states_format)\" --no-header"
 else
     # CUDA
     NUMERICS_CMD="PYTORCH_JIT=0 NVTE_TORCH_COMPILE=0 NVTE_ALLOW_NONDETERMINISTIC_ALGO=0 NVTE_FUSED_ATTN=0 python3 -m pytest -s -v --tb=auto --junitxml=$XML_LOG_DIR/pytest_test_numerics.xml $TE_PATH/tests/pytorch/test_numerics.py -k \"not (test_linear_accuracy or test_layernorm_linear_accuracy or test_layernorm_mlp_accuracy or test_transformer_layer_hidden_states_format)\" --no-header"
@@ -160,46 +135,20 @@ run_test_step "pytest_test_gqa.xml" "$TE_PATH/tests/pytorch/test_gqa.py" \
 "python3 -m pytest -s -v --tb=auto --junitxml=$XML_LOG_DIR/pytest_test_gqa.xml $TE_PATH/tests/pytorch/test_gqa.py" "test_gqa.py"
 
 # Step: Fused Optimizer
-if [ "$IS_MUSA_PLATFORM" = "true" ]; then
-    FUSED_OPTIMIZER_CMD="python3 -m pytest -s -v --tb=auto --junitxml=$XML_LOG_DIR/pytest_test_fused_optimizer.xml $TE_PATH/tests/pytorch/test_fused_optimizer.py -k \"not test_bf16_exp_avg_and_exp_avg_sq\""
-else
-    FUSED_OPTIMIZER_CMD="python3 -m pytest -s -v --tb=auto --junitxml=$XML_LOG_DIR/pytest_test_fused_optimizer.xml $TE_PATH/tests/pytorch/test_fused_optimizer.py"
-fi
 run_test_step "pytest_test_fused_optimizer.xml" "$TE_PATH/tests/pytorch/test_fused_optimizer.py" \
-"$FUSED_OPTIMIZER_CMD" "test_fused_optimizer.py"
+"python3 -m pytest -s -v --tb=auto --junitxml=$XML_LOG_DIR/pytest_test_fused_optimizer.xml $TE_PATH/tests/pytorch/test_fused_optimizer.py" "test_fused_optimizer.py"
 
 # Step: Multi Tensor
-if [ "$IS_MUSA_PLATFORM" = "true" ]; then
-    MULTI_TENSOR_CMD="python3 -m pytest -s -v --tb=auto --junitxml=$XML_LOG_DIR/pytest_test_multi_tensor.xml $TE_PATH/tests/pytorch/test_multi_tensor.py::test_multi_tensor_compute_scale_and_scale_inv --no-header"
-else
-    MULTI_TENSOR_CMD="python3 -m pytest -s -v --tb=auto --junitxml=$XML_LOG_DIR/pytest_test_multi_tensor.xml $TE_PATH/tests/pytorch/test_multi_tensor.py"
-fi
 run_test_step "pytest_test_multi_tensor.xml" "$TE_PATH/tests/pytorch/test_multi_tensor.py" \
-"$MULTI_TENSOR_CMD" "test_multi_tensor.py"
+"python3 -m pytest -s -v --tb=auto --junitxml=$XML_LOG_DIR/pytest_test_multi_tensor.xml $TE_PATH/tests/pytorch/test_multi_tensor.py" "test_multi_tensor.py"
 
 # Step: Fusible Ops
-if [ "$IS_MUSA_PLATFORM" = "true" ]; then
-    FUSIBLE_OPS_CMD="python3 -m pytest -s -v --tb=auto --junitxml=$XML_LOG_DIR/pytest_test_fusible_ops.xml $TE_PATH/tests/pytorch/test_fusible_ops.py -k \"not (test_layer_norm or test_rmsnorm or test_layernorm_mlp or test_grouped_mlp or test_custom)\""
-else
-    FUSIBLE_OPS_CMD="python3 -m pytest -s -v --tb=auto --junitxml=$XML_LOG_DIR/pytest_test_fusible_ops.xml $TE_PATH/tests/pytorch/test_fusible_ops.py"
-fi
 run_test_step "pytest_test_fusible_ops.xml" "$TE_PATH/tests/pytorch/test_fusible_ops.py" \
-"$FUSIBLE_OPS_CMD" "test_fusible_ops.py"
+"python3 -m pytest -s -v --tb=auto --junitxml=$XML_LOG_DIR/pytest_test_fusible_ops.xml $TE_PATH/tests/pytorch/test_fusible_ops.py" "test_fusible_ops.py"
 
 # Step: Permutation
-if [ "$IS_MUSA_PLATFORM" = "true" ]; then
-    PERMUTATION_CMD="python3 -m pytest -s -v --tb=auto --junitxml=$XML_LOG_DIR/pytest_test_permutation.xml $TE_PATH/tests/pytorch/test_permutation.py \
-        --deselect 'tests/pytorch/test_permutation.py::test_permutation_mask_map[' \
-        --deselect 'tests/pytorch/test_permutation.py::test_permutation_and_padding_mask_map[' \
-        --deselect 'tests/pytorch/test_permutation.py::test_permutation_and_padding_with_merging_probs[' \
-        --deselect 'tests/pytorch/test_permutation.py::test_permutation_mask_map_alongside_probs[' \
-        --deselect 'tests/pytorch/test_permutation.py::test_permutation_mask_map_topk1_no_probs[' \
-        --deselect 'tests/pytorch/test_permutation.py::test_chunk_permutation['"
-else
-    PERMUTATION_CMD="python3 -m pytest -s -v --tb=auto --junitxml=$XML_LOG_DIR/pytest_test_permutation.xml $TE_PATH/tests/pytorch/test_permutation.py"
-fi
 run_test_step "pytest_test_permutation.xml" "$TE_PATH/tests/pytorch/test_permutation.py" \
-"$PERMUTATION_CMD" "test_permutation.py"
+"python3 -m pytest -s -v --tb=auto --junitxml=$XML_LOG_DIR/pytest_test_permutation.xml $TE_PATH/tests/pytorch/test_permutation.py" "test_permutation.py"
 
 # Step: Parallel Cross Entropy
 run_test_step "pytest_test_parallel_cross_entropy.xml" "$TE_PATH/tests/pytorch/test_parallel_cross_entropy.py" \

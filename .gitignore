@@ -24,8 +24,6 @@ __pycache__
 tests/cpp/build/
 .ipynb_checkpoints
 *.log
-logs/
-qa_logs/
 *.mudmp
 CMakeFiles/CMakeSystem.cmake
 sdist/

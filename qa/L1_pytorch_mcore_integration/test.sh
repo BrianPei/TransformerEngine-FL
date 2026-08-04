@@ -28,9 +28,7 @@ retry_command() {
 }
 
 detect_platform() {
-    if [ "${PLATFORM:-}" = "musa" ] || [ "${PLATFORM:-}" = "mthreads" ]; then
-        echo musa
-    elif command -v nvidia-smi &>/dev/null; then
+    if command -v nvidia-smi &>/dev/null; then
         echo cuda
     elif command -v mx-smi &>/dev/null || [ -d /opt/maca ]; then
         echo metax
@@ -51,17 +49,8 @@ detect_platform() {
 : "${PLATFORM:=$(detect_platform)}"
 : "${TE_FL_PREFER:=vendor}"
 
-if [ "${PLATFORM}" = "musa" ] || [ "${PLATFORM}" = "mthreads" ]; then
-    : "${DISTRIBUTED_BACKEND:=gloo}"
-    : "${NUM_LAYERS:=2}"
-    : "${HIDDEN_SIZE:=128}"
-    : "${NUM_ATTENTION_HEADS:=4}"
-    : "${SEQ_LENGTH:=128}"
-    : "${MICRO_BATCH_SIZE:=1}"
-    : "${GLOBAL_BATCH_SIZE:=1}"
-    : "${ENABLE_DIAGNOSTICS:=0}"
-elif [ "${PLATFORM}" = "ascend" ]; then
-    : "${DISTRIBUTED_BACKEND:=nccl}"
+: "${DISTRIBUTED_BACKEND:=nccl}"
+if [ "${PLATFORM}" = "ascend" ]; then
     : "${NUM_LAYERS:=2}"
     : "${HIDDEN_SIZE:=128}"
     : "${NUM_ATTENTION_HEADS:=4}"
@@ -70,7 +59,6 @@ elif [ "${PLATFORM}" = "ascend" ]; then
     : "${GLOBAL_BATCH_SIZE:=1}"
     : "${ENABLE_DIAGNOSTICS:=0}"
 else
-    : "${DISTRIBUTED_BACKEND:=nccl}"
     : "${NUM_LAYERS:=12}"
     : "${HIDDEN_SIZE:=512}"
     : "${NUM_ATTENTION_HEADS:=8}"
@@ -104,55 +92,6 @@ elif command -v mx-smi &>/dev/null; then
     :
 fi
 
-if [ "${PLATFORM}" = "musa" ] || [ "${PLATFORM}" = "mthreads" ]; then
-    if [ "${MUSA_MCORE_FORCE_RUN:-0}" != "1" ]; then
-        if timeout "${MUSA_MCORE_BACKEND_CHECK_TIMEOUT:-15}s" python3 - <<'PY'
-import os
-import sys
-import tempfile
-
-import torch
-import torch.distributed as dist
-
-backend = os.environ["DISTRIBUTED_BACKEND"]
-if backend not in {"nccl", "gloo"}:
-    print(f"[SKIP] MUSA MCore integration: Megatron-LM-FL accepts nccl/gloo, not {backend}.")
-    sys.exit(1)
-
-if backend == "nccl" and not dist.is_nccl_available():
-    print("[SKIP] MUSA MCore integration: NCCL is not built in the current torch image.")
-    sys.exit(1)
-
-if backend == "gloo":
-    path = tempfile.mktemp(prefix="te_mcore_musa_gloo_")
-    try:
-        dist.init_process_group(
-            backend="gloo",
-            init_method=f"file://{path}",
-            rank=0,
-            world_size=1,
-        )
-        tensor = torch.ones(1, device="musa")
-        dist.all_reduce(tensor)
-    except Exception as exc:
-        print(f"[SKIP] MUSA MCore integration: gloo cannot all_reduce MUSA tensors: {exc}")
-        sys.exit(1)
-    finally:
-        if dist.is_initialized():
-            try:
-                dist.destroy_process_group()
-            except Exception:
-                pass
-PY
-        then
-            :
-        else
-            echo "[SKIP] MUSA MCore integration: current torch image has no usable MUSA tensor collective backend."
-            exit 0
-        fi
-    fi
-fi
-
 # Download or sync Megatron-LM-FL to the requested repo/ref.
 if [ ! -d "${MCORE_PATH}" ]; then
     mkdir -p "$(dirname "${MCORE_PATH}")"
@@ -163,13 +102,9 @@ if [ ! -d "${MCORE_PATH}" ]; then
 fi
 
 if [ -d "${MCORE_PATH}/.git" ]; then
-    if git -C "${MCORE_PATH}" rev-parse --verify --quiet "${MCORE_REF}^{commit}" >/dev/null; then
-        git -C "${MCORE_PATH}" checkout --detach --force "${MCORE_REF}"
-    else
-        git -C "${MCORE_PATH}" remote set-url origin "${MCORE_REPO_URL}"
-        retry_command 3 5 git -C "${MCORE_PATH}" fetch --depth 1 origin "${MCORE_REF}"
-        git -C "${MCORE_PATH}" checkout --detach --force "FETCH_HEAD"
-    fi
+    git -C "${MCORE_PATH}" remote set-url origin "${MCORE_REPO_URL}"
+    retry_command 3 5 git -C "${MCORE_PATH}" fetch --depth 1 origin "${MCORE_REF}"
+    git -C "${MCORE_PATH}" checkout --detach --force "FETCH_HEAD"
 else
     echo "Megatron-LM-FL checkout is not a Git repository: ${MCORE_PATH}" >&2
     exit 1
