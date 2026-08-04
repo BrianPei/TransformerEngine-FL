@@ -6,7 +6,7 @@ on:
       platform:
         required: true
         type: string
-        description: Platform name (e.g., cuda, default)
+        description: Platform configuration name
       run_unit_tests:
         required: false
         type: boolean
@@ -27,12 +27,21 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       ci_image: ${{ steps.config.outputs.ci_image }}
+      container_pull_policy: ${{ steps.config.outputs.container_pull_policy }}
       runs_on: ${{ steps.config.outputs.runs_on }}
       container_volumes: ${{ steps.config.outputs.container_volumes }}
       container_options: ${{ steps.config.outputs.container_options }}
       device_types: ${{ steps.config.outputs.device_types }}
       setup_script: ${{ steps.config.outputs.setup_script }}
-      build_env: ${{ steps.config.outputs.build_env }}
+      checkout_submodules: ${{ steps.config.outputs.checkout_submodules }}
+      unit_test_matrix: ${{ steps.config.outputs.unit_test_matrix }}
+      integration_test_matrix: ${{ steps.config.outputs.integration_test_matrix }}
+      coverage_enabled: ${{ steps.config.outputs.coverage_enabled }}
+      coverage_required: ${{ steps.config.outputs.coverage_required }}
+      coverage_sources: ${{ steps.config.outputs.coverage_sources }}
+      coverage_include: ${{ steps.config.outputs.coverage_include }}
+      coverage_omit: ${{ steps.config.outputs.coverage_omit }}
+      coverage_python: ${{ steps.config.outputs.coverage_python }}
     steps:
       - name: Checkout source code
         uses: actions/checkout@v4
@@ -55,6 +64,9 @@ jobs:
           CI_IMAGE=$(yq '.ci_image' "$CONFIG_FILE")
           echo "ci_image=$CI_IMAGE" >> $GITHUB_OUTPUT
 
+          CONTAINER_PULL_POLICY=$(yq '.container_pull_policy // "never"' "$CONFIG_FILE")
+          echo "container_pull_policy=$CONTAINER_PULL_POLICY" >> $GITHUB_OUTPUT
+
           # Read runner labels and format as JSON array
           RUNS_ON=$(yq '.runner_labels | tojson(0)' "$CONFIG_FILE")
           echo "runs_on=$RUNS_ON" >> $GITHUB_OUTPUT
@@ -75,9 +87,40 @@ jobs:
           SETUP_SCRIPT=$(yq '.setup_script // ""' "$CONFIG_FILE")
           echo "setup_script=$SETUP_SCRIPT" >> $GITHUB_OUTPUT
 
-          # Read build environment variables (default to empty object if not defined)
-          BUILD_ENV=$(yq '.build_env // {} | tojson(0)' "$CONFIG_FILE")
-          echo "build_env=$BUILD_ENV" >> $GITHUB_OUTPUT
+          CHECKOUT_SUBMODULES=$(yq '.checkout_submodules // "false"' "$CONFIG_FILE")
+          echo "checkout_submodules=$CHECKOUT_SUBMODULES" >> $GITHUB_OUTPUT
+
+          UNIT_TEST_MATRIX=$(yq '.unit_test_matrix | tojson(0)' "$CONFIG_FILE")
+          if [ "$UNIT_TEST_MATRIX" = "null" ] || [ "$UNIT_TEST_MATRIX" = "[]" ]; then
+            echo "unit_test_matrix must be defined in $CONFIG_FILE" >&2
+            exit 1
+          fi
+          echo "unit_test_matrix=$UNIT_TEST_MATRIX" >> $GITHUB_OUTPUT
+
+          INTEGRATION_TEST_MATRIX=$(yq '.integration_test_matrix // [] | tojson(0)' "$CONFIG_FILE")
+          if [ "${{ inputs.run_integration_tests }}" = "true" ] && \
+             { [ "$INTEGRATION_TEST_MATRIX" = "null" ] || [ "$INTEGRATION_TEST_MATRIX" = "[]" ]; }; then
+            echo "integration_test_matrix must be defined in $CONFIG_FILE" >&2
+            exit 1
+          fi
+          echo "integration_test_matrix=$INTEGRATION_TEST_MATRIX" >> $GITHUB_OUTPUT
+
+          COVERAGE_ENABLED=$(yq '.coverage.enabled // false' "$CONFIG_FILE")
+          COVERAGE_REQUIRED=$(yq '.coverage.required // false' "$CONFIG_FILE")
+          COVERAGE_SOURCES=$(yq '.coverage.sources // [] | join(",")' "$CONFIG_FILE")
+          COVERAGE_INCLUDE=$(yq '.coverage.include // [] | join(",")' "$CONFIG_FILE")
+          COVERAGE_OMIT=$(yq '.coverage.omit // [] | join(",")' "$CONFIG_FILE")
+          COVERAGE_PYTHON=$(yq '.coverage.python // "python3"' "$CONFIG_FILE")
+          if [ "$COVERAGE_ENABLED" = "true" ] && [ -z "$COVERAGE_SOURCES" ]; then
+            echo "coverage.sources must define at least one importable package or directory in $CONFIG_FILE" >&2
+            exit 1
+          fi
+          echo "coverage_enabled=$COVERAGE_ENABLED" >> $GITHUB_OUTPUT
+          echo "coverage_required=$COVERAGE_REQUIRED" >> $GITHUB_OUTPUT
+          echo "coverage_sources=$COVERAGE_SOURCES" >> $GITHUB_OUTPUT
+          echo "coverage_include=$COVERAGE_INCLUDE" >> $GITHUB_OUTPUT
+          echo "coverage_omit=$COVERAGE_OMIT" >> $GITHUB_OUTPUT
+          echo "coverage_python=$COVERAGE_PYTHON" >> $GITHUB_OUTPUT
 
   unit_tests:
     name: unit_tests
@@ -93,11 +136,19 @@ jobs:
       platform: ${{ inputs.platform }}
       device: ${{ matrix.device }}
       image: ${{ needs.checkout_and_config.outputs.ci_image }}
+      container_pull_policy: ${{ needs.checkout_and_config.outputs.container_pull_policy }}
       runs_on: ${{ needs.checkout_and_config.outputs.runs_on }}
       container_volumes: ${{ needs.checkout_and_config.outputs.container_volumes }}
       container_options: ${{ needs.checkout_and_config.outputs.container_options }}
       setup_script: ${{ needs.checkout_and_config.outputs.setup_script }}
-      build_env: ${{ needs.checkout_and_config.outputs.build_env }}
+      checkout_submodules: ${{ needs.checkout_and_config.outputs.checkout_submodules }}
+      test_matrix: ${{ needs.checkout_and_config.outputs.unit_test_matrix }}
+      coverage_enabled: ${{ fromJson(needs.checkout_and_config.outputs.coverage_enabled) }}
+      coverage_required: ${{ fromJson(needs.checkout_and_config.outputs.coverage_required) }}
+      coverage_sources: ${{ needs.checkout_and_config.outputs.coverage_sources }}
+      coverage_include: ${{ needs.checkout_and_config.outputs.coverage_include }}
+      coverage_omit: ${{ needs.checkout_and_config.outputs.coverage_omit }}
+      coverage_python: ${{ needs.checkout_and_config.outputs.coverage_python }}
 
   unit_tests_complete:
     name: unit_tests_complete
@@ -117,7 +168,10 @@ jobs:
 
   integration_tests:
     name: integration_tests
-    if: inputs.run_integration_tests
+    if: >-
+      always() && inputs.run_integration_tests &&
+      (needs.unit_tests_complete.result == 'success' ||
+      needs.unit_tests_complete.result == 'skipped')
     needs:
       - checkout_and_config
       - unit_tests_complete
@@ -127,14 +181,15 @@ jobs:
         device: ${{ fromJson(needs.checkout_and_config.outputs.device_types) }}
     uses: ./.github/workflows/integration_tests_common.yml
     with:
-      platform: ${{ inputs.platform }}
       device: ${{ matrix.device }}
       image: ${{ needs.checkout_and_config.outputs.ci_image }}
+      container_pull_policy: ${{ needs.checkout_and_config.outputs.container_pull_policy }}
       runs_on: ${{ needs.checkout_and_config.outputs.runs_on }}
       container_volumes: ${{ needs.checkout_and_config.outputs.container_volumes }}
       container_options: ${{ needs.checkout_and_config.outputs.container_options }}
       setup_script: ${{ needs.checkout_and_config.outputs.setup_script }}
-      build_env: ${{ needs.checkout_and_config.outputs.build_env }}
+      checkout_submodules: ${{ needs.checkout_and_config.outputs.checkout_submodules }}
+      test_matrix: ${{ needs.checkout_and_config.outputs.integration_test_matrix }}
 
   integration_tests_complete:
     name: integration_tests_complete
