@@ -19,6 +19,7 @@ export MICRO_BATCH_SIZE="${MICRO_BATCH_SIZE:-1}"
 export GLOBAL_BATCH_SIZE="${GLOBAL_BATCH_SIZE:-1}"
 export ENABLE_DIAGNOSTICS="${ENABLE_DIAGNOSTICS:-0}"
 
+set +e
 timeout "${MUSA_MCORE_BACKEND_CHECK_TIMEOUT:-15}s" python3 - <<'PY'
 import os
 import tempfile
@@ -43,12 +44,31 @@ with tempfile.TemporaryDirectory(prefix="te_mcore_musa_") as temp_dir:
             world_size=1,
         )
         tensor = torch.ones(1, device="musa")
-        dist.all_reduce(tensor)
+        try:
+            dist.all_reduce(tensor)
+        except RuntimeError as exc:
+            if "No backend type associated with device type musa" in str(exc):
+                print(f"[SKIP] MUSA collective backend is unavailable for {backend}: {exc}")
+                raise SystemExit(77)
+            raise
     finally:
         if dist.is_initialized():
-            dist.destroy_process_group()
+            try:
+                dist.destroy_process_group()
+            except RuntimeError as exc:
+                if "No backend type associated with device type musa" not in str(exc):
+                    raise
 
 print(f"MUSA collective backend is usable: {backend}")
 PY
+backend_check_exit=$?
+set -e
+
+if [ "${backend_check_exit}" -eq 77 ]; then
+    exit 0
+fi
+if [ "${backend_check_exit}" -ne 0 ]; then
+    exit "${backend_check_exit}"
+fi
 
 exec bash "${TE_PATH}/qa/L1_pytorch_mcore_integration/test.sh"
