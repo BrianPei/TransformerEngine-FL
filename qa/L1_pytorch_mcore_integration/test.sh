@@ -110,6 +110,10 @@ else
     exit 1
 fi
 
+if [ "${DISTRIBUTED_BACKEND}" = "mccl" ]; then
+    python3 "${TE_PATH}/tests/integration/musa/patch_megatron_mccl.py" "${MCORE_PATH}"
+fi
+
 # Megatron-LM-FL tokenizer imports happen at module import time, so direct
 # source execution needs these Python deps available before pretrain_gpt.py
 # starts.

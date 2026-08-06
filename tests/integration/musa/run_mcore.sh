@@ -10,7 +10,7 @@ SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 
 export PLATFORM=mthreads
 export TE_FL_PREFER="${TE_FL_PREFER:-vendor}"
-export DISTRIBUTED_BACKEND="${DISTRIBUTED_BACKEND:-gloo}"
+export DISTRIBUTED_BACKEND="${DISTRIBUTED_BACKEND:-mccl}"
 export NUM_LAYERS="${NUM_LAYERS:-2}"
 export HIDDEN_SIZE="${HIDDEN_SIZE:-128}"
 export NUM_ATTENTION_HEADS="${NUM_ATTENTION_HEADS:-4}"
@@ -19,18 +19,18 @@ export MICRO_BATCH_SIZE="${MICRO_BATCH_SIZE:-1}"
 export GLOBAL_BATCH_SIZE="${GLOBAL_BATCH_SIZE:-1}"
 export ENABLE_DIAGNOSTICS="${ENABLE_DIAGNOSTICS:-0}"
 
-set +e
 timeout "${MUSA_MCORE_BACKEND_CHECK_TIMEOUT:-15}s" python3 - <<'PY'
 import os
 import tempfile
 
 import torch
+import torch_musa  # noqa: F401
 import torch.distributed as dist
 
 backend = os.environ["DISTRIBUTED_BACKEND"]
-if backend not in {"nccl", "gloo"}:
+if backend not in {"mccl", "nccl", "gloo"}:
     raise RuntimeError(
-        f"Megatron-LM-FL accepts nccl/gloo, not MUSA backend {backend!r}"
+        f"MUSA integration launcher accepts mccl/nccl/gloo, not {backend!r}"
     )
 if backend == "nccl" and not dist.is_nccl_available():
     raise RuntimeError("NCCL is not available in the current MUSA torch image")
@@ -44,31 +44,12 @@ with tempfile.TemporaryDirectory(prefix="te_mcore_musa_") as temp_dir:
             world_size=1,
         )
         tensor = torch.ones(1, device="musa")
-        try:
-            dist.all_reduce(tensor)
-        except RuntimeError as exc:
-            if "No backend type associated with device type musa" in str(exc):
-                print(f"[SKIP] MUSA collective backend is unavailable for {backend}: {exc}")
-                raise SystemExit(77)
-            raise
+        dist.all_reduce(tensor)
     finally:
         if dist.is_initialized():
-            try:
-                dist.destroy_process_group()
-            except RuntimeError as exc:
-                if "No backend type associated with device type musa" not in str(exc):
-                    raise
+            dist.destroy_process_group()
 
 print(f"MUSA collective backend is usable: {backend}")
 PY
-backend_check_exit=$?
-set -e
-
-if [ "${backend_check_exit}" -eq 77 ]; then
-    exit 0
-fi
-if [ "${backend_check_exit}" -ne 0 ]; then
-    exit "${backend_check_exit}"
-fi
 
 exec bash "${TE_PATH}/qa/L1_pytorch_mcore_integration/test.sh"
