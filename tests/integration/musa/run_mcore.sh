@@ -12,6 +12,7 @@ export PLATFORM=mthreads
 export TE_FL_PREFER="${TE_FL_PREFER:-vendor}"
 export TE_FL_PER_OP="${TE_FL_PER_OP:-layernorm_fwd=reference|flagos|vendor;layernorm_bwd=reference|flagos|vendor}"
 export DISTRIBUTED_BACKEND="${DISTRIBUTED_BACKEND:-mccl}"
+export PYTHONPATH="${TE_PATH}:${PYTHONPATH:-}"
 export NUM_LAYERS="${NUM_LAYERS:-2}"
 export HIDDEN_SIZE="${HIDDEN_SIZE:-128}"
 export NUM_ATTENTION_HEADS="${NUM_ATTENTION_HEADS:-4}"
