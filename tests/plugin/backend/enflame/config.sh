@@ -6,7 +6,7 @@
 ENFLAME_CONFIG_FILE="${ENFLAME_CONFIG_FILE:-${GITHUB_WORKSPACE:-$(pwd)}/.github/configs/enflame.yml}"
 if [ -z "${ENFLAME_NPROC_PER_NODE:-}" ]; then
     ENFLAME_NPROC_PER_NODE="$(
-        ENFLAME_CONFIG_FILE="$ENFLAME_CONFIG_FILE" python3 - <<'PY'
+        PYTHONPATH= ENFLAME_CONFIG_FILE="$ENFLAME_CONFIG_FILE" python3 - <<'PY'
 import os
 from pathlib import Path
 
