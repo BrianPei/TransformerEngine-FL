@@ -3,23 +3,10 @@
 from __future__ import annotations
 
 import os
-import importlib.metadata
 
 
 def _skip(reason: str):
     return False, reason
-
-
-def _skip_cuda_flash_attention() -> None:
-    """Treat CUDA flash-attn wheels as unavailable in Enflame tests."""
-    original_version = importlib.metadata.version
-
-    def _version(distribution_name: str):
-        if distribution_name in {"flash-attn", "flash-attn-3"}:
-            raise importlib.metadata.PackageNotFoundError(distribution_name)
-        return original_version(distribution_name)
-
-    importlib.metadata.version = _version
 
 
 def apply_enflame_patch() -> None:
@@ -32,8 +19,6 @@ def apply_enflame_patch() -> None:
         from torch_gcu import transfer_to_gcu  # noqa: F401
     except Exception:
         return
-
-    _skip_cuda_flash_attention()
 
     import transformer_engine
 
