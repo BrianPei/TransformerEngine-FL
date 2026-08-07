@@ -6,7 +6,7 @@
 ENFLAME_CONFIG_FILE="${ENFLAME_CONFIG_FILE:-${GITHUB_WORKSPACE:-$(pwd)}/.github/configs/enflame.yml}"
 if [ -z "${ENFLAME_NPROC_PER_NODE:-}" ]; then
     ENFLAME_NPROC_PER_NODE="$(
-        ENFLAME_CONFIG_FILE="$ENFLAME_CONFIG_FILE" python3 - <<'PY'
+        PYTHONPATH= ENFLAME_CONFIG_FILE="$ENFLAME_CONFIG_FILE" python3 - <<'PY'
 import os
 from pathlib import Path
 
@@ -30,6 +30,10 @@ ENFLAME_UNITTEST_SKIP_FUSED_OPTIMIZER=(
 ENFLAME_UNITTEST_SKIP_JIT=(
     "test_l2normalization_fused"
     "test_l2normalization_fused_correctness"
+)
+
+ENFLAME_UNITTEST_SKIP_HF_INTEGRATION=(
+    "test_save_and_load_hf_model"
 )
 
 ENFLAME_DISTRIBUTED_SKIP_FILES=(

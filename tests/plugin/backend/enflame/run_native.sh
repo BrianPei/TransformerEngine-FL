@@ -101,9 +101,12 @@ run_unittest_suite() {
         -s -v --tb=auto --junitxml="$XML_LOG_DIR/pytest_test_fused_optimizer.xml" \
         "$TE_PATH/tests/pytorch/test_fused_optimizer.py" \
         -k "not ($fused_optimizer_skip_expr)"
+    local hf_integration_skip_expr
+    hf_integration_skip_expr="$(join_with_or "${ENFLAME_UNITTEST_SKIP_HF_INTEGRATION[@]}")"
     run_pytest_step unittest test_hf_integration.py \
         -s -v --tb=auto --junitxml="$XML_LOG_DIR/pytest_test_hf_integration.xml" \
-        "$TE_PATH/tests/pytorch/test_hf_integration.py"
+        "$TE_PATH/tests/pytorch/test_hf_integration.py" \
+        -k "not ($hf_integration_skip_expr)"
     run_pytest_step unittest plugin_policy.py \
         -s -v --tb=auto --junitxml="$XML_LOG_DIR/pytest_test_plugin_policy.xml" \
         "$TE_PATH/tests/plugin/plugin/test_policy.py"

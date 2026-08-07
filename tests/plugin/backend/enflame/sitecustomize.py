@@ -2,11 +2,34 @@
 
 from __future__ import annotations
 
+import importlib.metadata
 import os
+import sys
+import types
 
 
 def _skip(reason: str):
     return False, reason
+
+
+def _disable_flash_attention_imports() -> None:
+    original_version = importlib.metadata.version
+
+    def _version(distribution_name: str):
+        if distribution_name in {"flash-attn", "flash-attn-3"}:
+            raise importlib.metadata.PackageNotFoundError(distribution_name)
+        return original_version(distribution_name)
+
+    importlib.metadata.version = _version
+
+    if "flash_attn_2_cuda" not in sys.modules:
+        stub = types.ModuleType("flash_attn_2_cuda")
+
+        def _unavailable(*_args, **_kwargs):
+            raise RuntimeError("flash_attn_2_cuda is disabled on Enflame/GCU")
+
+        stub.varlen_bwd = _unavailable
+        sys.modules["flash_attn_2_cuda"] = stub
 
 
 def apply_enflame_patch() -> None:
@@ -19,6 +42,8 @@ def apply_enflame_patch() -> None:
         from torch_gcu import transfer_to_gcu  # noqa: F401
     except Exception:
         return
+
+    _disable_flash_attention_imports()
 
     import transformer_engine
 
