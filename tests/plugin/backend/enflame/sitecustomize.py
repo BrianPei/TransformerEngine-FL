@@ -36,14 +36,14 @@ def apply_enflame_patch() -> None:
     if os.environ.get("ENFLAME_ENABLE_PATCHES", "1") != "1":
         return
 
+    _disable_flash_attention_imports()
+
     try:
         import torch
         import torch_gcu
         from torch_gcu import transfer_to_gcu  # noqa: F401
     except Exception:
         return
-
-    _disable_flash_attention_imports()
 
     import transformer_engine
 
