@@ -16,7 +16,6 @@ container_volumes:
 
 container_options: >-
   --privileged
-  --gpus all
   --ipc=host
   --shm-size=100g
   --ulimit memlock=-1
