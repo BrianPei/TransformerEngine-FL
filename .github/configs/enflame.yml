@@ -5,7 +5,7 @@ hardware_name: enflame
 display_name: 'Enflame GCU'
 checkout_submodules: 'false'
 
-ci_image: harbor.baai.ac.cn/flagos-dev/transformerengine-fl:20260808-enflame-torch210
+ci_image: harbor.baai.ac.cn/flagos-dev/transformerengine-fl:manual-20260808-enflame-dev
 container_pull_policy: always
 
 runner_labels:
@@ -71,3 +71,7 @@ unit_test_matrix:
     runner: script
     path: tests/plugin/backend/enflame/run_native.sh
     args: [onnx]
+
+integration_test_matrix:
+  - name: pytorch_mcore_integration
+    path: tests/plugin/backend/enflame/run_integration.sh
