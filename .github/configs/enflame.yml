@@ -11,8 +11,7 @@ container_pull_policy: always
 runner_labels:
   - sy-8g-cicd-te
 
-container_volumes:
-  - /usr/local/gcu:/usr/local/gcu
+container_volumes: []
 
 container_options: >-
   --privileged
