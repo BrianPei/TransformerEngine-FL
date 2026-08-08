@@ -22,7 +22,6 @@ if [ -n "${GITHUB_ENV:-}" ]; then
         echo "NVTE_FUSED_ATTN=$NVTE_FUSED_ATTN"
         echo "NVTE_UNFUSED_ATTN=$NVTE_UNFUSED_ATTN"
         echo "NVTE_UnfusedDPA_Emulate_FP8=$NVTE_UnfusedDPA_Emulate_FP8"
-        echo "ENFLAME_ENABLE_PATCHES=$ENFLAME_ENABLE_PATCHES"
         echo "ENFLAME_CONFIG_FILE=$ENFLAME_CONFIG_FILE"
     } >> "$GITHUB_ENV"
 fi
