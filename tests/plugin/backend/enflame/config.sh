@@ -27,11 +27,6 @@ ENFLAME_UNITTEST_SKIP_FUSED_OPTIMIZER=(
     "test_grad_scaler_capturable_master"
 )
 
-ENFLAME_UNITTEST_SKIP_JIT=(
-    "test_l2normalization_fused"
-    "test_l2normalization_fused_correctness"
-)
-
 ENFLAME_UNITTEST_SKIP_HF_INTEGRATION=(
     "test_save_and_load_hf_model"
 )

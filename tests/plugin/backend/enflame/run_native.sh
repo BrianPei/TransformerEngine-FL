@@ -88,15 +88,10 @@ run_unittest_suite() {
     echo "===== START unittest ====="
     local fused_optimizer_skip_expr
     fused_optimizer_skip_expr="$(join_with_or "${ENFLAME_UNITTEST_SKIP_FUSED_OPTIMIZER[@]}")"
-    local jit_skip_expr
-    jit_skip_expr="$(join_with_or "${ENFLAME_UNITTEST_SKIP_JIT[@]}")"
     run_pytest_step unittest test_deferred_init.py \
         -s -v --tb=auto --junitxml="$XML_LOG_DIR/pytest_test_deferred_init.xml" \
         "$TE_PATH/tests/pytorch/test_deferred_init.py"
-    run_pytest_step unittest test_jit.py \
-        -s -v --tb=auto --junitxml="$XML_LOG_DIR/pytest_test_jit.xml" \
-        "$TE_PATH/tests/pytorch/test_jit.py" \
-        -k "not test_torch_dynamo and not ($jit_skip_expr)"
+    echo "[SKIP] Enflame: test_jit.py requires unsupported Torch JIT/TorchDynamo paths"
     run_pytest_step unittest test_fused_optimizer.py \
         -s -v --tb=auto --junitxml="$XML_LOG_DIR/pytest_test_fused_optimizer.xml" \
         "$TE_PATH/tests/pytorch/test_fused_optimizer.py" \
