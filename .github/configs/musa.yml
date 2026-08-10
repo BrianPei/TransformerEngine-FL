@@ -60,17 +60,17 @@ coverage:
 unit_test_matrix:
   - name: pytorch_debug
     runner: script
-    path: tests/plugin/backend/musa/run_native_tests.sh
+    path: tests/plugin/backend/musa/run_unit_tests.sh
   - name: pytorch_unittest
     runner: script
-    path: tests/plugin/backend/musa/run_native_tests.sh
+    path: tests/plugin/backend/musa/run_unit_tests.sh
   - name: pytorch_distributed_utils
     runner: script
-    path: tests/plugin/backend/musa/run_native_tests.sh
+    path: tests/plugin/backend/musa/run_unit_tests.sh
   - name: pytorch_onnx_unittest
     runner: script
-    path: tests/plugin/backend/musa/run_native_tests.sh
+    path: tests/plugin/backend/musa/run_unit_tests.sh
 
 integration_test_matrix:
   - name: pytorch_mcore_integration
-    path: tests/integration/musa/run_mcore.sh
+    path: tests/plugin/backend/musa/run_integration_tests.sh

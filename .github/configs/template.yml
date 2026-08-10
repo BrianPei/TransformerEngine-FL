@@ -41,24 +41,28 @@ coverage:
     - '*/setup.py'
     - '*/transformer_engine/plugin/core/_build_config.py'
 
-# A script group preserves an existing QA entry point. A pytest group may
-# instead declare pytest_args, env, log_dir, and a list of test steps.
+# Platform-owned launchers live under tests/plugin/backend/<platform>/.
+# A pytest group may instead declare pytest_args, env, log_dir, and steps.
 unit_test_matrix:
   - name: pytorch_debug
     runner: script
-    path: qa/L0_pytorch_debug_unittest/test.sh
+    path: tests/plugin/backend/example/run_unit_tests.sh
+    args: [debug]
   - name: pytorch_unittest
     runner: script
-    path: qa/L0_pytorch_unittest/test.sh
+    path: tests/plugin/backend/example/run_unit_tests.sh
+    args: [unittest]
   - name: pytorch_distributed_unittest
     runner: script
-    path: qa/L1_pytorch_distributed_unittest/test.sh
+    path: tests/plugin/backend/example/run_unit_tests.sh
+    args: [distributed]
   - name: pytorch_onnx_unittest
     runner: script
-    path: qa/L1_pytorch_onnx_unittest/test.sh
+    path: tests/plugin/backend/example/run_unit_tests.sh
+    args: [onnx]
 
 # Integration groups use the same common workflow. Put test-specific
 # environment defaults in the test script, not in the workflow.
 integration_test_matrix:
   - name: pytorch_mcore_integration
-    path: qa/L1_pytorch_mcore_integration/test.sh
+    path: tests/plugin/backend/example/run_integration_tests.sh

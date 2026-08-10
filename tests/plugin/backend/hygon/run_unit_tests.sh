@@ -11,7 +11,7 @@ FAILED_CASES=()
 
 usage() {
     cat <<'EOF'
-Usage: tests/plugin/backend/hygon/run_native.sh [debug] [unittest] [distributed] [onnx]
+Usage: tests/plugin/backend/hygon/run_unit_tests.sh [debug] [unittest] [distributed] [onnx]
 
 Runs the selected Hygon/DTK reference-baseline test group.
 If no suite is specified, all suites are run.

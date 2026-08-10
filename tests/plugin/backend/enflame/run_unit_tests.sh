@@ -11,7 +11,7 @@ FAILED_CASES=()
 
 usage() {
     cat <<'EOF'
-Usage: tests/plugin/backend/enflame/run_native.sh [debug] [unittest] [distributed] [onnx]
+Usage: tests/plugin/backend/enflame/run_unit_tests.sh [debug] [unittest] [distributed] [onnx]
 
 Runs the selected Enflame/GCU test group.
 If no suite is specified, all suites are run.
