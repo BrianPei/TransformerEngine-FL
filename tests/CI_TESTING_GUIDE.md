@@ -22,6 +22,8 @@ The common execution path is:
 ```text
 all_tests_<platform>.yml
   -> all_tests_common.yml
+     -> optional build_test_artifact
+        -> build one installable artifact without accelerator devices
      -> unit_tests_common.yml
         -> setup_<platform>.sh
         -> tests/test_utils/run_ci_test_group.py
@@ -89,6 +91,7 @@ metadata and fields consumed by the common workflows are:
 | `device_types` | Device values used to expand the CI matrix |
 | `checkout_submodules` | Checkout submodule mode; defaults to `false` |
 | `setup_script` | Repository-relative platform setup script |
+| `test_artifact` | Optional build-once artifact shared by all test jobs |
 | `unit_test_matrix` | Named unit-test groups |
 | `integration_test_matrix` | Named integration-test entries |
 | `coverage` | Optional Python coverage configuration |
@@ -97,6 +100,39 @@ Keep the vendor PyTorch stack, accelerator runtime, communication libraries,
 and expensive build dependencies in the image. Setup scripts should validate
 that stack and activate it; they should not silently replace it with packages
 from public package indexes.
+
+### Build-once test artifacts
+
+Platforms that compile the same source package in every matrix job should use
+the optional `test_artifact` contract:
+
+```yaml
+test_artifact:
+  enabled: true
+  build_script: .github/scripts/build_example_test_artifact.sh
+  path: ci-artifacts/example-wheel
+  runner_labels:
+    - example-build-runner
+  container_options: >-
+    --user root
+```
+
+`all_tests_common.yml` runs the build script once, uploads the files under
+`path`, and makes the artifact available to every unit and integration job.
+The reusable test workflows download it before invoking `setup_script` and set
+`TE_CI_ARTIFACT_DIR` to the repository-relative download directory.
+
+The build script and setup script own the artifact format. For a Python wheel,
+the build script should produce exactly the wheel needed by the configured
+image, while setup should install that wheel instead of rebuilding the source.
+Keep the artifact key scoped to the workflow's checked-out commit and do not
+reuse it across incompatible Python, framework, toolkit, ABI, or build flags.
+
+When compilation only needs the vendor toolkit, omit accelerator device
+options from `test_artifact.container_options`. `runner_labels` may select a
+CPU build runner when it can run the same image. If only the accelerator host
+has that image and toolchain, the build can still run there without exposing
+devices; building once still removes repeated compilation from the test matrix.
 
 ### Unit-test matrix
 

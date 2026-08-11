@@ -22,6 +22,18 @@ container_options: >-
 # later steps through GITHUB_ENV.
 setup_script: .github/scripts/setup_example.sh
 
+# Optional: build one installable artifact before the test matrices and reuse
+# it in every unit and integration job. Keep device options out of this build
+# container when compilation does not execute accelerator kernels.
+test_artifact:
+  enabled: false
+  build_script: .github/scripts/build_example_test_artifact.sh
+  path: ci-artifacts/example
+  runner_labels:
+    - example-build-runner
+  container_options: >-
+    --user root
+
 device_types:
   - example
 
