@@ -415,9 +415,9 @@ def dtype2str(dtype: torch.dtype, fake_bf16_io=False):
 
 def as_te_type(dtype: torch.dtype):
     return {
-        torch.float32: tex.DType.kFloat32,
-        torch.float16: tex.DType.kFloat16,
-        torch.bfloat16: tex.DType.kBFloat16,
+        torch.float32: te.DType.kFloat32,
+        torch.float16: te.DType.kFloat16,
+        torch.bfloat16: te.DType.kBFloat16,
     }[dtype]
 
 

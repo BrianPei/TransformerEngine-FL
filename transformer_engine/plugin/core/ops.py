@@ -111,6 +111,8 @@ class NVTE_QKV_Format(IntEnum):
     NVTE_SBHD_2BSHD = 4
     NVTE_THD_2BSHD = 5
     NVTE_THD_2SBHD = 6
+    NVTE_BHSD = 7
+    NVTE_QKV_Format_NOT_SET = 8
 
 
 class NVTE_QKV_Layout(IntEnum):
@@ -139,6 +141,7 @@ class NVTE_QKV_Layout(IntEnum):
     NVTE_Paged_KV_SBHD_SBHD_SBHD = 22
     NVTE_Paged_KV_THD_BSHD_BSHD = 23
     NVTE_Paged_KV_THD_SBHD_SBHD = 24
+    NVTE_BHSD_BHSD_BHSD = 25
 
 
 class CommOverlapType(IntEnum):
@@ -960,22 +963,6 @@ class TEFLBackendBase(ABC):
         rowwise: bool,
         columnwise: bool,
     ) -> None:
-        raise NotImplementedError
-
-    def convert_host_pointers_to_tensor(
-        self,
-        tensor_lists: List[List[torch.Tensor]],
-    ) -> Any:
-        raise NotImplementedError
-
-    def get_device_pointer_for_data_and_scales(
-        self,
-        data_tensors: List[torch.Tensor],
-        scale_tensors: List[torch.Tensor],
-        swizzle: bool = False,
-        rowwise: bool = True,
-        data_dtype: Any = None,
-    ) -> Any:
         raise NotImplementedError
 
     def splits_to_offsets(

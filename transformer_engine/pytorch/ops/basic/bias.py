@@ -10,9 +10,8 @@ from typing import Optional
 import torch
 
 import transformer_engine_torch as tex
-
+from ...quantization import FP8GlobalStateManager
 from transformer_engine import te_device_type
-
 from ..op import BasicOperation, OperationContext
 from ...utils import canonicalize_device, canonicalize_dtype
 from ...tensor import Quantizer
@@ -127,6 +126,10 @@ class Bias(BasicOperation):
 
         if ctx.requires_grad:
             ctx.grad_input_quantizer = prev_op_grad_output_quantizer
+            if FP8GlobalStateManager.is_fp8_enabled():
+                fp8_recipe = FP8GlobalStateManager.get_fp8_recipe()
+                if fp8_recipe.backward_override is not None:
+                    ctx.grad_input_quantizer = None
 
         return x + b
 
