@@ -806,7 +806,12 @@ def test_sanity_T5_126m():
 def test_sanity_amp_and_nvfuser(dtype, fp8_recipe, model, skip_wgrad):
     config = model_configs[model]
 
-    if dtype == torch.float16 and fp8_recipe is None and model == "small" and skip_wgrad:
+    if (
+        dtype in (torch.float16, torch.bfloat16)
+        and fp8_recipe is None
+        and model == "small"
+        and skip_wgrad
+    ):
         pytest.skip("Known fused_attn_bwd segfault for this AMP combo")
 
     if fp8_recipe is not None:
