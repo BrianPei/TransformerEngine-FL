@@ -15,7 +15,6 @@ fi
 
 export TE_PATH="${TE_PATH:-$REPO_ROOT}"
 export XML_LOG_DIR="${XML_LOG_DIR:-$TE_PATH/logs}"
-export PLATFORM="${PLATFORM:-hygon}"
 export TE_FL_SKIP_CUDA="${TE_FL_SKIP_CUDA:-1}"
 export TE_FL_PREFER="${TE_FL_PREFER:-reference}"
 export NVTE_FRAMEWORK="${NVTE_FRAMEWORK:-pytorch}"

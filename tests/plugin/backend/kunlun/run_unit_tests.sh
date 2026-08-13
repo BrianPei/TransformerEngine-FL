@@ -7,7 +7,6 @@ XML_LOG_DIR="${XML_LOG_DIR:-/logs}"
 mkdir -p "$XML_LOG_DIR"
 XML_LOG_ROOT="$XML_LOG_DIR"
 
-export PLATFORM="${PLATFORM:-kunlunxin}"
 export TE_FL_SKIP_CUDA="${TE_FL_SKIP_CUDA:-1}"
 export NVTE_FLASH_ATTN="${NVTE_FLASH_ATTN:-0}"
 export NVTE_FUSED_ATTN="${NVTE_FUSED_ATTN:-0}"
