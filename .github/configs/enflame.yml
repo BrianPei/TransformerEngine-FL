@@ -51,25 +51,9 @@ coverage:
 nproc_per_node: 2
 
 unit_test_matrix:
-  - name: pytorch_debug
-    runner: script
-    path: tests/plugin/backend/enflame/run_unit_tests.sh
-    args: [debug]
-
   - name: pytorch_unittest
     runner: script
     path: tests/plugin/backend/enflame/run_unit_tests.sh
-    args: [unittest]
-
-  - name: pytorch_distributed_unittest
-    runner: script
-    path: tests/plugin/backend/enflame/run_unit_tests.sh
-    args: [distributed]
-
-  - name: pytorch_onnx_unittest
-    runner: script
-    path: tests/plugin/backend/enflame/run_unit_tests.sh
-    args: [onnx]
 
 integration_test_matrix:
   - name: pytorch_mcore_integration

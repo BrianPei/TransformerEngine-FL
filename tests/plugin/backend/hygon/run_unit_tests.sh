@@ -6,7 +6,9 @@ source "$SCRIPT_DIR/set_env.sh"
 source "$SCRIPT_DIR/config.sh"
 
 PYTHON="${PYTHON_BIN:-python3}"
+XML_LOG_ROOT="$XML_LOG_DIR"
 FAIL=0
+OVERALL_FAIL=0
 FAILED_CASES=()
 
 usage() {
@@ -222,10 +224,16 @@ if [ "$#" -eq 0 ]; then
 fi
 
 for suite in "$@"; do
+    FAIL=0
+    export XML_LOG_DIR="$XML_LOG_ROOT/$suite"
+    mkdir -p "$XML_LOG_DIR"
     run_suite "$suite"
+    if [ "$FAIL" -ne 0 ]; then
+        OVERALL_FAIL=1
+    fi
 done
 
-if [ "$FAIL" -ne 0 ]; then
+if [ "$OVERALL_FAIL" -ne 0 ]; then
     echo "Error in the following test cases: ${FAILED_CASES[*]}"
     exit 1
 fi

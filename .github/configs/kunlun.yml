@@ -53,16 +53,7 @@ coverage:
     - '*/transformer_engine/plugin/core/_build_config.py'
 
 unit_test_matrix:
-  - name: pytorch_debug
-    runner: script
-    path: tests/plugin/backend/kunlun/run_unit_tests.sh
   - name: pytorch_unittest
-    runner: script
-    path: tests/plugin/backend/kunlun/run_unit_tests.sh
-  - name: pytorch_distributed_unittest
-    runner: script
-    path: tests/plugin/backend/kunlun/run_unit_tests.sh
-  - name: pytorch_onnx_unittest
     runner: script
     path: tests/plugin/backend/kunlun/run_unit_tests.sh
 

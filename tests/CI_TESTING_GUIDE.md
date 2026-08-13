@@ -92,7 +92,8 @@ metadata and fields consumed by the common workflows are:
 | `checkout_submodules` | Checkout submodule mode; defaults to `false` |
 | `setup_script` | Repository-relative platform setup script |
 | `test_artifact` | Optional build-once artifact shared by all test jobs |
-| `unit_test_matrix` | Named unit-test groups |
+| `unit_test_matrix` | Unit-test job entries; normally one serial launcher |
+| `unit_test_timeout_minutes` | Optional unit-job timeout; defaults to 90 minutes |
 | `integration_test_matrix` | Named integration-test entries |
 | `coverage` | Optional Python coverage configuration |
 
@@ -136,16 +137,14 @@ devices; building once still removes repeated compilation from the test matrix.
 
 ### Unit-test matrix
 
-A script-based group delegates platform behavior to the standard launcher:
+A platform normally defines one unit-test job and lets its standard launcher
+run the debug, PyTorch, distributed, and ONNX suites serially:
 
 ```yaml
 unit_test_matrix:
   - name: pytorch_unittest
     runner: script
     path: tests/plugin/backend/example/run_unit_tests.sh
-    args: [unittest]
-    env:
-      XML_LOG_DIR: logs/L0_pytorch_unittest-example
 ```
 
 `tests/test_utils/run_ci_test_group.py` supports two runner types:
@@ -158,9 +157,12 @@ Use `pytest` for hardware-neutral collections that only need a different pytest
 command. Use `script` when the platform needs multiple commands, runtime
 preflight, conditional groups, or platform-owned failure aggregation.
 
-Every unit group must have a unique `name`. Script paths are repository-relative
-and must remain under `tests/plugin/backend/<platform>/` for platform-owned
-runners.
+Keep a single `pytorch_unittest` entry unless the platform can actually run
+independent entries concurrently. The launcher should run all supported suites
+when called without arguments, retain optional suite arguments for local
+debugging, aggregate failures, and write each suite's JUnit files to a separate
+log subdirectory. Script paths are repository-relative and must remain under
+`tests/plugin/backend/<platform>/` for platform-owned runners.
 
 ### Integration-test matrix
 
@@ -240,7 +242,7 @@ docker run --rm -it \
 Do not replace vendor device options with `--gpus all`. Copy the configured
 runtime and device mappings exactly.
 
-### Run one unit-test group
+### Run the unit-test job
 
 Inside the container:
 
@@ -266,6 +268,13 @@ python3 tests/test_utils/run_ci_test_group.py
 This uses the same group definition and dispatcher as CI. A direct pytest
 command is useful for debugging, but it does not prove that the configured
 runner, environment, exclusions, JUnit output, and coverage behavior work.
+
+To reproduce only one suite while debugging a platform launcher, pass its
+short name directly:
+
+```bash
+bash tests/plugin/backend/enflame/run_unit_tests.sh debug
+```
 
 ### Run one integration test
 
@@ -322,8 +331,8 @@ For platform-specific runtime behavior:
    wrapper; otherwise point to the shared QA entry.
 5. Add `.github/workflows/all_tests_<platform>.yml` calling
    `all_tests_common.yml`.
-6. Validate one unit group and one integration entry before enabling the full
-   matrices.
+6. Validate the serial unit entry and one integration entry before enabling the
+   platform workflow.
 
 A normal platform addition must not require a hardware branch in
 `all_tests_common.yml`, `unit_tests_common.yml`, or

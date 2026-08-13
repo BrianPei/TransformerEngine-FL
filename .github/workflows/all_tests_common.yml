@@ -35,6 +35,7 @@ jobs:
       setup_script: ${{ steps.config.outputs.setup_script }}
       checkout_submodules: ${{ steps.config.outputs.checkout_submodules }}
       unit_test_matrix: ${{ steps.config.outputs.unit_test_matrix }}
+      unit_test_timeout_minutes: ${{ steps.config.outputs.unit_test_timeout_minutes }}
       integration_test_matrix: ${{ steps.config.outputs.integration_test_matrix }}
       coverage_enabled: ${{ steps.config.outputs.coverage_enabled }}
       coverage_required: ${{ steps.config.outputs.coverage_required }}
@@ -133,6 +134,13 @@ jobs:
           fi
           echo "unit_test_matrix=$UNIT_TEST_MATRIX" >> $GITHUB_OUTPUT
 
+          UNIT_TEST_TIMEOUT_MINUTES=$(yq '.unit_test_timeout_minutes // 90' "$CONFIG_FILE")
+          if ! [[ "$UNIT_TEST_TIMEOUT_MINUTES" =~ ^[1-9][0-9]*$ ]]; then
+            echo "unit_test_timeout_minutes must be a positive integer in $CONFIG_FILE" >&2
+            exit 1
+          fi
+          echo "unit_test_timeout_minutes=$UNIT_TEST_TIMEOUT_MINUTES" >> $GITHUB_OUTPUT
+
           INTEGRATION_TEST_MATRIX=$(yq '.integration_test_matrix // [] | tojson(0)' "$CONFIG_FILE")
           if [ "${{ inputs.run_integration_tests }}" = "true" ] && \
              { [ "$INTEGRATION_TEST_MATRIX" = "null" ] || [ "$INTEGRATION_TEST_MATRIX" = "[]" ]; }; then
@@ -226,6 +234,7 @@ jobs:
       setup_script: ${{ needs.checkout_and_config.outputs.setup_script }}
       checkout_submodules: ${{ needs.checkout_and_config.outputs.checkout_submodules }}
       test_matrix: ${{ needs.checkout_and_config.outputs.unit_test_matrix }}
+      timeout_minutes: ${{ fromJson(needs.checkout_and_config.outputs.unit_test_timeout_minutes) }}
       coverage_enabled: ${{ fromJson(needs.checkout_and_config.outputs.coverage_enabled) }}
       coverage_required: ${{ fromJson(needs.checkout_and_config.outputs.coverage_required) }}
       coverage_sources: ${{ needs.checkout_and_config.outputs.coverage_sources }}
