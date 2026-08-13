@@ -4,7 +4,6 @@
 hardware_name: kunlunxin
 display_name: 'KunlunXin XPU'
 checkout_submodules: recursive
-container_pull_policy: always
 
 ci_image: harbor.baai.ac.cn/flagos-dev/transformerengine-fl:b98d43b-kunlun-dev
 
