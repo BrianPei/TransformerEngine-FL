@@ -740,7 +740,7 @@ class CUDABackend(TEFLBackendBase):
         out: Optional[torch.Tensor],
     ) -> torch.Tensor:
         tex = self._get_tex()
-        return tex.swap_first_dims(tensor, out)
+        return tex.swap_first_dims(tensor, out=out)
 
     def nvfp4_data_transpose(
         self,
@@ -825,9 +825,9 @@ class CUDABackend(TEFLBackendBase):
         tex = self._get_tex()
         return tex.group_dequantize(input, otype)
 
-    def get_grouped_gemm_setup_workspace_size(self) -> int:
+    def get_grouped_gemm_setup_workspace_size(self, num_tensors: int) -> int:
         tex = self._get_tex()
-        return tex.get_grouped_gemm_setup_workspace_size()
+        return tex.get_grouped_gemm_setup_workspace_size(num_tensors)
 
     def multi_tensor_pad_last_dim(
         self,
@@ -1232,6 +1232,8 @@ class CUDABackend(TEFLBackendBase):
         p_dropout: float,
         set_zero: bool,
         qkv_layout: NVTE_QKV_Layout,
+        o_format: NVTE_QKV_Format,
+        qkv_scale_inv_format: NVTE_QKV_Format,
         bias_type: NVTE_Bias_Type,
         attn_mask_type: NVTE_Mask_Type,
         softmax_type: NVTE_Softmax_Type,
@@ -1259,6 +1261,12 @@ class CUDABackend(TEFLBackendBase):
         tex = self._get_tex()
 
         qkv_layout = tex.NVTE_QKV_Layout(int(qkv_layout)) if qkv_layout is not None else None
+        o_format = tex.NVTE_QKV_Format(int(o_format)) if o_format is not None else None
+        qkv_scale_inv_format = (
+            tex.NVTE_QKV_Format(int(qkv_scale_inv_format))
+            if qkv_scale_inv_format is not None
+            else None
+        )
         bias_type = tex.NVTE_Bias_Type(int(bias_type)) if bias_type is not None else None
         attn_mask_type = (
             tex.NVTE_Mask_Type(int(attn_mask_type)) if attn_mask_type is not None else None
@@ -1275,6 +1283,8 @@ class CUDABackend(TEFLBackendBase):
             p_dropout,
             set_zero,
             qkv_layout,
+            o_format,
+            qkv_scale_inv_format,
             bias_type,
             attn_mask_type,
             softmax_type,
@@ -1308,6 +1318,11 @@ class CUDABackend(TEFLBackendBase):
         p_dropout: float,
         set_zero: bool,
         qkv_layout: NVTE_QKV_Layout,
+        o_format: NVTE_QKV_Format,
+        do_format: NVTE_QKV_Format,
+        dqkv_layout: NVTE_QKV_Layout,
+        qkv_scale_inv_format: NVTE_QKV_Format,
+        do_scale_inv_format: NVTE_QKV_Format,
         bias_type: NVTE_Bias_Type,
         attn_mask_type: NVTE_Mask_Type,
         softmax_type: NVTE_Softmax_Type,
@@ -1322,7 +1337,6 @@ class CUDABackend(TEFLBackendBase):
         O: Any,
         dO: Any,
         fake_dtype: torch.dtype,
-        dqkv_type: DType,
         Aux_CTX_Tensors: List[torch.Tensor],
         cu_seqlens_q_padded: Optional[torch.Tensor],
         cu_seqlens_kv_padded: Optional[torch.Tensor],
@@ -1334,6 +1348,21 @@ class CUDABackend(TEFLBackendBase):
         tex = self._get_tex()
 
         qkv_layout = tex.NVTE_QKV_Layout(int(qkv_layout)) if qkv_layout is not None else None
+        o_format = tex.NVTE_QKV_Format(int(o_format)) if o_format is not None else None
+        do_format = tex.NVTE_QKV_Format(int(do_format)) if do_format is not None else None
+        dqkv_layout = (
+            tex.NVTE_QKV_Layout(int(dqkv_layout)) if dqkv_layout is not None else None
+        )
+        qkv_scale_inv_format = (
+            tex.NVTE_QKV_Format(int(qkv_scale_inv_format))
+            if qkv_scale_inv_format is not None
+            else None
+        )
+        do_scale_inv_format = (
+            tex.NVTE_QKV_Format(int(do_scale_inv_format))
+            if do_scale_inv_format is not None
+            else None
+        )
         bias_type = tex.NVTE_Bias_Type(int(bias_type)) if bias_type is not None else None
         attn_mask_type = (
             tex.NVTE_Mask_Type(int(attn_mask_type)) if attn_mask_type is not None else None
@@ -1341,7 +1370,6 @@ class CUDABackend(TEFLBackendBase):
         softmax_type = (
             tex.NVTE_Softmax_Type(int(softmax_type)) if softmax_type is not None else None
         )
-        dqkv_type = tex.DType(int(dqkv_type)) if dqkv_type is not None else None
 
         return tex.fused_attn_bwd(
             max_seqlen_q,
@@ -1350,6 +1378,11 @@ class CUDABackend(TEFLBackendBase):
             p_dropout,
             set_zero,
             qkv_layout,
+            o_format,
+            do_format,
+            dqkv_layout,
+            qkv_scale_inv_format,
+            do_scale_inv_format,
             bias_type,
             attn_mask_type,
             softmax_type,
@@ -1364,7 +1397,6 @@ class CUDABackend(TEFLBackendBase):
             O,
             dO,
             fake_dtype,
-            dqkv_type,
             Aux_CTX_Tensors,
             cu_seqlens_q_padded,
             cu_seqlens_kv_padded,

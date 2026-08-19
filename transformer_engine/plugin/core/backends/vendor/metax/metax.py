@@ -1022,6 +1022,8 @@ class MetaxBackend(TEFLBackendBase):
         p_dropout: float,
         set_zero: bool,
         qkv_layout: NVTE_QKV_Layout,
+        o_format: NVTE_QKV_Format,
+        qkv_scale_inv_format: NVTE_QKV_Format,
         bias_type: NVTE_Bias_Type,
         attn_mask_type: NVTE_Mask_Type,
         softmax_type: NVTE_Softmax_Type,
@@ -1049,6 +1051,12 @@ class MetaxBackend(TEFLBackendBase):
         tex = self._get_tex()
 
         qkv_layout = tex.NVTE_QKV_Layout(int(qkv_layout)) if qkv_layout is not None else None
+        o_format = tex.NVTE_QKV_Format(int(o_format)) if o_format is not None else None
+        qkv_scale_inv_format = (
+            tex.NVTE_QKV_Format(int(qkv_scale_inv_format))
+            if qkv_scale_inv_format is not None
+            else None
+        )
         bias_type = tex.NVTE_Bias_Type(int(bias_type)) if bias_type is not None else None
         attn_mask_type = (
             tex.NVTE_Mask_Type(int(attn_mask_type)) if attn_mask_type is not None else None
@@ -1065,6 +1073,8 @@ class MetaxBackend(TEFLBackendBase):
             p_dropout,
             set_zero,
             qkv_layout,
+            o_format,
+            qkv_scale_inv_format,
             bias_type,
             attn_mask_type,
             softmax_type,

@@ -129,6 +129,14 @@ def register_builtins(registry) -> None:
             vendor="CUDA",
             priority=100,
         ),
+        OpImpl(
+            op_name="get_grouped_gemm_setup_workspace_size",
+            impl_id="vendor.cuda",
+            kind=BackendImplKind.VENDOR,
+            fn=_bind_is_available(backend.get_grouped_gemm_setup_workspace_size, is_avail),
+            vendor="CUDA",
+            priority=100,
+        ),
         # Quantization
         OpImpl(
             op_name="quantize",
@@ -1149,6 +1157,15 @@ def register_builtins(registry) -> None:
             impl_id="vendor.cuda",
             kind=BackendImplKind.VENDOR,
             fn=_bind_is_available(backend.get_attention_backend, is_avail),
+            vendor="CUDA",
+            priority=100,
+        ),
+        # Empty quantized tensor allocation
+        OpImpl(
+            op_name="create_empty_quantized_tensor",
+            impl_id="vendor.cuda",
+            kind=BackendImplKind.VENDOR,
+            fn=_bind_is_available(backend.create_empty_quantized_tensor, is_avail),
             vendor="CUDA",
             priority=100,
         ),
