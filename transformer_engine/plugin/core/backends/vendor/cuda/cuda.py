@@ -1573,6 +1573,7 @@ class CUDABackend(TEFLBackendBase):
         scaling_factor: Optional[float],
         score_function: str,
         expert_bias: Optional[torch.Tensor],
+        routing_map_format: int = 0,
     ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         tex = self._get_tex()
         return tex.fused_topk_with_score_function_fwd(
@@ -1584,12 +1585,11 @@ class CUDABackend(TEFLBackendBase):
             scaling_factor,
             score_function,
             expert_bias,
+            routing_map_format,
         )
 
     def fused_topk_with_score_function_bwd(
         self,
-        num_tokens: int,
-        num_experts: int,
         routing_map: torch.Tensor,
         intermediate_output: torch.Tensor,
         grad_probs: torch.Tensor,
@@ -1598,11 +1598,10 @@ class CUDABackend(TEFLBackendBase):
         use_pre_softmax: bool,
         scaling_factor: Optional[float],
         score_function: str,
+        routing_map_format: int = 0,
     ) -> torch.Tensor:
         tex = self._get_tex()
         return tex.fused_topk_with_score_function_bwd(
-            num_tokens,
-            num_experts,
             routing_map,
             intermediate_output,
             grad_probs,
@@ -1611,6 +1610,7 @@ class CUDABackend(TEFLBackendBase):
             use_pre_softmax,
             scaling_factor,
             score_function,
+            routing_map_format,
         )
 
     def fused_score_for_moe_aux_loss_fwd(
@@ -1618,18 +1618,18 @@ class CUDABackend(TEFLBackendBase):
         logits: torch.Tensor,
         topk: int,
         score_function: str,
+        routing_map_format: int = 0,
     ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         tex = self._get_tex()
         return tex.fused_score_for_moe_aux_loss_fwd(
             logits,
             topk,
             score_function,
+            routing_map_format,
         )
 
     def fused_score_for_moe_aux_loss_bwd(
         self,
-        num_tokens: int,
-        num_experts: int,
         intermediate_output: torch.Tensor,
         grad_scores: torch.Tensor,
         grad_logits: torch.Tensor,
@@ -1638,8 +1638,6 @@ class CUDABackend(TEFLBackendBase):
     ) -> torch.Tensor:
         tex = self._get_tex()
         return tex.fused_score_for_moe_aux_loss_bwd(
-            num_tokens,
-            num_experts,
             intermediate_output,
             grad_scores,
             grad_logits,

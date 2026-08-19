@@ -144,6 +144,15 @@ class NVTE_QKV_Layout(IntEnum):
     NVTE_BHSD_BHSD_BHSD = 25
 
 
+class NVTERoutingMapFormat(IntEnum):
+    # Mirrors the C++ pybind enum tex.NVTERoutingMapFormat
+    # (see common/include/transformer_engine/fused_router.h).
+    # Member names match the pybind values (BYTEMAP / BITMAP_U8) so that
+    # transformer_engine.pytorch.router can re-export it transparently.
+    BYTEMAP = 0
+    BITMAP_U8 = 1
+
+
 class CommOverlapType(IntEnum):
     RS = 0
     AG = 1
@@ -1807,6 +1816,7 @@ class TEFLModule:
         self.NVTE_Fused_Attn_Backend = NVTE_Fused_Attn_Backend
         self.NVTE_QKV_Format = NVTE_QKV_Format
         self.NVTE_QKV_Layout = NVTE_QKV_Layout
+        self.NVTERoutingMapFormat = NVTERoutingMapFormat
         self.CommOverlapType = CommOverlapType
         self.CommOverlapAlgo = CommOverlapAlgo
         self.CommGemmOverlapRole = CommGemmOverlapRole
@@ -1854,6 +1864,7 @@ class TEFLModule:
             "NVTE_Fused_Attn_Backend",
             "NVTE_QKV_Format",
             "NVTE_QKV_Layout",
+            "NVTERoutingMapFormat",
             "CommOverlapType",
             "CommOverlapAlgo",
             "CommGemmOverlapRole",
