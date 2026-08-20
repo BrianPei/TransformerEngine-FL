@@ -5,6 +5,7 @@ set -euo pipefail
 
 export TE_FL_SKIP_CUDA="${TE_FL_SKIP_CUDA:-1}"
 export NVTE_WITH_MACA="${NVTE_WITH_MACA:-1}"
+export NVTE_WITH_NCCL_EP="${NVTE_WITH_NCCL_EP:-0}"
 export CUDA_HOME="${CUDA_HOME:-/opt/maca}"
 export MACA_HOME="${MACA_HOME:-/opt/maca}"
 
@@ -20,6 +21,7 @@ export LD_LIBRARY_PATH="${MACA_HOME}/lib:${LD_LIBRARY_PATH:-}"
 {
     echo "TE_FL_SKIP_CUDA=$TE_FL_SKIP_CUDA"
     echo "NVTE_WITH_MACA=$NVTE_WITH_MACA"
+    echo "NVTE_WITH_NCCL_EP=$NVTE_WITH_NCCL_EP"
     echo "CUDA_HOME=$CUDA_HOME"
     echo "MACA_HOME=$MACA_HOME"
     echo "PATH=$PATH"
