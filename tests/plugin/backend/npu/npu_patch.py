@@ -13,6 +13,7 @@ def _set_ascend_env() -> None:
     os.environ.setdefault("PLATFORM", "ascend")
     os.environ.setdefault("TE_FL_SKIP_CUDA", "1")
     os.environ.setdefault("NVTE_FRAMEWORK", "pytorch")
+    os.environ.setdefault("NVTE_WITH_NCCL_EP", "0")
     os.environ.setdefault("TORCHDYNAMO_DISABLE", "1")
 
 

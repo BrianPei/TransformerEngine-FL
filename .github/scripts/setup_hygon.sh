@@ -17,6 +17,7 @@ export NVTE_FLASH_ATTN=0
 export NVTE_FUSED_ATTN=0
 export NVTE_UNFUSED_ATTN=1
 export NVTE_UnfusedDPA_Emulate_FP8=1
+export NVTE_WITH_NCCL_EP="${NVTE_WITH_NCCL_EP:-0}"
 
 echo "===== Verify Hygon device visibility ====="
 if [ "${HYGON_REQUIRE_DEVICE:-1}" = "1" ] && ! command -v hy-smi >/dev/null 2>&1; then
@@ -118,6 +119,7 @@ if [ -n "${GITHUB_ENV:-}" ]; then
         echo "TE_FL_SKIP_CUDA=$TE_FL_SKIP_CUDA"
         echo "TE_FL_PREFER=$TE_FL_PREFER"
         echo "NVTE_FRAMEWORK=$NVTE_FRAMEWORK"
+        echo "NVTE_WITH_NCCL_EP=$NVTE_WITH_NCCL_EP"
         echo "PYTHON_BIN=$PYTHON_BIN"
         echo "NVTE_FLASH_ATTN=$NVTE_FLASH_ATTN"
         echo "NVTE_FUSED_ATTN=$NVTE_FUSED_ATTN"
