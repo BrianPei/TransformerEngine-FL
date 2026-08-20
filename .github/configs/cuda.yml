@@ -26,6 +26,8 @@ container_options: >-
   --ulimit memlock=-1 
   --ulimit stack=67108864 
   --user root
+  -e NVTE_CUDA_ARCHS=80
+  -e NVTE_WITH_NCCL_EP=0
 
 # Platform-specific environment setup script
 setup_script: .github/scripts/setup_cuda.sh
@@ -43,6 +45,9 @@ test_artifact:
   container_options: >-
     --shm-size=16g
     --user root
+    -e NVTE_CUDA_ARCHS=80
+    -e NVTE_WITH_NCCL_EP=0
+    -e MAX_JOBS=48
 
 # Device types to run tests on
 device_types:
