@@ -129,6 +129,14 @@ def register_builtins(registry) -> None:
             vendor="CUDA",
             priority=100,
         ),
+        OpImpl(
+            op_name="get_grouped_gemm_setup_workspace_size",
+            impl_id="vendor.cuda",
+            kind=BackendImplKind.VENDOR,
+            fn=_bind_is_available(backend.get_grouped_gemm_setup_workspace_size, is_avail),
+            vendor="CUDA",
+            priority=100,
+        ),
         # Quantization
         OpImpl(
             op_name="quantize",
@@ -719,22 +727,6 @@ def register_builtins(registry) -> None:
             priority=100,
         ),
         OpImpl(
-            op_name="convert_host_pointers_to_tensor",
-            impl_id="vendor.cuda",
-            kind=BackendImplKind.VENDOR,
-            fn=_bind_is_available(backend.convert_host_pointers_to_tensor, is_avail),
-            vendor="CUDA",
-            priority=100,
-        ),
-        OpImpl(
-            op_name="get_device_pointer_for_data_and_scales",
-            impl_id="vendor.cuda",
-            kind=BackendImplKind.VENDOR,
-            fn=_bind_is_available(backend.get_device_pointer_for_data_and_scales, is_avail),
-            vendor="CUDA",
-            priority=100,
-        ),
-        OpImpl(
             op_name="splits_to_offsets",
             impl_id="vendor.cuda",
             kind=BackendImplKind.VENDOR,
@@ -1189,6 +1181,15 @@ def register_builtins(registry) -> None:
             impl_id="vendor.cuda",
             kind=BackendImplKind.VENDOR,
             fn=_bind_is_available(backend.get_attention_backend, is_avail),
+            vendor="CUDA",
+            priority=100,
+        ),
+        # Empty quantized tensor allocation
+        OpImpl(
+            op_name="create_empty_quantized_tensor",
+            impl_id="vendor.cuda",
+            kind=BackendImplKind.VENDOR,
+            fn=_bind_is_available(backend.create_empty_quantized_tensor, is_avail),
             vendor="CUDA",
             priority=100,
         ),

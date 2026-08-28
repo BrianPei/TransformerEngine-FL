@@ -1,8 +1,7 @@
 # Copyright (c) 2025, BAAI. All rights reserved.
 #
 # See LICENSE for license information.
-import os
-import sys
+
 from typing import Any, Dict, List, Optional, Tuple, Union
 import torch
 from ....ops import *
@@ -212,6 +211,7 @@ class CUDABackend(TEFLBackendBase):
         quantizer: Any,
         num_tensors: int,
         first_dims: List[int],
+        tensor_offsets: Optional[Any] = None,
     ) -> Any:
         tex = self._get_tex()
         try:
@@ -221,7 +221,7 @@ class CUDABackend(TEFLBackendBase):
                     quantizer.dtype = tex.DType(int(qdtype))
         except Exception:
             pass
-        return tex.group_quantize(tensor, quantizer, num_tensors, first_dims)
+        return tex.group_quantize(tensor, quantizer, num_tensors, first_dims, tensor_offsets)
 
     def bgrad_group_quantize(
         self,
@@ -229,6 +229,7 @@ class CUDABackend(TEFLBackendBase):
         quantizer: Any,
         num_tensors: int,
         first_dims: List[int],
+        tensor_offsets: Optional[Any] = None,
     ) -> Any:
         tex = self._get_tex()
         try:
@@ -238,7 +239,7 @@ class CUDABackend(TEFLBackendBase):
                     quantizer.dtype = tex.DType(int(qdtype))
         except Exception:
             pass
-        return tex.bgrad_group_quantize(tensor, quantizer, num_tensors, first_dims)
+        return tex.bgrad_group_quantize(tensor, quantizer, num_tensors, first_dims, tensor_offsets)
 
     def generic_gemm(
         self,
@@ -349,9 +350,10 @@ class CUDABackend(TEFLBackendBase):
         quantizer: Any,
         limit: float = 7.0,
         alpha: float = 1.702,
+        glu_linear_offset: float = 1.0,
     ) -> Any:
         tex = self._get_tex()
-        return tex.clamped_swiglu(input, quantizer, limit, alpha)
+        return tex.clamped_swiglu(input, quantizer, limit, alpha, glu_linear_offset)
 
     # Backward of GLU #
     def dglu(self, grad: torch.Tensor, fwd_input: torch.Tensor, quantizer: Any) -> Any:
@@ -408,9 +410,10 @@ class CUDABackend(TEFLBackendBase):
         quantizer: Any,
         limit: float = 7.0,
         alpha: float = 1.702,
+        glu_linear_offset: float = 1.0,
     ) -> Any:
         tex = self._get_tex()
-        return tex.clamped_dswiglu(grad, fwd_input, quantizer, limit, alpha)
+        return tex.clamped_dswiglu(grad, fwd_input, quantizer, limit, alpha, glu_linear_offset)
 
     # DBias + DAct fusions #
     def dbias_dgelu(self, grad: torch.Tensor, fwd_input: torch.Tensor, quantizer: Any) -> List[Any]:
@@ -759,26 +762,6 @@ class CUDABackend(TEFLBackendBase):
         tex = self._get_tex()
         return tex.grouped_swizzle_for_gemm(tensor, rowwise, columnwise)
 
-    def convert_host_pointers_to_tensor(
-        self,
-        tensor_lists: List[List[torch.Tensor]],
-    ) -> Any:
-        tex = self._get_tex()
-        return tex.convert_host_pointers_to_tensor(tensor_lists)
-
-    def get_device_pointer_for_data_and_scales(
-        self,
-        data_tensors: List[torch.Tensor],
-        scale_tensors: List[torch.Tensor],
-        swizzle: bool = False,
-        rowwise: bool = True,
-        data_dtype: Any = None,
-    ) -> Any:
-        tex = self._get_tex()
-        return tex.get_device_pointer_for_data_and_scales(
-            data_tensors, scale_tensors, swizzle, rowwise, data_dtype
-        )
-
     def splits_to_offsets(
         self,
         first_dims: List[int],
@@ -786,6 +769,167 @@ class CUDABackend(TEFLBackendBase):
     ) -> torch.Tensor:
         tex = self._get_tex()
         return tex.splits_to_offsets(first_dims, logical_last_dim)
+
+    def splits_to_offsets_multi(
+        self,
+        split_sizes: List[int],
+        device: Any,
+        *,
+        strides: Any,
+        include_leading_zero: bool,
+        dtypes: Any,
+        bulk_allocate: bool = False,
+    ) -> Any:
+        tex = self._get_tex()
+        return tex.splits_to_offsets_multi(
+            split_sizes,
+            device,
+            strides=strides,
+            include_leading_zero=include_leading_zero,
+            dtypes=dtypes,
+            bulk_allocate=bulk_allocate,
+        )
+
+    def copy_data_ptrs_to_device(
+        self,
+        tensors: List[torch.Tensor],
+        device: Any,
+    ) -> Any:
+        tex = self._get_tex()
+        return tex.copy_data_ptrs_to_device(tensors, device)
+
+    def bulk_allocate(
+        self,
+        shapes: List[List[int]],
+        dtypes: List[Any],
+        device: Optional[Any] = None,
+        alignments: Optional[List[int]] = None,
+    ) -> Any:
+        tex = self._get_tex()
+        return tex.bulk_allocate(shapes, dtypes, device, alignments)
+
+    def create_empty_quantized_tensor(
+        self,
+        quantizer: Any,
+        shape: List[int],
+        dtype: Any,
+        device: Any,
+        pin_memory: bool,
+    ) -> Any:
+        tex = self._get_tex()
+        return tex.create_empty_quantized_tensor(quantizer, shape, dtype, device, pin_memory)
+
+    def group_dequantize(
+        self,
+        input: Any,
+        otype: Any,
+    ) -> Any:
+        tex = self._get_tex()
+        return tex.group_dequantize(input, otype)
+
+    def get_grouped_gemm_setup_workspace_size(self, num_tensors: int) -> int:
+        tex = self._get_tex()
+        return tex.get_grouped_gemm_setup_workspace_size(num_tensors)
+
+    def multi_tensor_pad_last_dim(
+        self,
+        inputs: List[torch.Tensor],
+        alignment: int,
+    ) -> Any:
+        tex = self._get_tex()
+        return tex.multi_tensor_pad_last_dim(inputs, alignment)
+
+    def multi_tensor_swizzle_scales_for_gemm_(
+        self,
+        tensors: List[torch.Tensor],
+        rowwise_usage: Any,
+        columnwise_usage: Any,
+    ) -> None:
+        tex = self._get_tex()
+        return tex.multi_tensor_swizzle_scales_for_gemm_(tensors, rowwise_usage, columnwise_usage)
+
+    def multi_tensor_transpose_to_bhsd(
+        self,
+        inputs: List[torch.Tensor],
+        original_format: Any,
+        outputs: Optional[List[Optional[torch.Tensor]]] = None,
+    ) -> Any:
+        tex = self._get_tex()
+        return tex.multi_tensor_transpose_to_bhsd(inputs, original_format, outputs)
+
+    def cusolvermp_ctx_create(
+        self,
+        nccl_comm_ptr: int,
+        nranks: int,
+        rank: int,
+    ) -> Any:
+        tex = self._get_tex()
+        return tex.cusolvermp_ctx_create(nccl_comm_ptr, nranks, rank)
+
+    def cusolvermp_ctx_destroy(
+        self,
+        ctx_ptr: Any,
+    ) -> None:
+        tex = self._get_tex()
+        return tex.cusolvermp_ctx_destroy(ctx_ptr)
+
+    def newton_schulz(
+        self,
+        ctx_ptr: Any,
+        m: int,
+        n: int,
+        x: torch.Tensor,
+        num_iterations: int,
+        coefficients: Any,
+    ) -> Any:
+        tex = self._get_tex()
+        return tex.newton_schulz(ctx_ptr, m, n, x, num_iterations, coefficients)
+
+    def nvfp4_quantize_with_amax(
+        self,
+        tensor: torch.Tensor,
+        quantizer: Any,
+        rowwise_amax: torch.Tensor,
+        columnwise_amax: torch.Tensor,
+    ) -> Any:
+        tex = self._get_tex()
+        return tex.nvfp4_quantize_with_amax(tensor, quantizer, rowwise_amax, columnwise_amax)
+
+    def nvfp4_group_quantize_with_amax(
+        self,
+        tensor: torch.Tensor,
+        quantizer: Any,
+        num_tensors: int,
+        first_dims: List[int],
+        rowwise_amax: torch.Tensor,
+        columnwise_amax: torch.Tensor,
+        tensor_offsets: Optional[Any] = None,
+    ) -> Any:
+        tex = self._get_tex()
+        return tex.nvfp4_group_quantize_with_amax(
+            tensor,
+            quantizer,
+            num_tensors,
+            first_dims,
+            rowwise_amax,
+            columnwise_amax,
+            tensor_offsets,
+        )
+
+    def swizzle_scales_and_pack_ptrs_for_discrete_weights(
+        self,
+        data_tensors: List[torch.Tensor],
+        scale_tensors: List[torch.Tensor],
+        swizzle_type: Any,
+        device: Any,
+    ) -> Any:
+        tex = self._get_tex()
+        return tex.grouped_mlp_experimental.swizzle_scales_and_pack_ptrs_for_discrete_weights(
+            data_tensors,
+            scale_tensors,
+            swizzle_type,
+            device,
+        )
 
     def get_fused_attn_backend(
         self,
@@ -1098,6 +1242,8 @@ class CUDABackend(TEFLBackendBase):
         p_dropout: float,
         set_zero: bool,
         qkv_layout: NVTE_QKV_Layout,
+        o_format: NVTE_QKV_Format,
+        qkv_scale_inv_format: NVTE_QKV_Format,
         bias_type: NVTE_Bias_Type,
         attn_mask_type: NVTE_Mask_Type,
         softmax_type: NVTE_Softmax_Type,
@@ -1125,6 +1271,12 @@ class CUDABackend(TEFLBackendBase):
         tex = self._get_tex()
 
         qkv_layout = tex.NVTE_QKV_Layout(int(qkv_layout)) if qkv_layout is not None else None
+        o_format = tex.NVTE_QKV_Format(int(o_format)) if o_format is not None else None
+        qkv_scale_inv_format = (
+            tex.NVTE_QKV_Format(int(qkv_scale_inv_format))
+            if qkv_scale_inv_format is not None
+            else None
+        )
         bias_type = tex.NVTE_Bias_Type(int(bias_type)) if bias_type is not None else None
         attn_mask_type = (
             tex.NVTE_Mask_Type(int(attn_mask_type)) if attn_mask_type is not None else None
@@ -1141,6 +1293,8 @@ class CUDABackend(TEFLBackendBase):
             p_dropout,
             set_zero,
             qkv_layout,
+            o_format,
+            qkv_scale_inv_format,
             bias_type,
             attn_mask_type,
             softmax_type,
@@ -1174,6 +1328,11 @@ class CUDABackend(TEFLBackendBase):
         p_dropout: float,
         set_zero: bool,
         qkv_layout: NVTE_QKV_Layout,
+        o_format: NVTE_QKV_Format,
+        do_format: NVTE_QKV_Format,
+        dqkv_layout: NVTE_QKV_Layout,
+        qkv_scale_inv_format: NVTE_QKV_Format,
+        do_scale_inv_format: NVTE_QKV_Format,
         bias_type: NVTE_Bias_Type,
         attn_mask_type: NVTE_Mask_Type,
         softmax_type: NVTE_Softmax_Type,
@@ -1188,7 +1347,6 @@ class CUDABackend(TEFLBackendBase):
         O: Any,
         dO: Any,
         fake_dtype: torch.dtype,
-        dqkv_type: DType,
         Aux_CTX_Tensors: List[torch.Tensor],
         cu_seqlens_q_padded: Optional[torch.Tensor],
         cu_seqlens_kv_padded: Optional[torch.Tensor],
@@ -1200,6 +1358,19 @@ class CUDABackend(TEFLBackendBase):
         tex = self._get_tex()
 
         qkv_layout = tex.NVTE_QKV_Layout(int(qkv_layout)) if qkv_layout is not None else None
+        o_format = tex.NVTE_QKV_Format(int(o_format)) if o_format is not None else None
+        do_format = tex.NVTE_QKV_Format(int(do_format)) if do_format is not None else None
+        dqkv_layout = tex.NVTE_QKV_Layout(int(dqkv_layout)) if dqkv_layout is not None else None
+        qkv_scale_inv_format = (
+            tex.NVTE_QKV_Format(int(qkv_scale_inv_format))
+            if qkv_scale_inv_format is not None
+            else None
+        )
+        do_scale_inv_format = (
+            tex.NVTE_QKV_Format(int(do_scale_inv_format))
+            if do_scale_inv_format is not None
+            else None
+        )
         bias_type = tex.NVTE_Bias_Type(int(bias_type)) if bias_type is not None else None
         attn_mask_type = (
             tex.NVTE_Mask_Type(int(attn_mask_type)) if attn_mask_type is not None else None
@@ -1207,7 +1378,6 @@ class CUDABackend(TEFLBackendBase):
         softmax_type = (
             tex.NVTE_Softmax_Type(int(softmax_type)) if softmax_type is not None else None
         )
-        dqkv_type = tex.DType(int(dqkv_type)) if dqkv_type is not None else None
 
         return tex.fused_attn_bwd(
             max_seqlen_q,
@@ -1216,6 +1386,11 @@ class CUDABackend(TEFLBackendBase):
             p_dropout,
             set_zero,
             qkv_layout,
+            o_format,
+            do_format,
+            dqkv_layout,
+            qkv_scale_inv_format,
+            do_scale_inv_format,
             bias_type,
             attn_mask_type,
             softmax_type,
@@ -1230,7 +1405,6 @@ class CUDABackend(TEFLBackendBase):
             O,
             dO,
             fake_dtype,
-            dqkv_type,
             Aux_CTX_Tensors,
             cu_seqlens_q_padded,
             cu_seqlens_kv_padded,
@@ -1407,6 +1581,7 @@ class CUDABackend(TEFLBackendBase):
         scaling_factor: Optional[float],
         score_function: str,
         expert_bias: Optional[torch.Tensor],
+        routing_map_format: int = 0,
     ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         tex = self._get_tex()
         return tex.fused_topk_with_score_function_fwd(
@@ -1418,12 +1593,11 @@ class CUDABackend(TEFLBackendBase):
             scaling_factor,
             score_function,
             expert_bias,
+            routing_map_format,
         )
 
     def fused_topk_with_score_function_bwd(
         self,
-        num_tokens: int,
-        num_experts: int,
         routing_map: torch.Tensor,
         intermediate_output: torch.Tensor,
         grad_probs: torch.Tensor,
@@ -1432,11 +1606,10 @@ class CUDABackend(TEFLBackendBase):
         use_pre_softmax: bool,
         scaling_factor: Optional[float],
         score_function: str,
+        routing_map_format: int = 0,
     ) -> torch.Tensor:
         tex = self._get_tex()
         return tex.fused_topk_with_score_function_bwd(
-            num_tokens,
-            num_experts,
             routing_map,
             intermediate_output,
             grad_probs,
@@ -1445,6 +1618,7 @@ class CUDABackend(TEFLBackendBase):
             use_pre_softmax,
             scaling_factor,
             score_function,
+            routing_map_format,
         )
 
     def fused_score_for_moe_aux_loss_fwd(
@@ -1452,18 +1626,18 @@ class CUDABackend(TEFLBackendBase):
         logits: torch.Tensor,
         topk: int,
         score_function: str,
+        routing_map_format: int = 0,
     ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         tex = self._get_tex()
         return tex.fused_score_for_moe_aux_loss_fwd(
             logits,
             topk,
             score_function,
+            routing_map_format,
         )
 
     def fused_score_for_moe_aux_loss_bwd(
         self,
-        num_tokens: int,
-        num_experts: int,
         intermediate_output: torch.Tensor,
         grad_scores: torch.Tensor,
         grad_logits: torch.Tensor,
@@ -1472,8 +1646,6 @@ class CUDABackend(TEFLBackendBase):
     ) -> torch.Tensor:
         tex = self._get_tex()
         return tex.fused_score_for_moe_aux_loss_bwd(
-            num_tokens,
-            num_experts,
             intermediate_output,
             grad_scores,
             grad_logits,
