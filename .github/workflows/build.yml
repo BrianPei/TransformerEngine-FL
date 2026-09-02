@@ -10,7 +10,7 @@ on:
 jobs:
   pytorch:
     name: 'PyTorch'
-    runs-on: [ nv-8g-cicd-te ]
+    runs-on: [ flagcicd-a100 ]
     defaults:
       run:
         shell: bash
