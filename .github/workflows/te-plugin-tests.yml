@@ -9,7 +9,7 @@ concurrency:
 
 jobs:
   run-plugin-tests:
-    runs-on: [ nv-8g-cicd-te ]
+    runs-on: [ flagcicd-a100 ]
     defaults:
       run:
         shell: bash
