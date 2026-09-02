@@ -11,7 +11,7 @@ ci_image: harbor.baai.ac.cn/flagscale/cuda12.8.1-torch2.7.1-python3.10-te2.9:202
 
 # Runner labels for the current online A100 environment
 runner_labels:
-  - nv-8g-cicd-te
+  - flagcicd-a100
 
 # Container volumes
 container_volumes:
@@ -41,7 +41,7 @@ test_artifact:
   build_script: .github/scripts/build_cuda_test_wheel.sh
   path: ci-artifacts/cuda-wheel
   runner_labels:
-    - nv-8g-cicd-te
+    - flagcicd-a100
   container_options: >-
     --shm-size=16g
     --user root
