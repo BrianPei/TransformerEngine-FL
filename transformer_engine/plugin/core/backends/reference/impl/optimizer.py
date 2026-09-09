@@ -87,7 +87,7 @@ def multi_tensor_l2norm_torch(
     return total_norm, per_tensor_result
 
 
-def multi_tensor_adam_torch(
+def _multi_tensor_adam_torch_impl(
     chunk_size: int,
     noop_flag: torch.Tensor,
     tensor_lists: List[List[torch.Tensor]],
@@ -99,6 +99,7 @@ def multi_tensor_adam_torch(
     mode: int,
     bias_correction: int,
     weight_decay: float,
+    inv_scale: Union[float, torch.Tensor] = 1.0,
 ) -> None:
     """
     Adam optimizer implementation matching CUDA exactly.
@@ -109,12 +110,18 @@ def multi_tensor_adam_torch(
     if noop_flag.item() != 0:
         return
 
-    if len(tensor_lists) != 4:
-        raise ValueError("tensor_lists should contain [grads, params, exp_avgs, exp_avg_sqs]")
+    if len(tensor_lists) not in (4, 5):
+        raise ValueError(
+            "tensor_lists should contain [grads, params, exp_avgs, exp_avg_sqs] "
+            "and optionally master_params"
+        )
 
-    grads, params, exp_avgs, exp_avg_sqs = tensor_lists
+    grads, model_params, exp_avgs, exp_avg_sqs = tensor_lists[:4]
+    master_params = tensor_lists[4] if len(tensor_lists) == 5 else model_params
 
-    if not (len(params) == len(grads) == len(exp_avgs) == len(exp_avg_sqs)):
+    if not (
+        len(model_params) == len(grads) == len(exp_avgs) == len(exp_avg_sqs) == len(master_params)
+    ):
         raise ValueError("All tensor lists must have the same length")
 
     if bias_correction:
@@ -124,12 +131,14 @@ def multi_tensor_adam_torch(
         bias_correction1 = 1.0
         bias_correction2 = 1.0
 
-    for grad, param, exp_avg, exp_avg_sq in zip(grads, params, exp_avgs, exp_avg_sqs):
+    for grad, model_param, exp_avg, exp_avg_sq, param in zip(
+        grads, model_params, exp_avgs, exp_avg_sqs, master_params
+    ):
         if grad is None:
             continue
 
         # Convert to float for computation (matches CUDA's MATH_T = float)
-        g = grad.float()
+        g = grad.float() * inv_scale
         p = param.float()
 
         if mode == 0:  # L2 regularization
@@ -165,6 +174,37 @@ def multi_tensor_adam_torch(
 
             # Update parameter
             param.add_(update, alpha=-lr)
+
+        if param is not model_param:
+            model_param.copy_(param.to(dtype=model_param.dtype))
+
+
+def multi_tensor_adam_torch(
+    chunk_size: int,
+    noop_flag: torch.Tensor,
+    tensor_lists: List[List[torch.Tensor]],
+    lr: float,
+    beta1: float,
+    beta2: float,
+    epsilon: float,
+    step: int,
+    mode: int,
+    bias_correction: int,
+    weight_decay: float,
+) -> None:
+    _multi_tensor_adam_torch_impl(
+        chunk_size,
+        noop_flag,
+        tensor_lists,
+        lr,
+        beta1,
+        beta2,
+        epsilon,
+        step,
+        mode,
+        bias_correction,
+        weight_decay,
+    )
 
 
 def multi_tensor_adam_param_remainder_torch(
@@ -361,15 +401,14 @@ def multi_tensor_compute_scale_and_scale_inv_torch(
 
     Args:
         chunk_size: Chunk size (unused in PyTorch implementation)
-        noop_flag: If non-zero, skip computation
+        noop_flag: Ignored to match the TEX CUDA kernel
         tensor_lists: [amaxes, scales, scale_invs]
         max_fp8: Maximum representable value in FP8 format (e.g., 448.0 for E4M3)
         force_pow_2_scales: If True, force scales to be powers of 2
-        amax_epsilon: Small epsilon to add to amax to avoid division by zero
+        amax_epsilon: Lower bound applied to amax before scale computation
     """
-    if noop_flag.item() != 0:
-        return
-
+    # TEX intentionally ignores noop_flag for this kernel so NaN/Inf amax
+    # values still flow through the scale update path.
     if len(tensor_lists) != 3:
         raise ValueError("tensor_lists should contain [amaxes, scales, scale_invs]")
 
@@ -379,23 +418,36 @@ def multi_tensor_compute_scale_and_scale_inv_torch(
         raise ValueError("All tensor lists must have the same length")
 
     for amax, scale, scale_inv in zip(amaxes, scales, scale_invs):
-        # Add epsilon to avoid division by zero
-        amax_val = amax + amax_epsilon
+        # Match compute_scale_from_amax in recipe_common.cuh. CUDA computes
+        # this kernel in float regardless of the storage tensor wrappers.
+        amax_val = amax.float()
+        epsilon = torch.as_tensor(amax_epsilon, dtype=torch.float32, device=amax.device)
+        amax_val = torch.where(amax_val < epsilon, epsilon, amax_val)
 
-        # Compute scale: max_fp8 / amax
-        # Clamp amax to avoid very small values
-        amax_val = torch.clamp(amax_val, min=1e-12)
+        invalid = torch.isinf(amax_val) | torch.isnan(amax_val) | (amax_val == 0)
         computed_scale = max_fp8 / amax_val
+        computed_scale = torch.where(
+            torch.isinf(computed_scale),
+            torch.full_like(computed_scale, torch.finfo(torch.float32).max),
+            computed_scale,
+        )
+        computed_scale = torch.where(invalid, torch.ones_like(computed_scale), computed_scale)
 
         if force_pow_2_scales:
-            # Round scale to nearest power of 2
-            log2_scale = torch.log2(computed_scale)
-            log2_scale = torch.round(log2_scale)
-            computed_scale = torch.pow(2.0, log2_scale)
+            # CUDA clears all mantissa bits, i.e. rounds down to a power of 2.
+            scale_bits = computed_scale.contiguous().view(torch.int32)
+            computed_scale = torch.bitwise_and(scale_bits, -8388608).view(torch.float32)
 
-        # Update scale and scale_inv
-        scale.copy_(computed_scale)
-        scale_inv.copy_(1.0 / computed_scale)
+        computed_scale_inv = computed_scale.reciprocal()
+        # CUDA's __frcp_rn runs with FTZ semantics, so subnormal reciprocals
+        # (e.g. 1 / FLT_MAX) are written as zero.
+        computed_scale_inv = torch.where(
+            computed_scale_inv.abs() < torch.finfo(torch.float32).tiny,
+            torch.zeros_like(computed_scale_inv),
+            computed_scale_inv,
+        )
+        scale.copy_(computed_scale.to(scale.dtype))
+        scale_inv.copy_(computed_scale_inv.to(scale_inv.dtype))
 
 
 def multi_tensor_compute_scale_inv_e8m0_torch(
@@ -509,8 +561,10 @@ def multi_tensor_adam_capturable_torch(
             "Please use a CUDA-enabled build or use scalar step."
         )
 
-    # Fallback to regular adam with scalar parameters
-    multi_tensor_adam_torch(
+    if len(tensor_lists) != 4:
+        raise ValueError("capturable Adam expects [grads, params, exp_avgs, exp_avg_sqs]")
+
+    _multi_tensor_adam_torch_impl(
         chunk_size,
         noop_flag,
         tensor_lists,
@@ -522,6 +576,7 @@ def multi_tensor_adam_capturable_torch(
         mode,
         bias_correction,
         weight_decay,
+        inv_scale,
     )
 
 
@@ -542,8 +597,9 @@ def multi_tensor_adam_capturable_master_torch(
     """
     Capturable master adam optimizer - reference backend fallback.
 
-    Note: This is a fallback implementation that does not support CUDA graph capture
-    or master weight management. These are GPU-specific features.
+    This fallback does not provide CUDA graph capture, but it preserves the
+    capturable-master numerical contract: gradients are unscaled, FP32 master
+    parameters are updated, and model parameters are synchronized from them.
     """
     if isinstance(lr, torch.Tensor) and lr.requires_grad:
         raise NotImplementedError(
@@ -559,8 +615,13 @@ def multi_tensor_adam_capturable_master_torch(
             "Please use a CUDA-enabled build or use scalar step."
         )
 
-    # Fallback to regular adam with scalar parameters
-    multi_tensor_adam_torch(
+    if len(tensor_lists) != 5:
+        raise ValueError(
+            "capturable master Adam expects "
+            "[grads, model_params, exp_avgs, exp_avg_sqs, master_params]"
+        )
+
+    _multi_tensor_adam_torch_impl(
         chunk_size,
         noop_flag,
         tensor_lists,
@@ -572,4 +633,5 @@ def multi_tensor_adam_capturable_master_torch(
         mode,
         bias_correction,
         weight_decay,
+        inv_scale,
     )
