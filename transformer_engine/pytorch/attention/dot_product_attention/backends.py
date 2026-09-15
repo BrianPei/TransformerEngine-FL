@@ -105,7 +105,7 @@ else:
     elif fa_utils.version_required <= fa_utils.version <= fa_utils.max_version:
         fa_utils.is_installed = True
 
-    if fa_utils.is_installed:
+    if fa_utils.is_installed and dpa_utils._NVTE_FLASH_ATTN:
         from flash_attn_2_cuda import varlen_bwd as flash_attn_cuda_bwd
         from flash_attn.flash_attn_interface import flash_attn_func, flash_attn_varlen_func
         from flash_attn.flash_attn_interface import _flash_attn_forward as _flash_attn_fwd
