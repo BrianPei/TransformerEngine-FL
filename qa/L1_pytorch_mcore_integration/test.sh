@@ -87,7 +87,11 @@ fi
 # Check whether FP8 is supported
 WITH_FP8=
 if command -v nvidia-smi &>/dev/null; then
-    DEVICE_ARCH=$(nvidia-smi --query-gpu=compute_cap --format=csv,noheader | head -n 1 | sed 's/[^0-9]//g')
+    # Read one device without closing nvidia-smi's stdout early.  Some vendor
+    # compatibility implementations enumerate every device; with pipefail,
+    # piping that output through head makes nvidia-smi exit on SIGPIPE.
+    DEVICE_ARCH=$(nvidia-smi --query-gpu=compute_cap --format=csv,noheader \
+        | sed -n '1{s/[^0-9]//gp;}')
     if [[ ${DEVICE_ARCH} -ge 89 ]]; then
         WITH_FP8=1
     fi

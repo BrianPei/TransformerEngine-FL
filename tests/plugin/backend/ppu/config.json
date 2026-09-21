@@ -1,0 +1,419 @@
+{
+  "suites": {
+    "debug": [
+      "tests/pytorch/debug/test_sanity.py",
+      "tests/pytorch/debug/test_config.py",
+      "tests/pytorch/debug/test_numerics.py",
+      "tests/pytorch/debug/test_log.py",
+      "tests/pytorch/debug/test_api_features.py",
+      "tests/pytorch/debug/test_perf.py"
+    ],
+    "unittest": [
+      "tests/pytorch/test_sanity.py",
+      "tests/pytorch/test_recipe.py",
+      "tests/pytorch/test_deferred_init.py",
+      "tests/pytorch/test_numerics.py",
+      "tests/pytorch/test_cuda_graphs.py",
+      "tests/pytorch/test_jit.py",
+      "tests/pytorch/test_fused_rope.py",
+      "tests/pytorch/nvfp4",
+      "tests/pytorch/test_quantized_tensor.py",
+      "tests/pytorch/test_float8blockwisetensor.py",
+      "tests/pytorch/test_float8_blockwise_scaling_exact.py",
+      "tests/pytorch/test_float8_blockwise_gemm_exact.py",
+      "tests/pytorch/test_gqa.py",
+      "tests/pytorch/test_fused_optimizer.py",
+      "tests/pytorch/test_multi_tensor.py",
+      "tests/pytorch/test_fusible_ops.py",
+      "tests/pytorch/test_permutation.py",
+      "tests/pytorch/test_parallel_cross_entropy.py",
+      "tests/pytorch/test_cpu_offloading.py",
+      "tests/pytorch/test_cpu_offloading_v1.py",
+      "tests/pytorch/attention/test_attention.py",
+      "tests/pytorch/attention/test_kv_cache.py",
+      "tests/pytorch/test_hf_integration.py",
+      "tests/pytorch/test_checkpoint.py",
+      "tests/plugin/plugin/test_policy.py",
+      "tests/plugin/plugin/test_manager.py",
+      "tests/plugin/plugin/test_policy_selection.py",
+      "tests/plugin/backend/flagos/test_lifecycle.py",
+      "tests/plugin/backend/flagos/test_fused_rope.py",
+      "tests/plugin/backend/flagos/test_optimizer.py",
+      "tests/plugin/backend/flagos/test_gemm.py",
+      "tests/plugin/backend/flagos/test_multi_tensor.py",
+      "tests/plugin/backend/flagos/test_rmsnorm.py",
+      "tests/plugin/backend/flagos/test_softmax.py",
+      "tests/plugin/backend/reference/test_lifecycle.py",
+      "tests/plugin/backend/reference/test_activation.py",
+      "tests/plugin/backend/reference/test_dropout.py",
+      "tests/plugin/backend/reference/test_gemm.py"
+    ],
+    "distributed": [
+      "tests/pytorch/distributed/test_numerics.py",
+      "tests/pytorch/distributed/test_numerics_exact.py",
+      "tests/pytorch/distributed/test_torch_fsdp2.py",
+      "tests/pytorch/distributed/test_cast_master_weights_to_fp8.py",
+      "tests/pytorch/attention/test_cp_utils.py"
+    ],
+    "onnx": [
+      "tests/pytorch/test_onnx_export.py"
+    ]
+  },
+  "skips": [
+    {
+      "id": "PPU-001",
+      "pattern": "tests/pytorch/debug/test_sanity.py::test_sanity_debug*fake_quant-False-mha_attention*",
+      "reason": "FakeQuant 调用 quantize 时提示算子不可用。证据：baseline/debug-reference-gemm.log。根因待后续追溯。"
+    },
+    {
+      "id": "PPU-001",
+      "pattern": "tests/pytorch/debug/test_sanity.py::test_sanity_debug*fake_quant-False-transformer_layer*",
+      "reason": "Transformer attention 的 FakeQuant 路径同样提示 quantize 不可用。根因待后续追溯。"
+    },
+    {
+      "id": "PPU-001",
+      "pattern": "tests/pytorch/debug/test_api_features.py::test_per_tensor_scaling",
+      "reason": "Debug 特性调用 quantize 时提示算子不可用。证据：probe2/debug/tests_pytorch_debug_test_api_features.log。根因待后续追溯。"
+    },
+    {
+      "id": "PPU-001",
+      "pattern": "tests/pytorch/debug/test_api_features.py::test_fake_quant",
+      "reason": "Debug 特性调用 quantize 时提示算子不可用。证据：probe2/debug/tests_pytorch_debug_test_api_features.log。根因待后续追溯。"
+    },
+    {
+      "id": "PPU-001",
+      "pattern": "tests/pytorch/debug/test_api_features.py::test_statistics_collection",
+      "reason": "统计参考路径调用 quantize 时提示算子不可用。证据：baseline/api-features.log。根因待后续追溯。"
+    },
+    {
+      "id": "PPU-001",
+      "pattern": "tests/pytorch/debug/test_api_features.py::test_statistics_multi_run",
+      "reason": "多次运行的统计参考路径调用 quantize 时提示算子不可用。证据：baseline/api-features.log。根因待后续追溯。"
+    },
+    {
+      "id": "PPU-002",
+      "pattern": "tests/pytorch/distributed/test_numerics.py::test_distributed*None*",
+      "min_devices": 4,
+      "reason": "四进程输出超出容差：相对误差 0.001506 > 0.001，绝对误差 3.05e-5 > 1e-5。证据：four-device/distributed/tests_pytorch_distributed_test_numerics.log。默认双进程使用同一公共测试，此规则仅在可见设备数不少于 4 时生效。根因待后续追溯。"
+    },
+    {
+      "id": "PPU-003",
+      "pattern": "tests/pytorch/test_sanity.py::test_sanity_grouped_linear*",
+      "params": {
+        "bs": [
+          1,
+          2
+        ]
+      },
+      "reason": "非空 grouped GEMM 在 300 秒文件探测预算内未结束；保留零 token 用例。证据：probe2/unittest/tests_pytorch_test_sanity.log。根因待后续追溯。"
+    },
+    {
+      "id": "PPU-004",
+      "pattern": "tests/pytorch/test_cuda_graphs.py::test_make_graphed_callables*",
+      "params": {
+        "module": [
+          "transformer",
+          "mha"
+        ],
+        "dtype": [
+          "torch.float16",
+          "torch.bfloat16"
+        ]
+      },
+      "reason": "Transformer/MHA attention 报 stream capture 失效，后续 RNG 状态亦受影响。证据：probe2/unittest/tests_pytorch_test_cuda_graphs.log、baseline/graphs2.log。根因待后续追溯。"
+    },
+    {
+      "id": "PPU-004",
+      "pattern": "tests/pytorch/test_cuda_graphs.py::test_make_graphed_callables_with_dot_product_attention*",
+      "reason": "Attention softmax 路径报 PPU stream capture 失效。证据：baseline/graphs3.log。根因待后续追溯。",
+      "params": {
+        "dtype": [
+          "torch.float16",
+          "torch.bfloat16"
+        ]
+      }
+    },
+    {
+      "id": "PPU-004",
+      "pattern": "tests/pytorch/test_numerics.py::test_gpt_cuda_graph*",
+      "params": {
+        "dtype": [
+          "torch.float16",
+          "torch.bfloat16"
+        ]
+      },
+      "reason": "低精度 attention 报 stream capture 失效，后续用例会受到残留状态影响。证据：baseline/numerics-full.log。根因待后续追溯。"
+    },
+    {
+      "id": "PPU-005",
+      "pattern": "tests/pytorch/test_numerics.py::test_layernorm_accuracy*",
+      "params": {
+        "dtype": [
+          "torch.float16",
+          "torch.bfloat16"
+        ]
+      },
+      "reason": "32 个 FP16/BF16 LayerNorm 数值比较未满足原始容差；保留 FP32 用例。证据：baseline/numerics-full.log。根因待后续追溯。"
+    },
+    {
+      "id": "PPU-006",
+      "pattern": "tests/pytorch/test_fused_optimizer.py::*test_bf16_exp_avg_and_exp_avg_sq",
+      "reason": "BF16 优化器矩估计有 9.5% 元素不一致，最大绝对误差 0.00912，容差为 0.002。证据：tail-probe/unittest/tests_pytorch_test_fused_optimizer.log。根因待后续追溯。"
+    },
+    {
+      "id": "PPU-007",
+      "pattern": "tests/pytorch/test_fused_optimizer.py::TestFusedSGD::*",
+      "reason": "multi_tensor_sgd 适配调用传入 11 个参数，实现接受 8 个参数。证据：tail-probe/unittest/tests_pytorch_test_fused_optimizer.log。根因待后续追溯。"
+    },
+    {
+      "id": "PPU-008",
+      "pattern": "tests/pytorch/test_cuda_graphs.py::test_make_graphed_callables_with_kwargs",
+      "reason": "Graph kwargs 输出未满足逐位相等，最大绝对误差 0.0007686。证据：baseline/graphs4.log。根因待后续追溯。"
+    },
+    {
+      "id": "PPU-009",
+      "pattern": "tests/pytorch/test_permutation.py::*",
+      "reason": "MoE permutation 路径提示 moe_permute_fwd 算子缺失。证据：tail-probe/unittest/tests_pytorch_test_permutation.log。根因待后续追溯。"
+    },
+    {
+      "id": "PPU-010",
+      "pattern": "tests/pytorch/test_multi_tensor.py::test_multi_tensor_compute_scale_and_scale_inv*",
+      "reason": "Scale 计算在两种 power-of-two 设置下均未满足逐位相等。证据：tail-probe/unittest/tests_pytorch_test_multi_tensor.log、probe2/unittest/tests_pytorch_test_multi_tensor.log。根因待后续追溯。"
+    },
+    {
+      "id": "PPU-011",
+      "pattern": "tests/pytorch/test_fusible_ops.py::*test_basic_linear*",
+      "param_length": {
+        "in_shape": [
+          1,
+          3,
+          4
+        ]
+      },
+      "reason": "BasicLinear 向 reference GEMM 传入一维、三维或四维输入时失败，当前路径要求矩阵输入。证据：tail-probe/unittest/tests_pytorch_test_fusible_ops.log、baseline/fusible2.log。根因待后续追溯。"
+    },
+    {
+      "id": "PPU-012",
+      "pattern": "tests/pytorch/test_cpu_offloading.py::*test_memory*",
+      "params": {
+        "layer_type": [
+          "multihead_attention",
+          "transformer_layer"
+        ]
+      },
+      "reason": "Attention offload 后 PPU 显存占用超出测试上限：167MB 对 71MB、297MB 对 201MB。证据：tail-probe/unittest/tests_pytorch_test_cpu_offloading.log。根因待后续追溯。"
+    },
+    {
+      "id": "PPU-013",
+      "pattern": "tests/pytorch/attention/test_attention.py::*",
+      "reason": "跨后端 attention 比较要求原生 fused/Flash attention；当前 PPU 插件构建报 No fused attention backend。证据：tail-probe/unittest/tests_pytorch_attention_test_attention.log。Unfused attention 由 numerics 和 ONNX 覆盖，根因待后续追溯。"
+    },
+    {
+      "id": "PPU-013",
+      "pattern": "tests/pytorch/attention/test_kv_cache.py::*",
+      "params": {
+        "backend": [
+          "FusedAttention"
+        ]
+      },
+      "reason": "当前 PPU 插件构建未提供原生 TE fused attention 后端。证据：tail-probe/unittest/tests_pytorch_attention_test_kv_cache.log。根因待后续追溯。"
+    },
+    {
+      "id": "PPU-014",
+      "pattern": "tests/pytorch/test_checkpoint.py::*test_module*",
+      "missing_checkpoint": true,
+      "reason": "缺少外部兼容性 checkpoint 文件。证据：tail-probe/unittest/tests_pytorch_test_checkpoint.log。通过 NVTE_TEST_CHECKPOINT_ARTIFACT_PATH 提供对应文件后自动恢复；不得用当前版本生成的文件冒充历史兼容性验证。"
+    },
+    {
+      "id": "PPU-013",
+      "pattern": "tests/pytorch/test_cpu_offloading_v1.py::test_cpu_offload*",
+      "params": {
+        "model_name": [
+          "multihead_attention",
+          "transformer_layer"
+        ]
+      },
+      "reason": "旧版 offload 测试显式启用当前不可用的原生 fused attention。证据：probe2/unittest/tests_pytorch_test_cpu_offloading_v1.log。根因待后续追溯。"
+    },
+    {
+      "id": "PPU-015",
+      "pattern": "tests/pytorch/attention/test_kv_cache.py::*",
+      "reason": "KV-cache 更新提示 copy_to_kv_cache 算子不可用。证据：probe2/unittest/tests_pytorch_attention_test_kv_cache.log。根因待后续追溯。"
+    },
+    {
+      "id": "PPU-005",
+      "pattern": "tests/pytorch/test_fusible_ops.py::*test_layer_norm*",
+      "params": {
+        "dtype": [
+          "torch.float16",
+          "torch.bfloat16"
+        ]
+      },
+      "reason": "低精度 LayerNorm 梯度比较超出原始容差，例如相对误差 0.001759 > 0.001。证据：baseline/fusible3.log。根因待后续追溯。"
+    },
+    {
+      "id": "PPU-016",
+      "pattern": "tests/pytorch/test_numerics.py::test_transformer_layer_hidden_states_format*",
+      "params": {
+        "bs": [
+          2
+        ]
+      },
+      "reason": "Batch=2 的布局比较在三种 dtype 下均有 2/3145728 个元素超出容差；保留 Batch=1。证据：final/unittest/tests_pytorch_test_numerics.log 及对应 JUnit。根因待后续追溯。"
+    },
+    {
+      "id": "PPU-017",
+      "pattern": "tests/pytorch/test_fusible_ops.py::*test_rmsnorm*",
+      "params": {
+        "dtype": [
+          "torch.float16",
+          "torch.bfloat16"
+        ],
+        "zero_centered_gamma": [
+          true
+        ]
+      },
+      "reason": "零中心 gamma 的低精度 RMSNorm 输入梯度超出原始容差。证据：baseline/fusible4.log。根因待后续追溯。"
+    },
+    {
+      "id": "PPU-018",
+      "pattern": "tests/pytorch/test_fusible_ops.py::*test_activation*",
+      "params": {
+        "dtype": [
+          "torch.float16"
+        ],
+        "activation": [
+          "qgelu",
+          "qgeglu",
+          "glu"
+        ]
+      },
+      "reason": "FP16 QuickGELU/GEGLU/GLU 梯度超出原始容差。证据：baseline/fusible4.log、baseline/fusible-tail.log。根因待后续追溯。"
+    },
+    {
+      "id": "PPU-019",
+      "pattern": "tests/pytorch/test_cpu_offloading.py::*test_numerics*",
+      "params": {
+        "layer_type": [
+          "transformer_layer"
+        ]
+      },
+      "reason": "TransformerLayer 开启和关闭 offload 的输出在不同 attention 设置下未通过 torch.allclose。证据：baseline/offload2.log。根因待后续追溯。"
+    },
+    {
+      "id": "PPU-004",
+      "pattern": "tests/pytorch/test_cpu_offloading.py::*test_numerics*",
+      "params": {
+        "layer_type": [
+          "multihead_attention"
+        ],
+        "backend": [
+          "UnfusedAttention"
+        ],
+        "use_cuda_graphs": [
+          true
+        ]
+      },
+      "reason": "BF16 unfused MHA offload 用例报 stream capture 失效；保留无 graph 和其他层用例。证据：baseline/offload3.log。根因待后续追溯。"
+    },
+    {
+      "id": "PPU-018",
+      "pattern": "tests/pytorch/test_fusible_ops.py::*test_clamped_swiglu*",
+      "params": {
+        "dtype": [
+          "torch.float16"
+        ]
+      },
+      "reason": "FP16 clamped SwiGLU 梯度超出原始容差。证据：baseline/fusible-tail.log。根因待后续追溯。"
+    },
+    {
+      "id": "PPU-011",
+      "pattern": "tests/pytorch/test_fusible_ops.py::*test_forward_linear_bias_activation*",
+      "params": {
+        "dtype": [
+          "torch.float16",
+          "torch.bfloat16"
+        ]
+      },
+      "param_length": {
+        "in_shape": [
+          1,
+          4
+        ]
+      },
+      "reason": "低精度融合 linear-bias-activation 向 reference GEMM 传入非矩阵输入时失败。证据：baseline/fusible-tail.log。根因待后续追溯。"
+    },
+    {
+      "id": "PPU-020",
+      "pattern": "tests/pytorch/test_fusible_ops.py::*test_dropout*",
+      "params": {
+        "dtype": [
+          "torch.float16",
+          "torch.bfloat16"
+        ],
+        "prob": [
+          0.5
+        ],
+        "is_training": [
+          true
+        ],
+        "shape": [
+          "(128, 128)"
+        ]
+      },
+      "reason": "观测到的零元素比例 0.4893188 超出测试的 99% 置信区间。证据：baseline/fusible-tail.log。根因待后续追溯。"
+    },
+    {
+      "id": "PPU-003",
+      "pattern": "tests/pytorch/test_fusible_ops.py::TestBasicOps::test_grouped_linear*",
+      "reason": "首个 grouped-linear 用例在 600 秒内未完成，超时退出码 124。证据：baseline/fusible5.log。根因待后续追溯。"
+    },
+    {
+      "id": "PPU-021",
+      "pattern": "tests/pytorch/test_fusible_ops.py::*test_forward_linear_bias_add*",
+      "params": {
+        "dtype": [
+          "torch.float16"
+        ],
+        "bias": [
+          true
+        ]
+      },
+      "reason": "FP16 融合 bias/add 输出超出原始容差。证据：baseline/fusible-tail2.log。根因待后续追溯。"
+    },
+    {
+      "id": "PPU-021",
+      "pattern": "tests/pytorch/test_fusible_ops.py::*test_forward_linear_scale_add*",
+      "params": {
+        "dtype": [
+          "torch.float16"
+        ],
+        "scale": [
+          -2.5,
+          3.5
+        ]
+      },
+      "reason": "FP16 带 scale 的 GEMM/add 输出超出原始容差。证据：baseline/fusible-tail2.log。根因待后续追溯。"
+    },
+    {
+      "id": "PPU-022",
+      "pattern": "tests/pytorch/test_fusible_ops.py::*test_backward_add_rmsnorm*",
+      "reason": "调用 rmsnorm_bwd_add 时提示算子不可用。证据：baseline/fusible-tail2.log。根因待后续追溯。"
+    },
+    {
+      "id": "PPU-001",
+      "pattern": "tests/pytorch/test_fusible_ops.py::TestCheckpointing::test_linear*",
+      "params": {
+        "quantized_weight": [
+          true
+        ]
+      },
+      "reason": "量化 checkpoint 路径调用 quantize 时提示算子不可用。证据：baseline/fusible-tail3.log。根因待后续追溯。"
+    },
+    {
+      "id": "PPU-003",
+      "pattern": "tests/pytorch/test_fusible_ops.py::TestSequentialModules::test_grouped_mlp*",
+      "reason": "首个 grouped-MLP 用例在 600 秒内未完成，超时退出码 124。证据：baseline/fusible6.log。根因待后续追溯。"
+    }
+  ]
+}
