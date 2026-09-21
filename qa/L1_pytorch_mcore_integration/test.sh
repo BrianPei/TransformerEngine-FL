@@ -34,6 +34,8 @@ detect_platform() {
         echo metax
     elif command -v npu-smi &>/dev/null || [ -d /usr/local/Ascend ]; then
         echo ascend
+    elif command -v ppu-smi &>/dev/null; then
+        echo ppu
     else
         echo unknown
     fi
@@ -86,7 +88,11 @@ fi
 
 # Check whether FP8 is supported
 WITH_FP8=
-if command -v nvidia-smi &>/dev/null; then
+if [ "${PLATFORM}" = "ppu" ]; then
+    # PPU exposes a CUDA-compatible nvidia-smi, but it is not an NVIDIA
+    # compute-capability device and must not enable CUDA FP8 arguments.
+    :
+elif command -v nvidia-smi &>/dev/null; then
     # Read one device without closing nvidia-smi's stdout early.  Some vendor
     # compatibility implementations enumerate every device; with pipefail,
     # piping that output through head makes nvidia-smi exit on SIGPIPE.
