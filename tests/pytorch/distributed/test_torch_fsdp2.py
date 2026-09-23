@@ -108,7 +108,10 @@ def test_fsdp2_fused_adam_tests():
 @pytest.mark.skipif(NUM_PROCS < 2, reason="Requires 2+ GPUs")
 @pytest.mark.skipif(not te.torch_version() >= (2, 4, 0), reason="Requires PyTorch 2.4.0+")
 def test_fsdp2_mem_leak_tests():
-    """FSDP2 memory leak detection tests (parametrized internally by recipe, quantized_model_init)."""
+    """Run FSDP2 memory leak tests.
+
+    The inner pytest parametrizes by recipe and quantized_model_init.
+    """
     test_path = _FSDP2_DIR / "run_fsdp2_mem_leak.py"
     nproc = min(NUM_PROCS, 2)
     result = subprocess.run(
