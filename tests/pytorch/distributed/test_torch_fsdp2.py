@@ -19,6 +19,22 @@ import transformer_engine.pytorch as te
 NUM_PROCS: int = torch.cuda.device_count()
 _FSDP2_DIR = Path(__file__).parent.resolve() / "fsdp2_tests"
 
+
+def _nested_test_env() -> dict[str, str]:
+    """Prevent outer pytest-cov settings from leaking into nested pytest."""
+    env = os.environ.copy()
+    for key in (
+        "PYTEST_ADDOPTS",
+        "COVERAGE_FILE",
+        "COVERAGE_PROCESS_START",
+        "COVERAGE_RCFILE",
+        "COV_CORE_SOURCE",
+        "COV_CORE_CONFIG",
+        "COV_CORE_DATAFILE",
+    ):
+        env.pop(key, None)
+    return env
+
 # Import some utilities from PyTest-owned conftest.py.
 sys.path.insert(0, str(_FSDP2_DIR))
 from conftest import _parametrize_recipes
@@ -53,7 +69,7 @@ def test_fsdp2_model_tests():
             "--tb=short",
         ],
         valid_returncodes=(0, 5),
-        env=os.environ,
+        env=_nested_test_env(),
         timeout=600,
     )
 
@@ -84,7 +100,7 @@ def test_fsdp2_fused_adam_tests():
             "not dcp_resharding_save and not dcp_resharding_load",
         ],
         valid_returncodes=(0, 5),
-        env=os.environ,
+        env=_nested_test_env(),
         timeout=600,
     )
 
@@ -107,7 +123,7 @@ def test_fsdp2_mem_leak_tests():
             "-s",
             "--tb=short",
         ],
-        env=os.environ,
+        env=_nested_test_env(),
         timeout=600,
     )
     assert result.returncode in (0, 5), f"Inner pytest failed with exit code {result.returncode}"
@@ -143,6 +159,7 @@ def test_fsdp2_fused_adam_dcp_resharding(recipe):
     test_path = _FSDP2_DIR / "run_fsdp2_fused_adam.py"
 
     # Phase 1: save checkpoint with 4 ranks.
+    nested_env = _nested_test_env()
     result = subprocess.run(
         [
             "torchrun",
@@ -154,7 +171,7 @@ def test_fsdp2_fused_adam_dcp_resharding(recipe):
             "--recipe",
             recipe,
         ],
-        env=os.environ,
+        env=nested_env,
         timeout=300,
     )
     assert result.returncode == 0, f"DCP resharding save phase failed: {result.returncode}"
@@ -171,7 +188,7 @@ def test_fsdp2_fused_adam_dcp_resharding(recipe):
             "--recipe",
             recipe,
         ],
-        env=os.environ,
+        env=nested_env,
         timeout=300,
     )
     assert result.returncode == 0, f"DCP resharding load phase failed: {result.returncode}"

@@ -21,6 +21,7 @@ container_options: >-
   -e NVTE_UNFUSED_ATTN=1
   -e NVTE_TORCH_COMPILE=0
   -e TE_FL_PER_OP=generic_gemm=reference
+  -e PPU_STEP_TIMEOUT=9000
 device_types:
   - 810e
 nproc_per_node: 2
