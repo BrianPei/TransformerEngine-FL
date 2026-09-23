@@ -26,12 +26,6 @@ device_types:
   - 810e
 nproc_per_node: 2
 setup_script: .github/scripts/setup_ppu.sh
-checkpoint_fixture:
-  enabled: true
-  version: ""
-  path: artifacts/tests/pytorch/test_checkpoint
-  archive_url: ""
-  archive_sha256: ""
 unit_test_timeout_minutes: 240
 unit_test_matrix:
   - name: pytorch_unittest
