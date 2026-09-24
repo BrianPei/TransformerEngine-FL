@@ -3,6 +3,7 @@
 # See LICENSE for license information.
 
 import os
+import shlex
 import sys
 import subprocess
 import sys
@@ -20,11 +21,13 @@ NUM_PROCS: int = torch.cuda.device_count()
 _FSDP2_DIR = Path(__file__).parent.resolve() / "fsdp2_tests"
 
 
-def _nested_test_env() -> dict[str, str]:
-    """Prevent outer pytest-cov settings from leaking into nested pytest."""
+def _nested_test_env(*, isolate_coverage: bool = False) -> dict[str, str]:
+    """Optionally prevent outer pytest-cov settings from leaking into nested pytest."""
     env = os.environ.copy()
+    if not isolate_coverage:
+        return env
+
     for key in (
-        "PYTEST_ADDOPTS",
         "COVERAGE_FILE",
         "COVERAGE_PROCESS_START",
         "COVERAGE_RCFILE",
@@ -33,6 +36,35 @@ def _nested_test_env() -> dict[str, str]:
         "COV_CORE_DATAFILE",
     ):
         env.pop(key, None)
+
+    pytest_addopts = shlex.split(env.get("PYTEST_ADDOPTS", ""))
+    coverage_flags = {"--cov-branch", "--cov-append"}
+    coverage_options_with_values = {"--cov-report", "--cov-config", "--cov-fail-under"}
+    filtered_addopts = []
+    index = 0
+    while index < len(pytest_addopts):
+        arg = pytest_addopts[index]
+        if arg in coverage_flags:
+            index += 1
+            continue
+        if arg in coverage_options_with_values:
+            index += 2
+            continue
+        if any(arg.startswith(f"{option}=") for option in coverage_options_with_values):
+            index += 1
+            continue
+        if arg == "--cov" or arg == "--no-cov" or arg.startswith("--cov="):
+            index += 1
+            if arg == "--cov" and index < len(pytest_addopts):
+                if not pytest_addopts[index].startswith("-"):
+                    index += 1
+            continue
+        filtered_addopts.append(arg)
+        index += 1
+    if filtered_addopts:
+        env["PYTEST_ADDOPTS"] = shlex.join(filtered_addopts)
+    else:
+        env.pop("PYTEST_ADDOPTS", None)
     return env
 
 
@@ -70,7 +102,7 @@ def test_fsdp2_model_tests():
             "--tb=short",
         ],
         valid_returncodes=(0, 5),
-        env=_nested_test_env(),
+        env=_nested_test_env(isolate_coverage=True),
         timeout=600,
     )
 
@@ -101,7 +133,7 @@ def test_fsdp2_fused_adam_tests():
             "not dcp_resharding_save and not dcp_resharding_load",
         ],
         valid_returncodes=(0, 5),
-        env=_nested_test_env(),
+        env=_nested_test_env(isolate_coverage=True),
         timeout=600,
     )
 
