@@ -156,7 +156,7 @@ def test_fsdp2_mem_leak_tests():
             "-s",
             "--tb=short",
         ],
-        env=_nested_test_env(),
+        env=_nested_test_env(isolate_coverage=True),
         timeout=600,
     )
     assert result.returncode in (0, 5), f"Inner pytest failed with exit code {result.returncode}"
