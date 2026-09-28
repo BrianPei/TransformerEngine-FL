@@ -3,7 +3,8 @@ hardware_name: ppu
 display_name: 'PPU ZW810E'
 ci_image: harbor.baai.ac.cn/flagos-dev/transformerengine-fl:f826afe-ppu-dev
 container_pull_policy: never
-runner_labels: flagcicd-810e
+runner_labels:
+  - flagcicd-810e
 container_volumes: []
 container_options: >-
   --privileged

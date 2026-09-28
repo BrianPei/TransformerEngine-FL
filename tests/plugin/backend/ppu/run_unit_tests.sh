@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 set -uo pipefail
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
-source "$SCRIPT_DIR/set_env.sh"
 source "$SCRIPT_DIR/config.sh"
+source "$SCRIPT_DIR/set_env.sh"
 # Individual pytest failures are collected and propagated after all targets.
 set +e
 cd "$TE_PATH"
