@@ -27,6 +27,10 @@ readonly -a ENFLAME_UNITTEST_SKIP_FUSED_OPTIMIZER=(
     "test_half"
     "test_grad_scaler_capturable"
     "test_grad_scaler_capturable_master"
+    # This case exhausts/overruns the S60 GCU kernel loader and can crash the
+    # vendor driver (loadSegments failed in alloc mem), rather than reporting
+    # a test failure that Transformer Engine can handle.
+    "test_multi_params"
 )
 
 readonly -a ENFLAME_UNITTEST_SKIP_HF_INTEGRATION=(
