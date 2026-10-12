@@ -11,7 +11,7 @@ ci_image: harbor.baai.ac.cn/flagscale/cuda12.8.1-torch2.7.1-python3.10-te2.9:202
 
 # Runner labels for the current online A100 environment
 runner_labels:
-  - flagcicd-a100
+  - nv-8g-cicd-te
 
 # Container volumes
 container_volumes:
@@ -41,7 +41,7 @@ test_artifact:
   build_script: .github/scripts/build_cuda_test_wheel.sh
   path: ci-artifacts/cuda-wheel
   runner_labels:
-    - flagcicd-a100
+    - nv-8g-cicd-te
   container_options: >-
     --shm-size=16g
     --user root
@@ -74,7 +74,7 @@ unit_test_matrix:
 
 integration_test_matrix:
   - name: pytorch_mcore_integration
-    path: qa/L1_pytorch_mcore_integration/test.sh
+    path: tests/plugin/backend/cuda/run_integration_tests.sh
 
 # Test matrix configuration
 test_matrix:
