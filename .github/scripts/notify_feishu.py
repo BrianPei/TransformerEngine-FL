@@ -60,7 +60,7 @@ def check_env_vars() -> bool:
     missing_feishu = [v for v in FEISHU_VARS if not os.environ.get(v, "").strip()]
     if missing_feishu:
         print(
-            f"::notice::Feishu notification skipped — "
+            "::notice::Feishu notification skipped — "
             f"missing credentials: {', '.join(missing_feishu)}"
         )
         return False
@@ -108,10 +108,7 @@ def main():
     pr_title = os.environ.get("PR_TITLE", "")
 
     short_sha = sha[:7]
-    run_url = (
-        os.environ.get("OVERRIDE_RUN_URL")
-        or f"{server_url}/{repo}/actions/runs/{run_id}"
-    )
+    run_url = os.environ.get("OVERRIDE_RUN_URL") or f"{server_url}/{repo}/actions/runs/{run_id}"
 
     # --- 1. Obtain tenant_access_token ---
     token_req = urllib.request.Request(
@@ -190,7 +187,10 @@ def main():
                             "is_short": False,
                             "text": {
                                 "tag": "lark_md",
-                                "content": f"**PR:** [{repo}#{pr_number}]({server_url}/{repo}/pull/{pr_number})",
+                                "content": (
+                                    "**PR:**"
+                                    f" [{repo}#{pr_number}]({server_url}/{repo}/pull/{pr_number})"
+                                ),
                             },
                         },
                     ]
