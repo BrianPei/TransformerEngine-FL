@@ -34,6 +34,7 @@ on:
       - 'examples/**'
   pull_request:
     branches: [main, devops]
+    types: [opened, synchronize, reopened, labeled, unlabeled]
   workflow_dispatch:
 
 concurrency:

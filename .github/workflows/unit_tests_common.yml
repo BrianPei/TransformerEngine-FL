@@ -6,6 +6,10 @@ on:
       platform:
         required: true
         type: string
+      checkout_ref:
+        required: false
+        type: string
+        default: ''
       device:
         required: true
         type: string
@@ -99,6 +103,7 @@ jobs:
       - name: Checkout source code
         uses: actions/checkout@v4
         with:
+          ref: ${{ inputs.checkout_ref }}
           fetch-depth: 0
           submodules: ${{ inputs.checkout_submodules }}
           set-safe-directory: true
@@ -125,6 +130,7 @@ jobs:
           COVERAGE_SOURCES: ${{ inputs.coverage_sources }}
           COVERAGE_INCLUDE: ${{ inputs.coverage_include }}
           COVERAGE_OMIT: ${{ inputs.coverage_omit }}
+          TE_TEST_MAX_RETRIES: '2'
         run: |
           set -euo pipefail
 
@@ -238,6 +244,7 @@ jobs:
       - name: Checkout source code
         uses: actions/checkout@v4
         with:
+          ref: ${{ inputs.checkout_ref }}
           fetch-depth: 0
           set-safe-directory: true
 

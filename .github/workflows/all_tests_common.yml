@@ -3,6 +3,10 @@ name: Common All Tests
 on:
   workflow_call:
     inputs:
+      checkout_ref:
+        required: false
+        type: string
+        default: ''
       platform:
         required: true
         type: string
@@ -52,6 +56,8 @@ jobs:
     steps:
       - name: Checkout source code
         uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.checkout_ref }}
 
       - name: Load platform configuration
         id: config
@@ -189,6 +195,7 @@ jobs:
       - name: Checkout source code
         uses: actions/checkout@v4
         with:
+          ref: ${{ inputs.checkout_ref }}
           fetch-depth: 0
           submodules: ${{ needs.checkout_and_config.outputs.checkout_submodules }}
           set-safe-directory: true
@@ -226,6 +233,7 @@ jobs:
     uses: ./.github/workflows/unit_tests_common.yml
     with:
       platform: ${{ inputs.platform }}
+      checkout_ref: ${{ inputs.checkout_ref }}
       device: ${{ matrix.device }}
       image: ${{ needs.checkout_and_config.outputs.ci_image }}
       container_pull_policy: ${{ needs.checkout_and_config.outputs.container_pull_policy }}
@@ -281,6 +289,7 @@ jobs:
     uses: ./.github/workflows/integration_tests_common.yml
     with:
       device: ${{ matrix.device }}
+      checkout_ref: ${{ inputs.checkout_ref }}
       image: ${{ needs.checkout_and_config.outputs.ci_image }}
       container_pull_policy: ${{ needs.checkout_and_config.outputs.container_pull_policy }}
       runs_on: ${{ needs.checkout_and_config.outputs.runs_on }}

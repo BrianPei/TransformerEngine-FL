@@ -21,6 +21,26 @@ not supported. Vendor aliases include `npu` for Ascend and `kunlunxin` for Kunlu
 - Renames are treated as deletion plus addition to include both affected paths.
 - Pushes that trigger CI, schedules, and manual runs select all platforms.
 
+### Optional routing and retries
+
+- `platform:<config-name>` PR labels override path routing; multiple labels take
+  their union, and `platform:all` selects all platforms. Unknown platform labels
+  fail generation. Adding/removing labels reruns CI; removing all restores path
+  routing. Non-PR runs are unaffected. Narrow shared-code changes only after review.
+- Unit/integration groups retry up to twice, five seconds apart, within the same
+  job timeout. Each attempt is logged; exhaustion fails the job. Signal exits are
+  not retried. A group can set `max_retries: 0`, `1`, or `2`; outside CI the default
+  is zero. Setup, builds and lint are not retried.
+- Writers/maintainers/admins can comment `/ci run ascend`, `/ci run cuda,ascend`,
+  `/ci run all`, or `/test musa` on an open PR. `ci-requested.yml` checks live
+  permissions and passes the current head SHA through all configuration/build/
+  test/coverage checkouts, including fork PRs. Authorization uses trusted base code
+  and a read-only token; requested PR code executes on selected self-hosted hardware.
+  Invalid commands/platforms, issue/edited comments, closed PRs and unauthorized
+  users cannot start tests. `Requested CI Complete` is supplemental to required
+  PR CI. Comment triggering requires this workflow on the default branch and uses
+  the GitHub CLI bundled with ubuntu-latest; existing manual workflows are unchanged.
+
 Keep shared dependencies out of individual platform watch lists: shared code
 must continue to trigger all platforms. A new platform without watch rules
 temporarily disables filtering rather than risking a missed test.
@@ -73,6 +93,11 @@ full matrix, so it cannot demonstrate documentation-only or vendor-only routing.
 | Test failure | Temporarily add `exit 1` to a watched vendor test script in the scenario branch | The test, its enabled test summary, platform workflow, and `CI Complete` fail. |
 | Lint failure | Introduce a change rejected by an existing pre-commit hook | Lint fails; matrix and platform jobs are skipped; `CI Complete` runs and fails. |
 | Cancellation | Cancel a running selected test job or the workflow run | The cancelled work must not produce a successful `CI Complete`; the gate fails if it runs, or remains cancelled if the whole run is cancelled. |
+| Label routing | Add/remove `platform:ascend`, combine vendor labels, then use `platform:all` | Each label change reruns PR CI with the documented override; removing the labels restores path routing. |
+| Retry recovery/exhaustion | Use a disposable test group that fails once then passes; separately make it always fail | Attempt counts are visible; recovery succeeds, while exhaustion fails summaries and the final gate. |
+| Authorized comment | A writer comments `/ci run ascend` on an open PR | Only Ascend runs; every checkout uses the captured PR SHA; `Requested CI Complete` reports the outcome. |
+| Rejected comment | Use a read-only account, an invalid platform, an issue comment, or a closed PR | No hardware tests start. |
+| Pinned/fork PR request | Update the PR after resolution; separately request a fork PR | Every checkout still tests the captured SHA using base-repository workflows. |
 
 For each run, inspect the platform-selection summary, matrix jobs, nested test
 summaries, and the final check on the PR's current commit. Keep intentional

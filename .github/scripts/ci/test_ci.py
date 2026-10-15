@@ -6,16 +6,19 @@ Run without importing TransformerEngine or requiring accelerator hardware:
 
 from __future__ import annotations
 
+import importlib.util
 import itertools
+import json
 import os
 from pathlib import Path
 import subprocess
 import tempfile
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 import yaml
 
+import ci_requests
 import generate_matrix as matrix
 
 
@@ -234,6 +237,148 @@ class WorkflowGateTests(unittest.TestCase):
                 if values[key] == "success":
                     bad_values[key] = "skipped"
                     self.assertNotEqual(self.run_common_gate("all_tests_complete", bad_values), 0)
+
+
+class CIControlsTests(unittest.TestCase):
+    def test_label_routing_and_event_payload(self):
+        rules = matrix._load_watch_rules(ROOT / ".github/configs")
+        for labels, expected in (
+            (["bug"], sorted(rules)),
+            (["platform:cuda", "platform:ascend", "platform:cuda"], ["ascend", "cuda"]),
+            (["platform:cuda", "platform:all"], sorted(rules)),
+        ):
+            self.assertEqual(
+                matrix.select_platforms(rules, ["shared.py"], "pull_request", labels)[0], expected
+            )
+        for label in ("platform:", "platform:unknown"):
+            with self.assertRaises(ValueError):
+                matrix.select_platforms(rules, ["shared.py"], "pull_request", [label])
+        self.assertEqual(
+            matrix.select_platforms(rules, ["README.md"], "pull_request", ["platform:cuda"])[0],
+            ["cuda"],
+        )
+        for event in ("push", "schedule", "workflow_dispatch"):
+            self.assertEqual(
+                matrix.select_platforms(rules, [], event, ["platform:cuda"])[0], sorted(rules)
+            )
+        with tempfile.TemporaryDirectory() as directory:
+            event = Path(directory, "event.json")
+            event.write_text(json.dumps({"pull_request": {"labels": [{"name": "platform:musa"}]}}))
+            result = subprocess.run(
+                [
+                    "python3",
+                    str(ROOT / ".github/scripts/ci/generate_matrix.py"),
+                    "--event-name",
+                    "pull_request",
+                    "--configs-dir",
+                    str(ROOT / ".github/configs"),
+                    "--changed-files",
+                    "shared.py",
+                ],
+                env=dict(os.environ, GITHUB_EVENT_PATH=str(event)),
+                capture_output=True,
+                text=True,
+                check=True,
+            )
+            self.assertEqual(json.loads(result.stdout.removeprefix("platforms=")), ["musa"])
+
+    def test_comment_authorization_and_selection(self):
+        for command in (
+            "/ci run cuda,ascend",
+            "/test cuda ascend",
+            "/test all",
+            "/test unknown",
+            "/test cuda;id",
+            "/test cuda\n/test ascend",
+        ):
+            for permission in ("admin", "maintain", "write", "triage", "read", "none"):
+                for state in ("open", "closed"):
+                    event = {
+                        "action": "created",
+                        "issue": {"number": 42, "pull_request": {"url": "unused"}},
+                        "comment": {"body": command, "user": {"login": "writer"}},
+                    }
+                    api = Mock(
+                        side_effect=[
+                            {"permission": permission},
+                            {"state": state, "head": {"sha": "a" * 40}},
+                        ]
+                    )
+                    if (
+                        command in ("/ci run cuda,ascend", "/test cuda ascend", "/test all")
+                        and permission in ("admin", "maintain", "write")
+                        and state == "open"
+                    ):
+                        self.assertEqual(
+                            ci_requests.resolve(event, api, {"ascend", "cuda"}),
+                            (["ascend", "cuda"], "a" * 40),
+                        )
+                    else:
+                        with self.assertRaises((ValueError, PermissionError)):
+                            ci_requests.resolve(event, api, {"ascend", "cuda"})
+        for event in ({"action": "edited"}, {"action": "created", "issue": {"number": 42}}):
+            api = Mock()
+            with self.assertRaises(ValueError):
+                ci_requests.resolve(event, api, {"cuda"})
+            api.assert_not_called()
+
+    def test_retry_limits_and_interrupts(self):
+        spec = importlib.util.spec_from_file_location(
+            "ci_runner", ROOT / "tests/test_utils/run_ci_test_group.py"
+        )
+        runner = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(runner)
+        for codes, retries in (
+            ([0], 2),
+            ([1, 1, 0], 2),
+            ([1, 2, 3], 2),
+            ([1], 0),
+            ([-15], 2),
+            ([130], 2),
+            ([137], 2),
+        ):
+            with patch.object(
+                runner, "_load_group", return_value={"name": "probe", "max_retries": retries}
+            ), patch.object(runner, "_run_script", side_effect=codes) as execute, patch.object(
+                runner.time, "sleep"
+            ):
+                self.assertEqual(runner.main(), codes[-1])
+                self.assertEqual(execute.call_count, len(codes))
+        for retries in (-1, 3, True):
+            with patch.object(
+                runner, "_load_group", return_value={"name": "probe", "max_retries": retries}
+            ), self.assertRaises(SystemExit):
+                runner.main()
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "probe.sh").write_text("if [ ! -f attempt ]; then touch attempt; exit 1; fi\n")
+            group = {"name": "real-script", "path": "probe.sh", "max_retries": 1}
+            with patch.object(runner, "REPO_ROOT", root), patch.object(
+                runner.time, "sleep"
+            ), patch.dict(os.environ, TE_TEST_GROUP_JSON=json.dumps(group)):
+                self.assertEqual(runner.main(), 0)
+
+    def test_pinned_checkouts_and_requested_gate(self):
+        for name in ("all_tests_common", "unit_tests_common", "integration_tests_common"):
+            jobs = yaml.safe_load((ROOT / f".github/workflows/{name}.yml").read_text())["jobs"]
+            for job in jobs.values():
+                if job.get("uses", "").startswith("./.github/workflows/"):
+                    self.assertEqual(job["with"]["checkout_ref"], "${{ inputs.checkout_ref }}")
+                for step in job.get("steps", []):
+                    if step.get("uses", "").startswith("actions/checkout@"):
+                        self.assertEqual(step["with"]["ref"], "${{ inputs.checkout_ref }}")
+        jobs = yaml.safe_load((ROOT / ".github/workflows/ci-requested.yml").read_text())["jobs"]
+        self.assertIn("always()", jobs["complete"]["if"])
+        self.assertEqual(
+            jobs["platform-pipeline"]["with"]["checkout_ref"],
+            "${{ needs.resolve.outputs.checkout_ref }}",
+        )
+        for resolve, pipeline in itertools.product(STATUSES, repeat=2):
+            result = subprocess.run(
+                ["bash", "-e", "-c", jobs["complete"]["steps"][0]["run"]],
+                env=dict(os.environ, RESOLVE_RESULT=resolve, PIPELINE_RESULT=pipeline),
+            )
+            self.assertEqual(result.returncode == 0, resolve == pipeline == "success")
 
 
 if __name__ == "__main__":

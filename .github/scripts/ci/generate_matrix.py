@@ -74,11 +74,24 @@ def _load_watch_rules(configs_dir: pathlib.Path) -> dict[str, list[str]]:
 
 
 def select_platforms(
-    rules: dict[str, list[str]], changed: list[str], event_name: str
+    rules: dict[str, list[str]],
+    changed: list[str],
+    event_name: str,
+    labels: list[str] | tuple[str, ...] = (),
 ) -> tuple[list[str], list[str]]:
     all_platforms = sorted(rules)
     if event_name != "pull_request":
         return all_platforms, [f"{event_name}: full matrix"]
+    requested = {
+        label.removeprefix("platform:") for label in labels if label.startswith("platform:")
+    }
+    unknown = requested - set(rules) - {"all"}
+    if unknown:
+        raise ValueError(f"Unknown platform labels: {', '.join(sorted(unknown))}")
+    if "all" in requested:
+        return all_platforms, ["platform:all label: full matrix"]
+    if requested:
+        return sorted(requested), ["Explicit platform labels override changed-file routing"]
     if not changed:
         return all_platforms, ["No changed-file information: full matrix"]
 
@@ -115,7 +128,11 @@ def main() -> None:
     try:
         rules = _load_watch_rules(pathlib.Path(args.configs_dir))
         changed = []
+        labels = []
         if args.event_name == "pull_request":
+            if event_path := os.environ.get("GITHUB_EVENT_PATH"):
+                event = json.loads(pathlib.Path(event_path).read_text())
+                labels = [label["name"] for label in event["pull_request"]["labels"]]
             if args.changed_files is not None:
                 changed = args.changed_files.splitlines()
             else:
@@ -126,7 +143,7 @@ def main() -> None:
                         f"::warning::Cannot read diff; running all platforms: {exc}",
                         file=sys.stderr,
                     )
-        platforms, reasons = select_platforms(rules, changed, args.event_name)
+        platforms, reasons = select_platforms(rules, changed, args.event_name, labels)
     except (OSError, ValueError, yaml.YAMLError) as exc:
         print(f"::error::{exc}", file=sys.stderr)
         raise SystemExit(1) from exc
