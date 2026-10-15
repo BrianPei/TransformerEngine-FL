@@ -25,10 +25,6 @@ container_options: >-
 
 setup_script: .github/scripts/setup_hygon.sh
 
-# Six BF16 Linear/LayerNorm/RMSNorm forward/backward smoke cases.
-performance_smoke:
-  enabled: true
-
 coverage:
   enabled: true
   required: false

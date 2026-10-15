@@ -36,10 +36,6 @@ container_options: >-
 # Platform-specific environment setup script
 setup_script: .github/scripts/setup_ascend.sh
 
-# Six BF16 Linear/LayerNorm/RMSNorm forward/backward smoke cases.
-performance_smoke:
-  enabled: true
-
 coverage:
   enabled: true
   required: true

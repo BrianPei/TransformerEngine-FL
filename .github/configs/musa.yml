@@ -43,10 +43,6 @@ unit_test_timeout_minutes: 120
 device_types:
   - s5000
 
-# Six BF16 Linear/LayerNorm/RMSNorm forward/backward smoke cases.
-performance_smoke:
-  enabled: true
-
 coverage:
   enabled: true
   required: false

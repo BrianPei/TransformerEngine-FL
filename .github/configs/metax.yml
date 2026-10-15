@@ -49,10 +49,6 @@ setup_script: .github/scripts/setup_metax.sh
 device_types:
   - c500
 
-# Initial smoke suite: six BF16 Linear/LayerNorm/RMSNorm forward/backward cases.
-performance_smoke:
-  enabled: true
-
 coverage:
   enabled: true
   required: false

@@ -21,6 +21,7 @@ import yaml
 import ci_requests
 import generate_matrix as matrix
 
+
 ROOT = Path(__file__).resolve().parents[3]
 STATUSES = ("success", "failure", "cancelled", "skipped")
 
@@ -214,13 +215,9 @@ class WorkflowGateTests(unittest.TestCase):
                     self.assertEqual(code == 0, status == "success")
 
     def test_platform_gate_only_accepts_explicitly_disabled_skips(self):
-        for build, unit, integration, performance in itertools.product((False, True), repeat=4):
+        for build, unit, integration in itertools.product((False, True), repeat=3):
             values = {
                 "needs.checkout_and_config.result": "success",
-                "needs.checkout_and_config.outputs.performance_smoke_enabled": (
-                    str(performance).lower()
-                ),
-                "needs.performance_smoke.result": "success" if performance else "skipped",
                 "needs.checkout_and_config.outputs.test_artifact_enabled": str(build).lower(),
                 "inputs.run_unit_tests": str(unit).lower(),
                 "inputs.run_integration_tests": str(integration).lower(),
@@ -230,7 +227,6 @@ class WorkflowGateTests(unittest.TestCase):
             }
             self.assertEqual(self.run_common_gate("all_tests_complete", values), 0)
             for key in (
-                "needs.performance_smoke.result",
                 "needs.checkout_and_config.result",
                 "needs.build_test_artifact.result",
                 "needs.unit_tests_complete.result",

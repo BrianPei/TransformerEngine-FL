@@ -241,9 +241,7 @@ jobs:
     container:
       image: ${{ inputs.image }}
       volumes: ${{ fromJson(inputs.container_volumes) }}
-      options: >-
-        --pull ${{ inputs.container_pull_policy }} ${{ inputs.container_options }}
-        ${{ vars.FLAGCICD_HOST_IP && format('--add-host flagcicd-inner.flagos.net:{0}', vars.FLAGCICD_HOST_IP) || '' }}
+      options: --pull ${{ inputs.container_pull_policy }} ${{ inputs.container_options }}
 
     steps:
       - name: Checkout source code
@@ -315,11 +313,12 @@ jobs:
 
       - name: Upload coverage report to FlagCICD
         if: ${{ !cancelled() && steps.aggregate.outputs.coverage_aggregated == 'true' }}
+        uses: flagos-ai/FlagOps/actions/post-pytest-report@v2
         continue-on-error: true
-        env:
-          FLAGCICD_API_TOKEN: ${{ secrets.FLAGCICD_API_TOKEN }}
-          REPORT_NAME: coverage-${{ inputs.platform }}-${{ inputs.device }}-pytorch-unittest
-        run: |
-          python3 .github/scripts/ci/upload_report.py \
-            --report "$REPORT_NAME.json" \
-            --file-type coverage
+        with:
+          backend_url: 'http://flagcicd-inner.flagos.net:8000/metrics/'
+          api_token: ${{ secrets.FLAGCICD_API_TOKEN }}
+          report_path: coverage-${{ inputs.platform }}-${{ inputs.device }}-pytorch-unittest.json
+          # Default github.job is shared by every platform/device.
+          job_name: coverage-${{ inputs.platform }}-${{ inputs.device }}-pytorch-unittest
+          fail_on_error: 'false'
