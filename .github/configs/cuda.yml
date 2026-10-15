@@ -53,6 +53,10 @@ test_artifact:
 device_types:
   - a100
 
+# Six BF16 Linear/LayerNorm/RMSNorm forward/backward smoke cases.
+performance_smoke:
+  enabled: true
+
 coverage:
   enabled: true
   required: false

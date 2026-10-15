@@ -37,6 +37,11 @@ test_artifact:
 device_types:
   - example
 
+# Initial smoke suite: six BF16 Linear/LayerNorm/RMSNorm forward/backward cases.
+performance_smoke:
+  enabled: false
+  # file_type: performance  # Optional override of the common default.
+
 coverage:
   enabled: true
   required: false

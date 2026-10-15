@@ -72,6 +72,98 @@ python .github/scripts/ci/generate_matrix.py \
   --changed-files tests/plugin/backend/ascend/run_unit_tests.sh
 ```
 
+## FlagCICD coverage and performance reports
+
+Coverage-enabled platforms collect Python coverage per unit-test group, combine
+raw data for groups named `pytorch_*`, and upload
+`coverage-<platform>-<device>-pytorch-unittest.json` to GitHub artifacts and
+`http://flagcicd-inner.flagos.net:8000/metrics/` with `file_type: coverage`.
+This does not measure C++ or device-kernel source coverage.
+
+Configure `FLAGCICD_API_TOKEN` as a repository or organization Actions secret
+accessible to this repository. Unified CI, manual platform workflows, and
+comment requests forward it explicitly through reusable workflows. No user ID
+or `x-user-id` header is sent, per the service owner's integration instructions.
+The public FlagOps `post-pytest-report@v2` still rejects empty user IDs, so
+`.github/scripts/ci/upload_report.py` sends its multipart form protocol directly
+using token authentication. It also attaches repository/workflow/job/run/runner
+metadata and the PR number for pull-request and issue-comment events. The
+backend job name is derived from the report filename without `.json`.
+
+The uploader bypasses proxies, limits connection time to 10 seconds and the
+whole request to 60 seconds, and never retries POSTs automatically. Missing
+tokens/files and upload failures are warnings. Reports remain available as
+GitHub artifacts when artifact upload succeeds; HTTP delivery status appears in
+the job summary. A 2xx response does not establish successful report parsing.
+
+The reporting containers use normal DNS by default. If a runner network needs
+an explicit hosts entry, configure the repository/organization Actions variable
+`FLAGCICD_HOST_IP` with an IP reachable from that network. Both reporting
+workflows then add `--add-host flagcicd-inner.flagos.net:<IP>` to the container;
+no host machine changes are needed. The service team supplied `10.1.4.15`, but
+local validation on the Enflame development machine timed out on that IP/port
+8000. Its existing DNS route returned HTTP 404 for GET `/metrics/`, which only
+establishes HTTP connectivity, not a valid upload endpoint. Verify the address
+and authenticated endpoint in the actual runner network before setting the
+variable. An `/etc/hosts` entry supplies name resolution, not network routing.
+
+### Performance smoke
+
+All eight platform configs enable `performance_smoke`: Ascend, CUDA, Enflame,
+Hygon, KunlunXin, MetaX, MUSA, and PPU. Every configured device runs the shared
+suite with its platform image, setup script and backend selection. The template
+keeps the suite disabled until a new platform is configured.
+Ascend reuses its existing NPU test compatibility patch. Device aliases exposed
+by vendor CUDA compatibility layers are resolved using an actual device tensor,
+so TE input validation and report metadata use the runtime device type.
+The suite waits for enabled unit and integration tests to succeed, reuses the
+platform image/setup/build artifact, and runs six BF16 cases: Linear, LayerNorm,
+and RMSNorm, each in forward and forward/backward mode, with input shape
+`[256, 512]`. It does not retry measurements or collect coverage.
+
+Each case performs 10 warmup iterations and 30 measured iterations. The timer
+uses host wall time with accelerator synchronization after each operation;
+reported latency includes host dispatch, and backward measurements include
+clearing gradients. These are end-to-end smoke measurements, not isolated kernel
+times. A finite output/gradient check precedes measurement. Missing hardware,
+failed cases, or an empty suite fail the job. Ordinary Python exceptions still
+produce a report; cancellation, process termination, or a step timeout may not.
+
+The JSON artifact `perf-smoke-<platform>-<device>.json` uses TE schema version 1:
+`environment` records the tested commit, image, software and device;
+`measurement` describes timing; `cases` records operator/mode/shape/dtype/status
+and `latency` samples/min/median/max in milliseconds; `summary` records totals
+and overall status. Logs and a latency table in the job summary aid inspection.
+No performance regression threshold is enforced yet. Enabled smoke jobs must
+pass the final platform gate; disabled jobs must be skipped.
+
+The backend performance schema has not been supplied. Uploads provisionally use
+`file_type: performance` by default; a platform can override it with
+`performance_smoke.file_type`. Confirm
+this identifier and parsing against a backend example; adapt the JSON if needed.
+Do not interpret a 2xx response as validated performance ingestion.
+
+### First live verification
+
+1. Run each `all_tests_<platform>.yml` on the branch containing these changes,
+   or run unified CI for all platforms. Each runs configured unit/integration
+   tests, coverage aggregation, then performance smoke. Validate every configured
+   device separately; MetaX C500 filenames below are examples.
+2. Inspect `coverage-metax-c500-pytorch-unittest.json`. Missing coverage
+   dependencies/data can prevent generation with `coverage.required: false`.
+3. Inspect `perf-smoke-metax-c500.json`: six passed cases, finite positive latency
+   samples, correct tested commit/device/image, and matching CI summary.
+4. Check both uploader summaries for HTTP 2xx. The aggregation and smoke
+   containers must resolve and directly reach the internal metrics endpoint.
+5. Verify repository/run/job ownership, coverage totals/file details, and
+   performance metrics in FlagCICD. Request the performance schema from the
+   service owner if the provisional report is rejected or not parsed.
+
+Local tests cover the HTTP form using a loopback server, error handling, report
+failure output, timing validation and workflow gates. They do not establish a
+live authenticated upload or accelerator performance. Do not publish results
+from CPU-only/mocked tests as device measurements.
+
 ## Validation on GitHub Actions
 
 Local checks validate routing and execute the gate commands, including failure,

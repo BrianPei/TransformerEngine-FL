@@ -38,6 +38,10 @@ setup_script: .github/scripts/setup_kunlun.sh
 device_types:
   - kunlunxin
 
+# Six BF16 Linear/LayerNorm/RMSNorm forward/backward smoke cases.
+performance_smoke:
+  enabled: true
+
 coverage:
   enabled: true
   required: false

@@ -34,6 +34,10 @@ setup_script: .github/scripts/setup_enflame.sh
 device_types:
   - S60
 
+# Six BF16 Linear/LayerNorm/RMSNorm forward/backward smoke cases.
+performance_smoke:
+  enabled: true
+
 coverage:
   enabled: true
   required: false
