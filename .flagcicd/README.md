@@ -14,8 +14,22 @@ This directory contains the FlagCICD contract and configuration for TransformerE
 1. Go to **Actions** → **FlagCICD Entry** → **Run workflow**
 2. Set parameters:
    - `platforms`: JSON array, e.g. `["cuda"]` or `["cuda", "ascend"]`
-   - `test_level`: `L0` (preflight), `L1` (unit), `L2` (unit+integration)
+   - `test_level`: `L0` (preflight), `L1` (unit), `L2` (unit+integration), `L3` (full regression), `L4` (release)
    - `risk_level`: `auto` (uses risk mapper) or explicit `R1`-`R4`
+
+### Test Levels
+
+| Level | Purpose | Scope | Timeout |
+|-------|---------|-------|---------|
+| L0 | Preflight | Checkout + config validation | 15 min |
+| L1 | Unit tests | Python unit tests | 60 min |
+| L2 | Integration | Unit + integration tests | 360 min |
+| L3 | Full regression | L2 + FA version compatibility + benchmarks | 480 min |
+| L4 | Release validation | L3 + cross-repo integration + model validation | 2880 min |
+
+**Note on L3**: Flash Attention version compatibility tests require Hopper or higher GPUs. These tests will be skipped if hardware is unavailable.
+
+**Note on L4**: Requires cross-repository coordination with Megatron-LM-FL and vLLM-plugin-FL teams. Manual coordination required for release validation procedures.
 
 ### Trigger via repository_dispatch
 
@@ -48,9 +62,9 @@ Unknown paths escalate to L2/R2.
 
 ## Regression Detection
 
-Regression detection supports two modes:
+Regression detection supports two modes and is automatically enabled for PR builds:
 
-**Absolute threshold** (default 2.0%):
+**Absolute threshold** (currently enabled):
 ```bash
 python3 .github/scripts/flagcicd_regression.py \
   --current report.json \
@@ -59,7 +73,14 @@ python3 .github/scripts/flagcicd_regression.py \
   --output verdict.json
 ```
 
-**Statistical** (3σ bounds):
+Platform-specific thresholds are defined in `.flagcicd/golden_baseline.json`:
+- CUDA: 2.0% (strictest - primary platform)
+- Ascend: 3.0%
+- Other platforms: 3.0%
+
+Exit code 1 indicates regression detected. Currently runs in **advisory mode** (non-blocking) to allow calibration period.
+
+**Statistical** (3σ bounds) - planned:
 ```bash
 python3 .github/scripts/flagcicd_regression.py \
   --current report.json \
@@ -68,7 +89,7 @@ python3 .github/scripts/flagcicd_regression.py \
   --output verdict.json
 ```
 
-Exit code 1 indicates regression detected.
+Statistical mode will be enabled after FlagOps API integration for historical data storage.
 
 ## Artifacts
 

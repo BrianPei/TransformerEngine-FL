@@ -95,7 +95,9 @@ def build_report(args: argparse.Namespace) -> dict[str, Any]:
             "name": "coverage.py",
             "version": args.coverage_version,
         },
-        "metrics": {"coverage": coverage_metrics(args.coverage, args.source_root, args.scope)},
+        "metrics": {
+            "coverage": coverage_metrics(args.coverage, args.source_root, args.scope)
+        },
         "child_jobs": args.child_job,
         "artifacts": artifacts,
         "created_at": utc_now(),
@@ -143,21 +145,31 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--output", type=Path)
     parser.add_argument("--run-id", default=os.environ.get("GITHUB_RUN_ID", "local"))
     parser.add_argument("--task-id", default=os.environ.get("FLAGCICD_TASK_ID", ""))
-    parser.add_argument("--parent-run-id", default=os.environ.get("FLAGCICD_PARENT_RUN_ID", ""))
+    parser.add_argument(
+        "--parent-run-id", default=os.environ.get("FLAGCICD_PARENT_RUN_ID", "")
+    )
     parser.add_argument("--attempt", type=int, default=1)
     parser.add_argument(
         "--repository",
         default=os.environ.get("GITHUB_REPOSITORY", "TransformerEngine-FL"),
     )
     parser.add_argument("--source-sha", default=os.environ.get("GITHUB_SHA", ""))
-    parser.add_argument("--test-level", default=os.environ.get("FLAGCICD_TEST_LEVEL", "L1"))
-    parser.add_argument("--risk-level", default=os.environ.get("FLAGCICD_RISK_LEVEL", "R1"))
+    parser.add_argument(
+        "--test-level", default=os.environ.get("FLAGCICD_TEST_LEVEL", "L1")
+    )
+    parser.add_argument(
+        "--risk-level", default=os.environ.get("FLAGCICD_RISK_LEVEL", "R1")
+    )
     parser.add_argument("--risk-rule-version", default="v1")
     parser.add_argument("--platform", default="")
     parser.add_argument("--device", default="")
     parser.add_argument("--image-ref", default=os.environ.get("FLAGCICD_IMAGE_REF", ""))
-    parser.add_argument("--image-digest", default=os.environ.get("FLAGCICD_IMAGE_DIGEST", ""))
-    parser.add_argument("--config-hash", default=os.environ.get("FLAGCICD_CONFIG_HASH", ""))
+    parser.add_argument(
+        "--image-digest", default=os.environ.get("FLAGCICD_IMAGE_DIGEST", "")
+    )
+    parser.add_argument(
+        "--config-hash", default=os.environ.get("FLAGCICD_CONFIG_HASH", "")
+    )
     parser.add_argument("--status", default="passed")
     parser.add_argument("--failure-reason", default="")
     parser.add_argument("--coverage-version", default="")
@@ -183,7 +195,9 @@ def main() -> int:
     if args.output is None:
         raise SystemExit("--output is required when creating a report")
     report = build_report(args)
-    args.output.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    args.output.write_text(
+        json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+    )
     errors = validate_report(report)
     if errors:
         for error in errors:

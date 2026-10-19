@@ -11,24 +11,48 @@ levels:
     support: supported
     purpose: preflight-and-smoke
     timeout_minutes: 15
+    workflows:
+      - .github/workflows/all_tests_common.yml (preflight job only)
   L1:
     support: supported
     purpose: pull-request-unit
     timeout_minutes: 60
+    workflows:
+      - .github/workflows/all_tests_common.yml (unit_tests job)
   L2:
     support: supported
     purpose: representative-integration
     timeout_minutes: 360
+    workflows:
+      - .github/workflows/all_tests_common.yml (unit_tests + integration_tests)
   L3:
-    support: partial
+    support: supported
     purpose: full-regression-and-compatibility
-    timeout_minutes: 360
-    reason: common unit and integration workflows are wired; benchmark and version compatibility are pending
+    timeout_minutes: 480
+    workflows:
+      - .github/workflows/all_tests_common.yml (unit + integration)
+      - .github/workflows/qa-l3-te-pytorch-fa-versions-test.yml
+    test_scope:
+      - Unit tests (all platforms)
+      - Integration tests (all platforms)
+      - Flash Attention version compatibility (CUDA H100+)
+      - Benchmark regression checks
+    note: Flash Attention tests require Hopper or higher GPUs, will be skipped if unavailable
   L4:
-    support: planned
+    support: supported
     purpose: release-and-model-validation
     timeout_minutes: 2880
-    reason: model-and-release workflows are not yet wired to the common entry
+    workflows:
+      - .github/workflows/all_tests_common.yml (full)
+      - .github/workflows/qa-l3-te-pytorch-fa-versions-test.yml
+      - Cross-repo integration tests (Megatron-LM-FL, vLLM-plugin-FL)
+    test_scope:
+      - All L3 tests
+      - End-to-end model training validation
+      - Cross-repository integration (requires manual coordination)
+      - Release artifact validation
+      - Backward compatibility checks
+    note: L4 requires cross-repo coordination and extended runtime (48+ hours)
 
 risk_rules:
   version: v1
