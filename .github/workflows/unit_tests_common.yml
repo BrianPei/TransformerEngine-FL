@@ -409,17 +409,28 @@ jobs:
           set -euo pipefail
           echo "🔍 Checking coverage regression against main branch baseline..."
 
-          # Fetch latest successful run on main branch for this platform
-          BASELINE_RUN=$(gh run list \
+          # Fetch latest successful runs on main branch
+          # Look for runs from CI or FlagCICD Entry workflows that have the platform report
+          BASELINE_RUN=""
+          for run_id in $(gh run list \
             --repo "$GITHUB_REPOSITORY" \
             --branch main \
             --status completed \
-            --limit 10 \
-            --json databaseId,conclusion,workflowName \
-            --jq "[.[] | select(.conclusion == \"success\" and (.workflowName | contains(\"${PLATFORM}\")))] | .[0].databaseId")
+            --limit 20 \
+            --json databaseId,conclusion \
+            --jq '.[] | select(.conclusion == "success") | .databaseId'); do
 
-          if [ -z "$BASELINE_RUN" ] || [ "$BASELINE_RUN" = "null" ]; then
-            echo "⚠️  No successful baseline run found on main branch for platform: ${PLATFORM}"
+            # Check if this run has the artifact we need
+            if gh run view "$run_id" --json artifacts \
+               --jq ".artifacts[] | select(.name == \"flagcicd-report-${PLATFORM}-${DEVICE}-pytorch-unittest\")" \
+               | grep -q "name"; then
+              BASELINE_RUN="$run_id"
+              break
+            fi
+          done
+
+          if [ -z "$BASELINE_RUN" ]; then
+            echo "⚠️  No baseline report artifact found on main branch for ${PLATFORM}-${DEVICE}"
             echo "   Skipping regression check (baseline will be established after merge)"
             exit 0
           fi

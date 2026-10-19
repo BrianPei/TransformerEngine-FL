@@ -436,8 +436,10 @@ jobs:
           fi
 
           expected_build=skipped
-          if [ "${{ needs.checkout_and_config.outputs.test_artifact_enabled }}" = "true" ] && [ "${{ inputs.run_unit_tests }}" = "true" ]; then
-            expected_build=success
+          if [ "${{ needs.checkout_and_config.outputs.test_artifact_enabled }}" = "true" ]; then
+            if [ "${{ inputs.run_unit_tests }}" = "true" ] || [ "${{ inputs.run_integration_tests }}" = "true" ]; then
+              expected_build=success
+            fi
           fi
           if [ "${{ needs.build_test_artifact.result }}" != "$expected_build" ]; then
             echo "Test artifact build failed or was cancelled: ${{ needs.build_test_artifact.result }}"

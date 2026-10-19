@@ -93,6 +93,17 @@ jobs:
               json.dumps(platforms, separators=(",", ":")), encoding="utf-8"
           )
           PY
+          # Reject unsupported test levels
+          if [ "$TEST_LEVEL_INPUT" = "L3" ] || [ "$TEST_LEVEL_INPUT" = "L4" ]; then
+            echo "::error::Test level $TEST_LEVEL_INPUT is not yet supported"
+            echo ""
+            echo "Supported levels: L0 (preflight), L1 (unit), L2 (integration)"
+            echo "Partially supported: L3 (requires Hopper+ GPU for FA tests)"
+            echo "Planned: L4 (requires cross-repo coordination)"
+            echo ""
+            echo "See .flagcicd/project.yaml for implementation status"
+            exit 1
+          fi
           python3 .github/scripts/flagcicd_plan.py \
             --changed-files "$CHANGED_FILES_INPUT" \
             --requested-level "$TEST_LEVEL_INPUT" \
@@ -104,13 +115,17 @@ jobs:
 
           plan = json.loads(open(os.environ["PLAN_PATH"], encoding="utf-8").read())
 
+          # Compute task_id
+          task_id_input = os.environ["TASK_ID_INPUT"]
+          task_id = task_id_input if task_id_input else f"te-{os.environ['GITHUB_RUN_ID']}"
+
           output_path = os.environ["GITHUB_OUTPUT"]
           with open(output_path, "a", encoding="utf-8") as output:
               output.write("platforms=" + os.environ["PLATFORMS_INPUT"] + "\n")
               output.write(f"test_level={plan['test_level']}\n")
               output.write(f"risk_level={plan['risk_level']}\n")
               output.write(f"risk_rule_version={plan['risk_rule_version']}\n")
-              output.write(f"task_id={os.environ['TASK_ID_INPUT'] or f'te-{os.environ['GITHUB_RUN_ID}']}\n")
+              output.write(f"task_id={task_id}\n")
               output.write(f"parent_run_id={os.environ['PARENT_RUN_ID_INPUT']}\n")
               output.write(f"run_unit_tests={str(plan['test_level'] != 'L0').lower()}\n")
               output.write(f"run_integration_tests={str(plan['test_level'] in {'L2', 'L3', 'L4'}).lower()}\n")
@@ -215,6 +230,7 @@ jobs:
           merge-multiple: true
 
       - name: Aggregate platform reports
+        id: aggregate
         env:
           EXPECTED_PLATFORMS: ${{ needs.plan.outputs.platforms }}
           RUN_ID: ${{ github.run_id }}
@@ -249,33 +265,14 @@ jobs:
       - name: Check platform results
         if: always()
         run: |
-          failed=false
-
           if [ "${{ needs.run_tests.result }}" != "success" ]; then
-            echo "FlagCICD platform jobs failed: ${{ needs.run_tests.result }}" >&2
-            failed=true
-          fi
-
-          # L3/L4 jobs should fail with exit 1 (not yet implemented)
-          # We expect them to be skipped (when not triggered) or failure (when triggered)
-          if [ "${{ needs.plan.outputs.test_level }}" = "L3" ] || [ "${{ needs.plan.outputs.test_level }}" = "L4" ]; then
-            fa_result="${{ needs.run_fa_version_tests.result }}"
-            if [ "$fa_result" = "success" ]; then
-              echo "::error::L3 FA tests claim success but are not yet implemented" >&2
-              failed=true
-            fi
-          fi
-
-          if [ "${{ needs.plan.outputs.test_level }}" = "L4" ]; then
-            l4_result="${{ needs.run_l4_validation.result }}"
-            if [ "$l4_result" = "success" ]; then
-              echo "::error::L4 validation claims success but is not yet implemented" >&2
-              failed=true
-            fi
-          fi
-
-          if [ "$failed" = "true" ]; then
+            echo "::error::FlagCICD platform jobs failed: ${{ needs.run_tests.result }}"
             exit 1
           fi
 
-          echo "FlagCICD entry completed successfully"
+          if [ "${{ steps.aggregate.outcome }}" != "success" ]; then
+            echo "::error::Report aggregation failed: ${{ steps.aggregate.outcome }}"
+            exit 1
+          fi
+
+          echo "✅ FlagCICD entry completed successfully"

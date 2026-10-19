@@ -216,12 +216,14 @@ class WorkflowGateTests(unittest.TestCase):
 
     def test_platform_gate_only_accepts_explicitly_disabled_skips(self):
         for build, unit, integration in itertools.product((False, True), repeat=3):
+            # Build should succeed only if artifact is enabled AND (unit OR integration)
+            build_should_run = build and (unit or integration)
             values = {
                 "needs.checkout_and_config.result": "success",
                 "needs.checkout_and_config.outputs.test_artifact_enabled": str(build).lower(),
                 "inputs.run_unit_tests": str(unit).lower(),
                 "inputs.run_integration_tests": str(integration).lower(),
-                "needs.build_test_artifact.result": "success" if build else "skipped",
+                "needs.build_test_artifact.result": "success" if build_should_run else "skipped",
                 "needs.unit_tests_complete.result": "success" if unit else "skipped",
                 "needs.integration_tests_complete.result": "success" if integration else "skipped",
             }

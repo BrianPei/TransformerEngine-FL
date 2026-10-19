@@ -106,9 +106,11 @@ def main() -> int:
     args.output.write_text(json.dumps(summary, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     print(f"Created FlagCICD run summary: {args.output}")
     if errors:
-        print("Report aggregation completed with errors:")
+        print("⚠️  Report aggregation completed with errors:")
         for error in errors:
-            print(f"- {error}")
+            print(f"  - {error}")
+        # Return non-zero to signal aggregation problems
+        return 1
     return 0
 
 
