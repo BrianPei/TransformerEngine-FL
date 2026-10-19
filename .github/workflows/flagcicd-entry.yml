@@ -3,6 +3,11 @@ name: FlagCICD Entry
 on:
   workflow_dispatch:
     inputs:
+      checkout_ref:
+        description: 'Optional git ref to checkout'
+        required: false
+        default: ''
+        type: string
       platforms:
         description: 'JSON array of platform names, for example ["cuda"]'
         required: false
@@ -117,6 +122,7 @@ jobs:
         platform: ${{ fromJson(needs.plan.outputs.platforms) }}
     uses: ./.github/workflows/all_tests_common.yml
     with:
+      checkout_ref: ${{ inputs.checkout_ref || github.event.client_payload.checkout_ref || '' }}
       platform: ${{ matrix.platform }}
       run_unit_tests: ${{ needs.plan.outputs.run_unit_tests == 'true' }}
       run_integration_tests: ${{ needs.plan.outputs.run_integration_tests == 'true' }}
@@ -134,6 +140,8 @@ jobs:
     steps:
       - name: Checkout source code
         uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.checkout_ref || github.event.client_payload.checkout_ref || '' }}
 
       - name: Download platform reports
         if: always()

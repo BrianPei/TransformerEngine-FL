@@ -10,6 +10,7 @@ on:
         required: false
         type: string
         default: ''
+        description: Optional git ref to checkout
       platform:
         required: true
         type: string
@@ -268,6 +269,8 @@ jobs:
     steps:
       - name: Checkout source code
         uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.checkout_ref }}
 
       - name: Create preflight report
         env:
