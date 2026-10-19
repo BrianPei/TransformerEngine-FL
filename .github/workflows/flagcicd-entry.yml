@@ -152,7 +152,7 @@ jobs:
         platform: ${{ fromJson(needs.plan.outputs.platforms) }}
     uses: ./.github/workflows/all_tests_common.yml
     with:
-      checkout_ref: ${{ inputs.checkout_ref || github.event.client_payload.checkout_ref || '' }}
+      checkout_ref: ${{ needs.plan.outputs.actual_sha }}
       platform: ${{ matrix.platform }}
       run_unit_tests: ${{ needs.plan.outputs.run_unit_tests == 'true' }}
       run_integration_tests: ${{ needs.plan.outputs.run_integration_tests == 'true' }}
@@ -172,7 +172,7 @@ jobs:
       - name: Checkout source code
         uses: actions/checkout@v4
         with:
-          ref: ${{ inputs.checkout_ref || github.event.client_payload.checkout_ref || '' }}
+          ref: ${{ needs.plan.outputs.actual_sha }}
 
       - name: FA Version Tests Placeholder
         run: |
@@ -199,7 +199,7 @@ jobs:
       - name: Checkout source code
         uses: actions/checkout@v4
         with:
-          ref: ${{ inputs.checkout_ref || github.event.client_payload.checkout_ref || '' }}
+          ref: ${{ needs.plan.outputs.actual_sha }}
 
       - name: L4 Release Validation Placeholder
         run: |
@@ -230,7 +230,7 @@ jobs:
       - name: Checkout source code
         uses: actions/checkout@v4
         with:
-          ref: ${{ inputs.checkout_ref || github.event.client_payload.checkout_ref || '' }}
+          ref: ${{ needs.plan.outputs.actual_sha }}
 
       - name: Download platform reports
         if: always()

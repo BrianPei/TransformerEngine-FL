@@ -152,7 +152,12 @@ jobs:
           TEST_ARTIFACT_PATH=""
           TEST_ARTIFACT_BUILD_SCRIPT=""
           if [ "$TEST_ARTIFACT_ENABLED" = "true" ]; then
-            SOURCE_KEY="${GITHUB_SHA:0:12}"
+            # Use actual source SHA if provided, otherwise fall back to GITHUB_SHA
+            ACTUAL_SHA="${{ inputs.actual_source_sha }}"
+            SOURCE_KEY="${ACTUAL_SHA:0:12}"
+            if [ -z "$SOURCE_KEY" ]; then
+              SOURCE_KEY="${GITHUB_SHA:0:12}"
+            fi
             CONFIG_KEY="${CONFIG_HASH:0:12}"
             TEST_ARTIFACT_NAME="test-artifact-$PLATFORM-$SOURCE_KEY-$CONFIG_KEY"
             TEST_ARTIFACT_PATH=$(yq '.test_artifact.path // ""' "$CONFIG_FILE")
