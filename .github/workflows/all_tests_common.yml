@@ -50,6 +50,11 @@ on:
         type: string
         default: ''
         description: Optional parent run identifier
+      actual_source_sha:
+        required: false
+        type: string
+        default: ''
+        description: Actual source commit SHA (resolved from checkout_ref)
 
 jobs:
   checkout_and_config:
@@ -84,19 +89,11 @@ jobs:
       test_artifact_build_script: ${{ steps.config.outputs.test_artifact_build_script }}
       test_artifact_runs_on: ${{ steps.config.outputs.test_artifact_runs_on }}
       test_artifact_container_options: ${{ steps.config.outputs.test_artifact_container_options }}
-      actual_sha: ${{ steps.resolve_sha.outputs.actual_sha }}
     steps:
       - name: Checkout source code
         uses: actions/checkout@v4
         with:
           ref: ${{ inputs.checkout_ref }}
-
-      - name: Resolve actual commit SHA
-        id: resolve_sha
-        run: |
-          ACTUAL_SHA=$(git rev-parse HEAD)
-          echo "actual_sha=$ACTUAL_SHA" >> "$GITHUB_OUTPUT"
-          echo "Checked out commit: $ACTUAL_SHA"
 
       - name: Load platform configuration
         id: config
@@ -290,7 +287,7 @@ jobs:
           python3 .github/scripts/flagcicd_report.py \
             --output "flagcicd-report-${{ inputs.platform }}-preflight.json" \
             --repository "$GITHUB_REPOSITORY" \
-            --source-sha "$GITHUB_SHA" \
+            --source-sha "${{ inputs.actual_source_sha || github.sha }}" \
             --run-id "${FLAGCICD_RUN_ID:-$GITHUB_RUN_ID}" \
             --task-id "$FLAGCICD_TASK_ID" \
             --parent-run-id "$FLAGCICD_PARENT_RUN_ID" \
@@ -357,7 +354,7 @@ jobs:
       flagcicd_config_hash: ${{ needs.checkout_and_config.outputs.config_hash }}
       test_artifact_name: ${{ needs.checkout_and_config.outputs.test_artifact_name }}
       test_artifact_path: ${{ needs.checkout_and_config.outputs.test_artifact_path }}
-      actual_source_sha: ${{ needs.checkout_and_config.outputs.actual_sha }}
+      actual_source_sha: ${{ inputs.actual_source_sha }}
 
   unit_tests_complete:
     name: unit_tests_complete

@@ -48,6 +48,7 @@ def main() -> int:
     parser.add_argument("--source-sha", required=True)
     parser.add_argument("--test-level", required=True)
     parser.add_argument("--risk-level", required=True)
+    parser.add_argument("--platform-job-result", default="success")
     args = parser.parse_args()
 
     expected_platforms = json.loads(args.expected_platforms)
@@ -70,18 +71,35 @@ def main() -> int:
     if missing_platforms:
         errors.append(f"missing platform reports: {sorted(missing_platforms)}")
 
-    # Check if test level requirements are met by report scopes
+    # Check if test level requirements are met by report scopes (per platform)
     test_level = args.test_level
-    report_scopes = {report.get("scope", "") for report in reports}
     if test_level in {"L2", "L3", "L4"}:
-        # L2+ requires both unit and integration test results
-        if "unit" not in report_scopes:
-            errors.append(f"test level {test_level} requires unit test reports")
+        # L2+ requires unit test reports from all platforms
+        for platform in expected_platforms:
+            platform_reports = [r for r in reports if r.get("platform", {}).get("name") == platform]
+            platform_scopes = {
+                r.get("metrics", {}).get("coverage", {}).get("scope", "") for r in platform_reports
+            }
+            if "unit" not in platform_scopes:
+                errors.append(
+                    f"test level {test_level} requires unit test report from platform: {platform}"
+                )
         # Note: Integration tests currently don't produce structured reports.
         # The aggregated status only reflects unit test results. Integration
         # test failures are caught by the workflow-level gate in entry_complete,
         # which checks needs.run_tests.result. External systems should check
         # the workflow conclusion, not just this aggregated status field.
+
+    # If platform jobs failed, override aggregated status
+    final_status = "report_error" if errors else choose_status(statuses, missing_platforms)
+    if args.platform_job_result not in {"success", "skipped"}:
+        # Platform job failed or cancelled, reflect in aggregated status
+        # Map workflow result to report status
+        result_to_status = {
+            "failure": "test_failed",
+            "cancelled": "cancelled",
+        }
+        final_status = result_to_status.get(args.platform_job_result, "infra_error")
 
     summary: dict[str, Any] = {
         "schema_version": SCHEMA_VERSION,
@@ -93,7 +111,7 @@ def main() -> int:
         "source_sha": args.source_sha,
         "test_level": args.test_level,
         "risk_level": args.risk_level,
-        "status": choose_status(statuses, missing_platforms),
+        "status": final_status,
         "platform": {"name": "multi", "device": "multi"},
         "metrics": {
             "coverage": {

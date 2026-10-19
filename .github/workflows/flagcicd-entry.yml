@@ -63,11 +63,19 @@ jobs:
       run_integration_tests: ${{ steps.normalize.outputs.run_integration_tests }}
       run_unit_tests: ${{ steps.normalize.outputs.run_unit_tests }}
       run_fa_version_tests: ${{ steps.normalize.outputs.run_fa_version_tests }}
+      actual_sha: ${{ steps.resolve_sha.outputs.actual_sha }}
     steps:
       - name: Checkout source code
         uses: actions/checkout@v4
         with:
           ref: ${{ inputs.checkout_ref || github.event.client_payload.checkout_ref || '' }}
+
+      - name: Resolve actual commit SHA
+        id: resolve_sha
+        run: |
+          ACTUAL_SHA=$(git rev-parse HEAD)
+          echo "actual_sha=$ACTUAL_SHA" >> "$GITHUB_OUTPUT"
+          echo "📌 Source commit for this run: $ACTUAL_SHA"
 
       - name: Validate and normalize request
         id: normalize
@@ -153,6 +161,7 @@ jobs:
       flagcicd_task_id: ${{ needs.plan.outputs.task_id }}
       flagcicd_run_id: ${{ github.run_id }}
       flagcicd_parent_run_id: ${{ needs.plan.outputs.parent_run_id }}
+      actual_source_sha: ${{ needs.plan.outputs.actual_sha }}
 
   run_fa_version_tests:
     name: FA Version Compatibility (L3/L4)
@@ -223,13 +232,6 @@ jobs:
         with:
           ref: ${{ inputs.checkout_ref || github.event.client_payload.checkout_ref || '' }}
 
-      - name: Resolve actual commit SHA
-        id: resolve_sha
-        run: |
-          ACTUAL_SHA=$(git rev-parse HEAD)
-          echo "actual_sha=$ACTUAL_SHA" >> "$GITHUB_OUTPUT"
-          echo "📌 Actual source commit: $ACTUAL_SHA"
-
       - name: Download platform reports
         if: always()
         uses: actions/download-artifact@v4
@@ -246,7 +248,7 @@ jobs:
           RUN_ID: ${{ github.run_id }}
           TASK_ID: ${{ needs.plan.outputs.task_id }}
           PARENT_RUN_ID: ${{ needs.plan.outputs.parent_run_id }}
-          SOURCE_SHA: ${{ steps.resolve_sha.outputs.actual_sha }}
+          SOURCE_SHA: ${{ needs.plan.outputs.actual_sha }}
           TEST_LEVEL: ${{ needs.plan.outputs.test_level }}
           RISK_LEVEL: ${{ needs.plan.outputs.risk_level }}
         run: |
@@ -260,7 +262,8 @@ jobs:
             --parent-run-id "$PARENT_RUN_ID" \
             --source-sha "$SOURCE_SHA" \
             --test-level "$TEST_LEVEL" \
-            --risk-level "$RISK_LEVEL"
+            --risk-level "$RISK_LEVEL" \
+            --platform-job-result "${{ needs.run_tests.result }}"
 
       - name: Upload FlagCICD run summary
         if: always()
