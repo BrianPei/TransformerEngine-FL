@@ -64,6 +64,11 @@ jobs:
       run_unit_tests: ${{ steps.normalize.outputs.run_unit_tests }}
       run_fa_version_tests: ${{ steps.normalize.outputs.run_fa_version_tests }}
     steps:
+      - name: Checkout source code
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.checkout_ref || github.event.client_payload.checkout_ref || '' }}
+
       - name: Validate and normalize request
         id: normalize
         env:
@@ -75,8 +80,7 @@ jobs:
           PARENT_RUN_ID_INPUT: ${{ inputs.parent_run_id || github.event.client_payload.parent_run_id || '' }}
         run: |
           set -euo pipefail
-          actions/checkout is intentionally kept in the plan job so that the
-          risk mapper always evaluates the exact checked-out source.
+          # Validate platforms
           PYTHONPATH="$GITHUB_WORKSPACE" python3 - <<'PY'
           import json
           import os
@@ -145,17 +149,19 @@ jobs:
 
       - name: FA Version Tests Placeholder
         run: |
+          echo "::error::L3 Flash Attention tests not yet enabled"
+          echo ""
           echo "🔬 Flash Attention Version Compatibility Tests (L3)"
           echo ""
-          echo "Note: qa-l3-te-pytorch-fa-versions-test.yml requires Hopper+ GPUs"
-          echo "      Currently disabled (see workflow trigger branches)"
+          echo "Status: NOT YET ENABLED"
+          echo "Reason: Requires Hopper+ GPUs and workflow trigger enablement"
           echo ""
           echo "To enable:"
           echo "  1. Ensure Hopper or higher GPU availability"
           echo "  2. Update qa-l3-te-pytorch-fa-versions-test.yml trigger branches"
-          echo "  3. Call that workflow from here with appropriate inputs"
+          echo "  3. Remove this placeholder and call the actual workflow"
           echo ""
-          echo "✅ Placeholder passed (actual tests pending GPU availability)"
+          exit 1
 
   run_l4_validation:
     name: Release Validation (L4 only)
@@ -170,22 +176,23 @@ jobs:
 
       - name: L4 Release Validation Placeholder
         run: |
-          echo "🚀 L4 Release Validation"
+          echo "::error::L4 release validation not yet implemented"
           echo ""
-          echo "L4 includes:"
-          echo "  - End-to-end model training validation"
-          echo "  - Cross-repo integration (Megatron-LM-FL, vLLM-plugin-FL)"
-          echo "  - Release artifact validation (wheel, docs)"
-          echo "  - Backward compatibility checks"
+          echo "🚀 Release Validation Tests (L4)"
           echo ""
-          echo "Implementation plan:"
-          echo "  1. Coordinate with Megatron-LM-FL and vLLM-plugin-FL teams"
-          echo "  2. Define model validation scenarios and success criteria"
-          echo "  3. Set up extended runtime infrastructure (48+ hours)"
-          echo "  4. Create separate workflow or extend this placeholder"
+          echo "Status: NOT YET IMPLEMENTED"
+          echo "Reason: Requires cross-repo coordination and test definition"
           echo ""
-          echo "⚠️  L4 is currently a placeholder - manual coordination required"
-          echo "   Contact the TE-FL maintainers for release validation procedures"
+          echo "Required implementation:"
+          echo "  1. Define cross-repo integration test scenarios with Megatron-LM-FL"
+          echo "  2. Define cross-repo integration test scenarios with vLLM-plugin-FL"
+          echo "  3. Define model training/inference validation criteria"
+          echo "  4. Define release artifact validation (wheel, docs)"
+          echo "  5. Define backward compatibility test matrix"
+          echo ""
+          echo "Contact: Cross-repo CI/CD coordination team"
+          echo ""
+          exit 1
 
   entry_complete:
     name: Aggregate FlagCICD reports
@@ -242,8 +249,33 @@ jobs:
       - name: Check platform results
         if: always()
         run: |
+          failed=false
+
           if [ "${{ needs.run_tests.result }}" != "success" ]; then
             echo "FlagCICD platform jobs failed: ${{ needs.run_tests.result }}" >&2
+            failed=true
+          fi
+
+          # L3/L4 jobs should fail with exit 1 (not yet implemented)
+          # We expect them to be skipped (when not triggered) or failure (when triggered)
+          if [ "${{ needs.plan.outputs.test_level }}" = "L3" ] || [ "${{ needs.plan.outputs.test_level }}" = "L4" ]; then
+            fa_result="${{ needs.run_fa_version_tests.result }}"
+            if [ "$fa_result" = "success" ]; then
+              echo "::error::L3 FA tests claim success but are not yet implemented" >&2
+              failed=true
+            fi
+          fi
+
+          if [ "${{ needs.plan.outputs.test_level }}" = "L4" ]; then
+            l4_result="${{ needs.run_l4_validation.result }}"
+            if [ "$l4_result" = "success" ]; then
+              echo "::error::L4 validation claims success but is not yet implemented" >&2
+              failed=true
+            fi
+          fi
+
+          if [ "$failed" = "true" ]; then
             exit 1
           fi
+
           echo "FlagCICD entry completed successfully"

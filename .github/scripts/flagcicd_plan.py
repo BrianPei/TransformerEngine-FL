@@ -52,7 +52,11 @@ RULES = (
 def matches(path: str, pattern: str) -> bool:
     """Match repository-relative paths with a small, CI-portable glob."""
 
-    normalized = path.lstrip("./")
+    # Remove exactly "./" prefix if present, don't use lstrip which removes chars
+    if path.startswith("./"):
+        normalized = path[2:]
+    else:
+        normalized = path
     if fnmatch.fnmatchcase(normalized, pattern):
         return True
     if pattern.endswith("/**") and normalized.startswith(pattern[:-3]):

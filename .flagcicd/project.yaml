@@ -26,26 +26,25 @@ levels:
     workflows:
       - .github/workflows/all_tests_common.yml (unit_tests + integration_tests)
   L3:
-    support: supported
+    support: partial
     purpose: full-regression-and-compatibility
     timeout_minutes: 480
     workflows:
       - .github/workflows/all_tests_common.yml (unit + integration)
-      - .github/workflows/qa-l3-te-pytorch-fa-versions-test.yml
+      - .github/workflows/qa-l3-te-pytorch-fa-versions-test.yml (disabled, requires Hopper+ GPU)
     test_scope:
       - Unit tests (all platforms)
       - Integration tests (all platforms)
-      - Flash Attention version compatibility (CUDA H100+)
-      - Benchmark regression checks
-    note: Flash Attention tests require Hopper or higher GPUs, will be skipped if unavailable
+      - Flash Attention version compatibility (requires Hopper+ GPU, currently disabled)
+      - Benchmark regression checks (planned)
+    note: FA tests require Hopper+ GPUs and workflow trigger enablement
   L4:
-    support: supported
+    support: planned
     purpose: release-and-model-validation
     timeout_minutes: 2880
     workflows:
       - .github/workflows/all_tests_common.yml (full)
-      - .github/workflows/qa-l3-te-pytorch-fa-versions-test.yml
-      - Cross-repo integration tests (Megatron-LM-FL, vLLM-plugin-FL)
+      - Cross-repo integration tests (requires coordination)
     test_scope:
       - All L3 tests
       - End-to-end model training validation

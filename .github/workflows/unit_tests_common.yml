@@ -426,18 +426,18 @@ jobs:
 
           echo "📥 Downloading baseline from run ID: $BASELINE_RUN"
           gh run download "$BASELINE_RUN" \
-            --name "coverage-${PLATFORM}-${DEVICE}-pytorch_unittest" \
+            --name "flagcicd-report-${PLATFORM}-${DEVICE}-pytorch-unittest" \
             --dir baseline 2>&1 || {
-              echo "⚠️  Could not download baseline coverage artifact"
+              echo "⚠️  Could not download baseline report artifact"
               echo "   Artifact may not exist or name format may have changed"
               exit 0
             }
 
-          BASELINE_FILE=$(find baseline -name "*.json" -type f | head -n 1)
-          CURRENT_FILE="coverage-${PLATFORM}-${DEVICE}-pytorch_unittest.json"
+          BASELINE_FILE="baseline/flagcicd-report-${PLATFORM}-${DEVICE}-pytorch-unittest.json"
+          CURRENT_FILE="${FLAGCICD_REPORT_PATH:-flagcicd-report-${PLATFORM}-${DEVICE}-pytorch-unittest.json}"
 
           if [ ! -f "$BASELINE_FILE" ]; then
-            echo "⚠️  Baseline coverage JSON not found in downloaded artifacts"
+            echo "⚠️  Baseline report not found in downloaded artifacts"
             exit 0
           fi
 
@@ -452,21 +452,21 @@ jobs:
 
           # Get platform-specific threshold from golden_baseline.json
           THRESHOLD=$(python3 - <<'PYEOF'
-import json, os
-try:
-    baseline_config = json.load(open(".flagcicd/golden_baseline.json"))
-    platform = os.environ["PLATFORM"].lower()
-    if platform in baseline_config.get("platforms", {}):
-        threshold = baseline_config["platforms"][platform]["absolute_threshold_percent"]
-    elif "other" in baseline_config.get("platforms", {}):
-        threshold = baseline_config["platforms"]["other"]["absolute_threshold_percent"]
-    else:
-        threshold = 2.0
-    print(threshold)
-except Exception:
-    print("2.0")
-PYEOF
-)
+          import json, os
+          try:
+              baseline_config = json.load(open(".flagcicd/golden_baseline.json"))
+              platform = os.environ["PLATFORM"].lower()
+              if platform in baseline_config.get("platforms", {}):
+                  threshold = baseline_config["platforms"][platform]["absolute_threshold_percent"]
+              elif "other" in baseline_config.get("platforms", {}):
+                  threshold = baseline_config["platforms"]["other"]["absolute_threshold_percent"]
+              else:
+                  threshold = 2.0
+              print(threshold)
+          except Exception:
+              print("2.0")
+          PYEOF
+          )
 
           echo "   Threshold: ${THRESHOLD}%"
 

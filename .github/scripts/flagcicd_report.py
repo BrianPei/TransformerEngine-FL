@@ -137,9 +137,8 @@ def validate_report(report: dict[str, Any]) -> list[str]:
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
-    mode = parser.add_mutually_exclusive_group(required=True)
-    mode.add_argument("--coverage", type=Path)
-    mode.add_argument("--validate", type=Path)
+    parser.add_argument("--coverage", type=Path, help="Path to coverage.py JSON output")
+    parser.add_argument("--validate", type=Path, help="Path to existing report to validate only")
     parser.add_argument("--output", type=Path)
     parser.add_argument("--run-id", default=os.environ.get("GITHUB_RUN_ID", "local"))
     parser.add_argument("--task-id", default=os.environ.get("FLAGCICD_TASK_ID", ""))
