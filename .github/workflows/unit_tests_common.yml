@@ -99,6 +99,10 @@ on:
         required: false
         type: string
         default: ''
+      actual_source_sha:
+        required: false
+        type: string
+        default: ''
       flagcicd_image_digest:
         required: false
         type: string
@@ -363,7 +367,7 @@ jobs:
           report_args=(
             --output "$report_path"
             --repository "$GITHUB_REPOSITORY"
-            --source-sha "$GITHUB_SHA"
+            --source-sha "${{ inputs.actual_source_sha || github.sha }}"
             --run-id "${FLAGCICD_RUN_ID:-$GITHUB_RUN_ID}"
             --task-id "$FLAGCICD_TASK_ID"
             --parent-run-id "$FLAGCICD_PARENT_RUN_ID"
@@ -410,7 +414,7 @@ jobs:
           echo "🔍 Checking coverage regression against main branch baseline..."
 
           # Fetch latest successful runs on main branch
-          # Look for runs from CI or FlagCICD Entry workflows that have the platform report
+          # Look for runs that have the platform report artifact
           BASELINE_RUN=""
           for run_id in $(gh run list \
             --repo "$GITHUB_REPOSITORY" \
@@ -420,10 +424,11 @@ jobs:
             --json databaseId,conclusion \
             --jq '.[] | select(.conclusion == "success") | .databaseId'); do
 
-            # Check if this run has the artifact we need
-            if gh run view "$run_id" --json artifacts \
-               --jq ".artifacts[] | select(.name == \"flagcicd-report-${PLATFORM}-${DEVICE}-pytorch-unittest\")" \
-               | grep -q "name"; then
+            # Check if this run has the artifact we need using GitHub API
+            artifact_name="flagcicd-report-${PLATFORM}-${DEVICE}-pytorch-unittest"
+            if gh api "repos/$GITHUB_REPOSITORY/actions/runs/$run_id/artifacts" \
+               --jq ".artifacts[] | select(.name == \"$artifact_name\") | .name" \
+               2>/dev/null | grep -q "$artifact_name"; then
               BASELINE_RUN="$run_id"
               break
             fi

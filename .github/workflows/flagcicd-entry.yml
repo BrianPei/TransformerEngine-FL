@@ -93,22 +93,25 @@ jobs:
               json.dumps(platforms, separators=(",", ":")), encoding="utf-8"
           )
           PY
-          # Reject unsupported test levels
-          if [ "$TEST_LEVEL_INPUT" = "L3" ] || [ "$TEST_LEVEL_INPUT" = "L4" ]; then
-            echo "::error::Test level $TEST_LEVEL_INPUT is not yet supported"
-            echo ""
-            echo "Supported levels: L0 (preflight), L1 (unit), L2 (integration)"
-            echo "Partially supported: L3 (requires Hopper+ GPU for FA tests)"
-            echo "Planned: L4 (requires cross-repo coordination)"
-            echo ""
-            echo "See .flagcicd/project.yaml for implementation status"
-            exit 1
-          fi
           python3 .github/scripts/flagcicd_plan.py \
             --changed-files "$CHANGED_FILES_INPUT" \
             --requested-level "$TEST_LEVEL_INPUT" \
             --requested-risk "$RISK_LEVEL_INPUT" \
             --output "$RUNNER_TEMP/flagcicd-plan.json"
+
+          # Check final test level after risk mapping
+          FINAL_LEVEL=$(python3 -c "import json; print(json.load(open('$RUNNER_TEMP/flagcicd-plan.json'))['test_level'])")
+          if [ "$FINAL_LEVEL" = "L3" ] || [ "$FINAL_LEVEL" = "L4" ]; then
+            echo "::error::Risk mapping produced unsupported test level: $FINAL_LEVEL"
+            echo ""
+            echo "Requested: $TEST_LEVEL_INPUT"
+            echo "Final (after risk mapping): $FINAL_LEVEL"
+            echo ""
+            echo "L3/L4 are not yet supported (see .flagcicd/project.yaml)"
+            echo "Please modify changed files or request a lower test level"
+            exit 1
+          fi
+
           PLAN_PATH="$RUNNER_TEMP/flagcicd-plan.json" python3 - <<'PY'
           import json
           import os
@@ -220,6 +223,13 @@ jobs:
         with:
           ref: ${{ inputs.checkout_ref || github.event.client_payload.checkout_ref || '' }}
 
+      - name: Resolve actual commit SHA
+        id: resolve_sha
+        run: |
+          ACTUAL_SHA=$(git rev-parse HEAD)
+          echo "actual_sha=$ACTUAL_SHA" >> "$GITHUB_OUTPUT"
+          echo "📌 Actual source commit: $ACTUAL_SHA"
+
       - name: Download platform reports
         if: always()
         uses: actions/download-artifact@v4
@@ -236,7 +246,7 @@ jobs:
           RUN_ID: ${{ github.run_id }}
           TASK_ID: ${{ needs.plan.outputs.task_id }}
           PARENT_RUN_ID: ${{ needs.plan.outputs.parent_run_id }}
-          SOURCE_SHA: ${{ github.sha }}
+          SOURCE_SHA: ${{ steps.resolve_sha.outputs.actual_sha }}
           TEST_LEVEL: ${{ needs.plan.outputs.test_level }}
           RISK_LEVEL: ${{ needs.plan.outputs.risk_level }}
         run: |

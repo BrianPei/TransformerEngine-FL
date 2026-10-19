@@ -69,6 +69,20 @@ def main() -> int:
     missing_platforms = set(expected_platforms) - actual_platforms
     if missing_platforms:
         errors.append(f"missing platform reports: {sorted(missing_platforms)}")
+
+    # Check if test level requirements are met by report scopes
+    test_level = args.test_level
+    report_scopes = {report.get("scope", "") for report in reports}
+    if test_level in {"L2", "L3", "L4"}:
+        # L2+ requires both unit and integration test results
+        if "unit" not in report_scopes:
+            errors.append(f"test level {test_level} requires unit test reports")
+        # Note: Integration tests currently don't produce structured reports.
+        # The aggregated status only reflects unit test results. Integration
+        # test failures are caught by the workflow-level gate in entry_complete,
+        # which checks needs.run_tests.result. External systems should check
+        # the workflow conclusion, not just this aggregated status field.
+
     summary: dict[str, Any] = {
         "schema_version": SCHEMA_VERSION,
         "report_type": "run_summary",
