@@ -30,7 +30,11 @@ def utc_now() -> str:
 def choose_status(statuses: list[str], missing_platforms: set[str]) -> str:
     if missing_platforms:
         return "infra_error"
-    return max(statuses, key=lambda status: STATUS_PRIORITY.get(status, 4), default="infra_error")
+    return max(
+        statuses,
+        key=lambda status: STATUS_PRIORITY.get(status, 4),
+        default="infra_error",
+    )
 
 
 def main() -> int:
@@ -61,9 +65,7 @@ def main() -> int:
         reports.append(payload)
 
     statuses = [report.get("status", "report_error") for report in reports]
-    actual_platforms = {
-        report.get("platform", {}).get("name", "") for report in reports
-    }
+    actual_platforms = {report.get("platform", {}).get("name", "") for report in reports}
     missing_platforms = set(expected_platforms) - actual_platforms
     if missing_platforms:
         errors.append(f"missing platform reports: {sorted(missing_platforms)}")
@@ -94,7 +96,10 @@ def main() -> int:
             }
         },
         "children": reports,
-        "artifacts": [{"kind": "child_report", "path": str(path)} for path in sorted(args.input_dir.rglob("*.json"))],
+        "artifacts": [
+            {"kind": "child_report", "path": str(path)}
+            for path in sorted(args.input_dir.rglob("*.json"))
+        ],
         "errors": errors,
         "created_at": utc_now(),
     }

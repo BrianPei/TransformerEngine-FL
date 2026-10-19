@@ -26,7 +26,9 @@ def coverage_percent(report: dict[str, Any]) -> float | None:
     return coverage.get("percent", 0.0)
 
 
-def regression_verdict(current: float | None, baseline: float | None, threshold: float) -> dict[str, Any]:
+def regression_verdict(
+    current: float | None, baseline: float | None, threshold: float
+) -> dict[str, Any]:
     """Determine if current coverage regresses against baseline."""
     if current is None:
         return {
@@ -89,7 +91,9 @@ def statistical_regression(
     if current < lower_bound:
         return {
             "status": "outlier_below",
-            "message": f"Coverage {current:.2f}% is below {sigma_multiplier}σ bound ({lower_bound:.2f}%)",
+            "message": (
+                f"Coverage {current:.2f}% is below {sigma_multiplier}σ bound ({lower_bound:.2f}%)"
+            ),
             "current_percent": current,
             "baseline_mean": mean,
             "baseline_std": std,
@@ -99,7 +103,9 @@ def statistical_regression(
     if current > upper_bound:
         return {
             "status": "outlier_above",
-            "message": f"Coverage {current:.2f}% is above {sigma_multiplier}σ bound ({upper_bound:.2f}%)",
+            "message": (
+                f"Coverage {current:.2f}% is above {sigma_multiplier}σ bound ({upper_bound:.2f}%)"
+            ),
             "current_percent": current,
             "baseline_mean": mean,
             "baseline_std": std,
@@ -108,7 +114,10 @@ def statistical_regression(
         }
     return {
         "status": "within_bounds",
-        "message": f"Coverage {current:.2f}% is within {sigma_multiplier}σ bounds [{lower_bound:.2f}%, {upper_bound:.2f}%]",
+        "message": (
+            f"Coverage {current:.2f}% is within {sigma_multiplier}σ bounds [{lower_bound:.2f}%,"
+            f" {upper_bound:.2f}%]"
+        ),
         "current_percent": current,
         "baseline_mean": mean,
         "baseline_std": std,
@@ -121,9 +130,18 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--current", type=Path, required=True, help="Current FlagCICD report")
     parser.add_argument("--baseline", type=Path, help="Single baseline FlagCICD report")
-    parser.add_argument("--historical", type=Path, help="JSON array of historical coverage percentages")
-    parser.add_argument("--threshold", type=float, default=2.0, help="Absolute threshold in percent")
-    parser.add_argument("--sigma", type=float, default=3.0, help="Sigma multiplier for statistical bounds")
+    parser.add_argument(
+        "--historical", type=Path, help="JSON array of historical coverage percentages"
+    )
+    parser.add_argument(
+        "--threshold", type=float, default=2.0, help="Absolute threshold in percent"
+    )
+    parser.add_argument(
+        "--sigma",
+        type=float,
+        default=3.0,
+        help="Sigma multiplier for statistical bounds",
+    )
     parser.add_argument("--output", type=Path, required=True, help="Output regression verdict JSON")
     args = parser.parse_args()
 

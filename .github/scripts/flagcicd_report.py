@@ -145,7 +145,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--task-id", default=os.environ.get("FLAGCICD_TASK_ID", ""))
     parser.add_argument("--parent-run-id", default=os.environ.get("FLAGCICD_PARENT_RUN_ID", ""))
     parser.add_argument("--attempt", type=int, default=1)
-    parser.add_argument("--repository", default=os.environ.get("GITHUB_REPOSITORY", "TransformerEngine-FL"))
+    parser.add_argument(
+        "--repository",
+        default=os.environ.get("GITHUB_REPOSITORY", "TransformerEngine-FL"),
+    )
     parser.add_argument("--source-sha", default=os.environ.get("GITHUB_SHA", ""))
     parser.add_argument("--test-level", default=os.environ.get("FLAGCICD_TEST_LEVEL", "L1"))
     parser.add_argument("--risk-level", default=os.environ.get("FLAGCICD_RISK_LEVEL", "R1"))
