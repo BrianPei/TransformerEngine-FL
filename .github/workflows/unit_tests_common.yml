@@ -380,7 +380,7 @@ jobs:
           name: flagcicd-report-${{ inputs.platform }}-${{ inputs.device }}-pytorch-unittest
           path: flagcicd-report-${{ inputs.platform }}-${{ inputs.device }}-pytorch-unittest.json
           if-no-files-found: warn
-          retention-days: 14
+          retention-days: 90
 
       - name: Check coverage regression
         if: |
@@ -396,43 +396,35 @@ jobs:
           set -euo pipefail
           echo "🔍 Checking coverage regression against main branch baseline..."
 
-          # Fetch latest successful runs on main branch
-          # Look for runs that have the platform report artifact
-          BASELINE_RUN=""
-          for run_id in $(gh run list \
-            --repo "$GITHUB_REPOSITORY" \
+          artifact_name="flagcicd-report-${PLATFORM}-${DEVICE}-pytorch-unittest"
+          baseline_dir="$RUNNER_TEMP/flagcicd-baseline"
+          baseline_run_file="$RUNNER_TEMP/flagcicd-baseline-run-id"
+          baseline_log="$RUNNER_TEMP/flagcicd-baseline-fetch.log"
+          set +e
+          python3 "$GITHUB_WORKSPACE/.github/scripts/fetch_flagcicd_baseline.py" \
+            --repository "$GITHUB_REPOSITORY" \
             --branch main \
-            --status completed \
-            --limit 20 \
-            --json databaseId,conclusion \
-            --jq '.[] | select(.conclusion == "success") | .databaseId'); do
+            --artifact-name "$artifact_name" \
+            --output-dir "$baseline_dir" \
+            >"$baseline_run_file" 2>"$baseline_log"
+          fetch_status=$?
+          set -e
 
-            # Check if this run has the artifact we need using GitHub API
-            artifact_name="flagcicd-report-${PLATFORM}-${DEVICE}-pytorch-unittest"
-            if gh api "repos/$GITHUB_REPOSITORY/actions/runs/$run_id/artifacts" \
-               --jq ".artifacts[] | select(.name == \"$artifact_name\") | .name" \
-               2>/dev/null | grep -q "$artifact_name"; then
-              BASELINE_RUN="$run_id"
-              break
-            fi
-          done
-
-          if [ -z "$BASELINE_RUN" ]; then
+          if [ "$fetch_status" -eq 2 ]; then
+            cat "$baseline_log"
             echo "⚠️  No baseline report artifact found on main branch for ${PLATFORM}-${DEVICE}"
             echo "   Skipping regression check (baseline will be established after merge)"
             exit 0
           fi
+          if [ "$fetch_status" -ne 0 ]; then
+            cat "$baseline_log" >&2
+            echo "::warning::Unable to query the main-branch FlagCICD baseline; regression check skipped"
+            exit 0
+          fi
 
-          echo "📥 Downloading baseline from run ID: $BASELINE_RUN"
-          gh run download "$BASELINE_RUN" \
-            --name "flagcicd-report-${PLATFORM}-${DEVICE}-pytorch-unittest" \
-            --dir baseline 2>&1 || {
-              echo "⚠️  Could not download baseline report artifact"
-              echo "   Artifact may not exist or name format may have changed"
-              exit 0
-            }
-
-          BASELINE_FILE="baseline/flagcicd-report-${PLATFORM}-${DEVICE}-pytorch-unittest.json"
+          BASELINE_RUN=$(tr -d '[:space:]' < "$baseline_run_file")
+          echo "📥 Downloaded baseline from run ID: $BASELINE_RUN"
+          BASELINE_FILE="$baseline_dir/flagcicd-report-${PLATFORM}-${DEVICE}-pytorch-unittest.json"
           CURRENT_FILE="${FLAGCICD_REPORT_PATH:-flagcicd-report-${PLATFORM}-${DEVICE}-pytorch-unittest.json}"
 
           if [ ! -f "$BASELINE_FILE" ]; then

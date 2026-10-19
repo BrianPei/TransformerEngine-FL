@@ -64,6 +64,10 @@ Unknown paths escalate to L2/R2.
 
 Regression detection supports two modes and is automatically enabled for PR builds:
 
+Baseline reports are fetched through the GitHub REST API by
+`.github/scripts/fetch_flagcicd_baseline.py`. The check does not require the
+vendor test image to contain the `gh` CLI. Callers must grant `actions: read`.
+
 **Absolute threshold** (currently enabled):
 ```bash
 python3 .github/scripts/flagcicd_regression.py \
