@@ -1,0 +1,22 @@
+{
+  "schema_version": "flagcicd.baseline/v1",
+  "repository": "TransformerEngine-FL",
+  "description": "Coverage regression detection thresholds",
+  "rules": {
+    "absolute": {
+      "method": "threshold",
+      "threshold_percent": 2.0,
+      "description": "Fail if coverage drops more than 2.0% from the baseline"
+    },
+    "statistical": {
+      "method": "sigma",
+      "sigma_multiplier": 3.0,
+      "minimum_history": 8,
+      "description": "Fail if coverage is outside mean ± 3σ of historical window"
+    }
+  },
+  "storage": {
+    "method": "artifact",
+    "retention_days": 90
+  }
+}

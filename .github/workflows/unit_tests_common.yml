@@ -79,6 +79,34 @@ on:
         required: false
         type: string
         default: python3
+      flagcicd_test_level:
+        required: false
+        type: string
+        default: L1
+      flagcicd_risk_level:
+        required: false
+        type: string
+        default: R1
+      flagcicd_task_id:
+        required: false
+        type: string
+        default: ''
+      flagcicd_run_id:
+        required: false
+        type: string
+        default: ''
+      flagcicd_parent_run_id:
+        required: false
+        type: string
+        default: ''
+      flagcicd_image_digest:
+        required: false
+        type: string
+        default: ''
+      flagcicd_config_hash:
+        required: false
+        type: string
+        default: ''
 
 jobs:
   unit_test:
@@ -233,7 +261,7 @@ jobs:
   aggregate_coverage:
     name: unit-${{ inputs.device }}-pytorch-unittest-coverage
     needs: unit_test
-    if: ${{ !cancelled() && inputs.coverage_enabled }}
+    if: ${{ always() && inputs.coverage_enabled }}
     defaults:
       run:
         shell: bash
@@ -302,6 +330,70 @@ jobs:
           fi
           "${coverage_command[@]}"
           echo "coverage_aggregated=true" >> "$GITHUB_OUTPUT"
+
+      - name: Create FlagCICD report
+        if: always()
+        env:
+          FLAGCICD_TEST_LEVEL: ${{ inputs.flagcicd_test_level }}
+          FLAGCICD_RISK_LEVEL: ${{ inputs.flagcicd_risk_level }}
+          FLAGCICD_TASK_ID: ${{ inputs.flagcicd_task_id }}
+          FLAGCICD_RUN_ID: ${{ inputs.flagcicd_run_id }}
+          FLAGCICD_PARENT_RUN_ID: ${{ inputs.flagcicd_parent_run_id }}
+          FLAGCICD_CONFIG_HASH: ${{ inputs.flagcicd_config_hash }}
+          FLAGCICD_IMAGE_DIGEST: ${{ inputs.flagcicd_image_digest }}
+          COVERAGE_PYTHON: ${{ inputs.coverage_python }}
+          UNIT_TEST_RESULT: ${{ needs.unit_test.result }}
+          AGGREGATE_RESULT: ${{ steps.aggregate.outcome }}
+        run: |
+          set -euo pipefail
+          report_status=passed
+          case "$UNIT_TEST_RESULT" in
+            success) report_status=passed ;;
+            failure) report_status=test_failed ;;
+            cancelled) report_status=cancelled ;;
+            skipped) report_status=skipped ;;
+            *) report_status=infra_error ;;
+          esac
+          if [ "$UNIT_TEST_RESULT" = "success" ] && [ "$AGGREGATE_RESULT" != "success" ]; then
+            report_status=report_error
+          fi
+
+          coverage_path="coverage-${{ inputs.platform }}-${{ inputs.device }}-pytorch-unittest.json"
+          report_path="flagcicd-report-${{ inputs.platform }}-${{ inputs.device }}-pytorch-unittest.json"
+          report_args=(
+            --output "$report_path"
+            --repository "$GITHUB_REPOSITORY"
+            --source-sha "$GITHUB_SHA"
+            --run-id "${FLAGCICD_RUN_ID:-$GITHUB_RUN_ID}"
+            --task-id "$FLAGCICD_TASK_ID"
+            --parent-run-id "$FLAGCICD_PARENT_RUN_ID"
+            --test-level "$FLAGCICD_TEST_LEVEL"
+            --risk-level "$FLAGCICD_RISK_LEVEL"
+            --platform "${{ inputs.platform }}"
+            --device "${{ inputs.device }}"
+            --image-ref "${{ inputs.image }}"
+            --image-digest "$FLAGCICD_IMAGE_DIGEST"
+            --config-hash "$FLAGCICD_CONFIG_HASH"
+            --status "$report_status"
+            --source-root "transformer_engine"
+            --scope "unit"
+            --coverage-version "$($COVERAGE_PYTHON -c 'import importlib.metadata as m; print(m.version("coverage"))' 2>/dev/null || true)"
+          )
+          if [ -f "$coverage_path" ]; then
+            report_args+=(--coverage "$coverage_path" --artifact "$coverage_path")
+          fi
+          python3 "$GITHUB_WORKSPACE/.github/scripts/flagcicd_report.py" "${report_args[@]}"
+          echo "FLAGCICD_REPORT_PATH=$report_path" >> "$GITHUB_ENV"
+
+      - name: Upload FlagCICD report artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        continue-on-error: true
+        with:
+          name: flagcicd-report-${{ inputs.platform }}-${{ inputs.device }}-pytorch-unittest
+          path: flagcicd-report-${{ inputs.platform }}-${{ inputs.device }}-pytorch-unittest.json
+          if-no-files-found: warn
+          retention-days: 14
 
       - name: Upload aggregated coverage artifact
         if: steps.aggregate.outputs.coverage_aggregated == 'true'

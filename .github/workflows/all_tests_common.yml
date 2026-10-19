@@ -24,6 +24,31 @@ on:
         type: boolean
         default: true
         description: Whether to run integration tests in this workflow
+      test_level:
+        required: false
+        type: string
+        default: L2
+        description: FlagCICD test capability level
+      risk_level:
+        required: false
+        type: string
+        default: R1
+        description: FlagCICD change risk level
+      flagcicd_task_id:
+        required: false
+        type: string
+        default: ''
+        description: External task identifier propagated to reports
+      flagcicd_run_id:
+        required: false
+        type: string
+        default: ''
+        description: Parent FlagCICD run identifier
+      flagcicd_parent_run_id:
+        required: false
+        type: string
+        default: ''
+        description: Optional parent run identifier
 
 jobs:
   checkout_and_config:
@@ -34,6 +59,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       ci_image: ${{ steps.config.outputs.ci_image }}
+      image_digest: ${{ steps.config.outputs.image_digest }}
       container_pull_policy: ${{ steps.config.outputs.container_pull_policy }}
       runs_on: ${{ steps.config.outputs.runs_on }}
       container_volumes: ${{ steps.config.outputs.container_volumes }}
@@ -50,6 +76,7 @@ jobs:
       coverage_include: ${{ steps.config.outputs.coverage_include }}
       coverage_omit: ${{ steps.config.outputs.coverage_omit }}
       coverage_python: ${{ steps.config.outputs.coverage_python }}
+      config_hash: ${{ steps.config.outputs.config_hash }}
       test_artifact_enabled: ${{ steps.config.outputs.test_artifact_enabled }}
       test_artifact_name: ${{ steps.config.outputs.test_artifact_name }}
       test_artifact_path: ${{ steps.config.outputs.test_artifact_path }}
@@ -76,9 +103,15 @@ jobs:
           /usr/local/bin/yq --version
           echo "Loading configuration from $CONFIG_FILE"
 
+          CONFIG_HASH=$(sha256sum "$CONFIG_FILE" | awk '{print $1}')
+          echo "config_hash=$CONFIG_HASH" >> "$GITHUB_OUTPUT"
+
           # Read CI image
           CI_IMAGE=$(yq '.ci_image' "$CONFIG_FILE")
           echo "ci_image=$CI_IMAGE" >> $GITHUB_OUTPUT
+
+          IMAGE_DIGEST=$(yq '.image_digest // ""' "$CONFIG_FILE")
+          echo "image_digest=$IMAGE_DIGEST" >> "$GITHUB_OUTPUT"
 
           CONTAINER_PULL_POLICY=$(yq '.container_pull_policy // "never"' "$CONFIG_FILE")
           echo "container_pull_policy=$CONTAINER_PULL_POLICY" >> $GITHUB_OUTPUT
@@ -113,7 +146,9 @@ jobs:
           TEST_ARTIFACT_PATH=""
           TEST_ARTIFACT_BUILD_SCRIPT=""
           if [ "$TEST_ARTIFACT_ENABLED" = "true" ]; then
-            TEST_ARTIFACT_NAME="test-artifact-$PLATFORM"
+            SOURCE_KEY="${GITHUB_SHA:0:12}"
+            CONFIG_KEY="${CONFIG_HASH:0:12}"
+            TEST_ARTIFACT_NAME="test-artifact-$PLATFORM-$SOURCE_KEY-$CONFIG_KEY"
             TEST_ARTIFACT_PATH=$(yq '.test_artifact.path // ""' "$CONFIG_FILE")
             TEST_ARTIFACT_BUILD_SCRIPT=$(yq '.test_artifact.build_script // ""' "$CONFIG_FILE")
             if [ -z "$TEST_ARTIFACT_PATH" ] || [ -z "$TEST_ARTIFACT_BUILD_SCRIPT" ]; then
@@ -179,7 +214,9 @@ jobs:
     name: build_test_artifact
     needs:
       - checkout_and_config
-    if: needs.checkout_and_config.outputs.test_artifact_enabled == 'true'
+    if: >-
+      (inputs.run_unit_tests || inputs.run_integration_tests) &&
+      needs.checkout_and_config.outputs.test_artifact_enabled == 'true'
     runs-on: ${{ fromJson(needs.checkout_and_config.outputs.test_artifact_runs_on) }}
     defaults:
       run:
@@ -218,6 +255,51 @@ jobs:
           retention-days: 1
           overwrite: true
 
+  flagcicd_preflight_report:
+    name: flagcicd_preflight_report
+    needs:
+      - checkout_and_config
+    if: >-
+      always() &&
+      needs.checkout_and_config.result == 'success' &&
+      !inputs.run_unit_tests &&
+      !inputs.run_integration_tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout source code
+        uses: actions/checkout@v4
+
+      - name: Create preflight report
+        env:
+          FLAGCICD_TASK_ID: ${{ inputs.flagcicd_task_id }}
+          FLAGCICD_RUN_ID: ${{ inputs.flagcicd_run_id }}
+          FLAGCICD_PARENT_RUN_ID: ${{ inputs.flagcicd_parent_run_id }}
+        run: |
+          set -euo pipefail
+          python3 .github/scripts/flagcicd_report.py \
+            --output "flagcicd-report-${{ inputs.platform }}-preflight.json" \
+            --repository "$GITHUB_REPOSITORY" \
+            --source-sha "$GITHUB_SHA" \
+            --run-id "${FLAGCICD_RUN_ID:-$GITHUB_RUN_ID}" \
+            --task-id "$FLAGCICD_TASK_ID" \
+            --parent-run-id "$FLAGCICD_PARENT_RUN_ID" \
+            --test-level "${{ inputs.test_level }}" \
+            --risk-level "${{ inputs.risk_level }}" \
+            --platform "${{ inputs.platform }}" \
+            --image-ref "${{ needs.checkout_and_config.outputs.ci_image }}" \
+            --image-digest "${{ needs.checkout_and_config.outputs.image_digest }}" \
+            --config-hash "${{ needs.checkout_and_config.outputs.config_hash }}" \
+            --status passed \
+            --scope preflight
+
+      - name: Upload preflight report
+        uses: actions/upload-artifact@v4
+        with:
+          name: flagcicd-report-${{ inputs.platform }}-preflight
+          path: flagcicd-report-${{ inputs.platform }}-preflight.json
+          if-no-files-found: error
+          retention-days: 14
+
   unit_tests:
     name: unit_tests
     if: >-
@@ -255,6 +337,13 @@ jobs:
       coverage_include: ${{ needs.checkout_and_config.outputs.coverage_include }}
       coverage_omit: ${{ needs.checkout_and_config.outputs.coverage_omit }}
       coverage_python: ${{ needs.checkout_and_config.outputs.coverage_python }}
+      flagcicd_test_level: ${{ inputs.test_level }}
+      flagcicd_risk_level: ${{ inputs.risk_level }}
+      flagcicd_task_id: ${{ inputs.flagcicd_task_id }}
+      flagcicd_run_id: ${{ inputs.flagcicd_run_id }}
+      flagcicd_parent_run_id: ${{ inputs.flagcicd_parent_run_id }}
+      flagcicd_image_digest: ${{ needs.checkout_and_config.outputs.image_digest }}
+      flagcicd_config_hash: ${{ needs.checkout_and_config.outputs.config_hash }}
       test_artifact_name: ${{ needs.checkout_and_config.outputs.test_artifact_name }}
       test_artifact_path: ${{ needs.checkout_and_config.outputs.test_artifact_path }}
 
