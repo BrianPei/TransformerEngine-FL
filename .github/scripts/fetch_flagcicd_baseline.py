@@ -77,7 +77,9 @@ def fetch(args: argparse.Namespace) -> int:
         raise GitHubApiError("GH_TOKEN or GITHUB_TOKEN is required")
 
     repository = args.repository.strip("/")
-    encoded_repository = "/".join(urllib.parse.quote(part, safe="") for part in repository.split("/"))
+    encoded_repository = "/".join(
+        urllib.parse.quote(part, safe="") for part in repository.split("/")
+    )
     query = urllib.parse.urlencode(
         {"branch": args.branch, "status": "completed", "per_page": str(args.limit)}
     )
