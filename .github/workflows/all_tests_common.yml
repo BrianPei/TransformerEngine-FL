@@ -35,26 +35,11 @@ on:
         type: string
         default: R1
         description: FlagCICD change risk level
-      flagcicd_task_id:
+      flagcicd_metadata:
         required: false
         type: string
-        default: ''
-        description: External task identifier propagated to reports
-      flagcicd_run_id:
-        required: false
-        type: string
-        default: ''
-        description: Parent FlagCICD run identifier
-      flagcicd_parent_run_id:
-        required: false
-        type: string
-        default: ''
-        description: Optional parent run identifier
-      actual_source_sha:
-        required: false
-        type: string
-        default: ''
-        description: Actual source commit SHA (resolved from checkout_ref)
+        default: '{}'
+        description: 'Optional JSON with run_id, task_id, parent_run_id, actual_sha'
 
 jobs:
   checkout_and_config:
@@ -284,24 +269,26 @@ jobs:
 
       - name: Create preflight report
         env:
-          FLAGCICD_TASK_ID: ${{ inputs.flagcicd_task_id }}
-          FLAGCICD_RUN_ID: ${{ inputs.flagcicd_run_id }}
-          FLAGCICD_PARENT_RUN_ID: ${{ inputs.flagcicd_parent_run_id }}
+          FLAGCICD_METADATA: ${{ inputs.flagcicd_metadata }}
         run: |
           set -euo pipefail
+          # Extract metadata
+          TASK_ID=$(echo "$FLAGCICD_METADATA" | python3 -c "import sys,json; print(json.load(sys.stdin).get('task_id',''))" 2>/dev/null || echo "")
+          RUN_ID=$(echo "$FLAGCICD_METADATA" | python3 -c "import sys,json; print(json.load(sys.stdin).get('run_id',''))" 2>/dev/null || echo "$GITHUB_RUN_ID")
+          PARENT_RUN_ID=$(echo "$FLAGCICD_METADATA" | python3 -c "import sys,json; print(json.load(sys.stdin).get('parent_run_id',''))" 2>/dev/null || echo "")
+          ACTUAL_SHA=$(git rev-parse HEAD 2>/dev/null || echo "$GITHUB_SHA")
+
           python3 .github/scripts/flagcicd_report.py \
             --output "flagcicd-report-${{ inputs.platform }}-preflight.json" \
             --repository "$GITHUB_REPOSITORY" \
-            --source-sha "${{ inputs.actual_source_sha || github.sha }}" \
-            --run-id "${FLAGCICD_RUN_ID:-$GITHUB_RUN_ID}" \
-            --task-id "$FLAGCICD_TASK_ID" \
-            --parent-run-id "$FLAGCICD_PARENT_RUN_ID" \
+            --source-sha "$ACTUAL_SHA" \
+            --run-id "$RUN_ID" \
+            --task-id "$TASK_ID" \
+            --parent-run-id "$PARENT_RUN_ID" \
             --test-level "${{ inputs.test_level }}" \
             --risk-level "${{ inputs.risk_level }}" \
             --platform "${{ inputs.platform }}" \
             --image-ref "${{ needs.checkout_and_config.outputs.ci_image }}" \
-            --image-digest "${{ needs.checkout_and_config.outputs.image_digest }}" \
-            --config-hash "${{ needs.checkout_and_config.outputs.config_hash }}" \
             --status passed \
             --scope preflight
 
@@ -352,14 +339,9 @@ jobs:
       coverage_python: ${{ needs.checkout_and_config.outputs.coverage_python }}
       flagcicd_test_level: ${{ inputs.test_level }}
       flagcicd_risk_level: ${{ inputs.risk_level }}
-      flagcicd_task_id: ${{ inputs.flagcicd_task_id }}
-      flagcicd_run_id: ${{ inputs.flagcicd_run_id }}
-      flagcicd_parent_run_id: ${{ inputs.flagcicd_parent_run_id }}
-      flagcicd_image_digest: ${{ needs.checkout_and_config.outputs.image_digest }}
-      flagcicd_config_hash: ${{ needs.checkout_and_config.outputs.config_hash }}
+      flagcicd_metadata: ${{ inputs.flagcicd_metadata }}
       test_artifact_name: ${{ needs.checkout_and_config.outputs.test_artifact_name }}
       test_artifact_path: ${{ needs.checkout_and_config.outputs.test_artifact_path }}
-      actual_source_sha: ${{ inputs.actual_source_sha }}
 
   unit_tests_complete:
     name: unit_tests_complete

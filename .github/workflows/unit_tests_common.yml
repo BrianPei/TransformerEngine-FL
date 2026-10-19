@@ -87,30 +87,11 @@ on:
         required: false
         type: string
         default: R1
-      flagcicd_task_id:
+      flagcicd_metadata:
         required: false
         type: string
-        default: ''
-      flagcicd_run_id:
-        required: false
-        type: string
-        default: ''
-      flagcicd_parent_run_id:
-        required: false
-        type: string
-        default: ''
-      actual_source_sha:
-        required: false
-        type: string
-        default: ''
-      flagcicd_image_digest:
-        required: false
-        type: string
-        default: ''
-      flagcicd_config_hash:
-        required: false
-        type: string
-        default: ''
+        default: '{}'
+        description: 'Optional JSON with run_id, task_id, parent_run_id'
 
 jobs:
   unit_test:
@@ -340,11 +321,7 @@ jobs:
         env:
           FLAGCICD_TEST_LEVEL: ${{ inputs.flagcicd_test_level }}
           FLAGCICD_RISK_LEVEL: ${{ inputs.flagcicd_risk_level }}
-          FLAGCICD_TASK_ID: ${{ inputs.flagcicd_task_id }}
-          FLAGCICD_RUN_ID: ${{ inputs.flagcicd_run_id }}
-          FLAGCICD_PARENT_RUN_ID: ${{ inputs.flagcicd_parent_run_id }}
-          FLAGCICD_CONFIG_HASH: ${{ inputs.flagcicd_config_hash }}
-          FLAGCICD_IMAGE_DIGEST: ${{ inputs.flagcicd_image_digest }}
+          FLAGCICD_METADATA: ${{ inputs.flagcicd_metadata }}
           COVERAGE_PYTHON: ${{ inputs.coverage_python }}
           UNIT_TEST_RESULT: ${{ needs.unit_test.result }}
           AGGREGATE_RESULT: ${{ steps.aggregate.outcome }}
@@ -362,22 +339,28 @@ jobs:
             report_status=report_error
           fi
 
+          # Extract metadata from JSON or use defaults
+          TASK_ID=$(echo "$FLAGCICD_METADATA" | python3 -c "import sys,json; print(json.load(sys.stdin).get('task_id',''))" 2>/dev/null || echo "")
+          RUN_ID=$(echo "$FLAGCICD_METADATA" | python3 -c "import sys,json; print(json.load(sys.stdin).get('run_id',''))" 2>/dev/null || echo "$GITHUB_RUN_ID")
+          PARENT_RUN_ID=$(echo "$FLAGCICD_METADATA" | python3 -c "import sys,json; print(json.load(sys.stdin).get('parent_run_id',''))" 2>/dev/null || echo "")
+
+          # Get actual commit SHA
+          ACTUAL_SHA=$(git rev-parse HEAD 2>/dev/null || echo "$GITHUB_SHA")
+
           coverage_path="coverage-${{ inputs.platform }}-${{ inputs.device }}-pytorch-unittest.json"
           report_path="flagcicd-report-${{ inputs.platform }}-${{ inputs.device }}-pytorch-unittest.json"
           report_args=(
             --output "$report_path"
             --repository "$GITHUB_REPOSITORY"
-            --source-sha "${{ inputs.actual_source_sha || github.sha }}"
-            --run-id "${FLAGCICD_RUN_ID:-$GITHUB_RUN_ID}"
-            --task-id "$FLAGCICD_TASK_ID"
-            --parent-run-id "$FLAGCICD_PARENT_RUN_ID"
+            --source-sha "$ACTUAL_SHA"
+            --run-id "$RUN_ID"
+            --task-id "$TASK_ID"
+            --parent-run-id "$PARENT_RUN_ID"
             --test-level "$FLAGCICD_TEST_LEVEL"
             --risk-level "$FLAGCICD_RISK_LEVEL"
             --platform "${{ inputs.platform }}"
             --device "${{ inputs.device }}"
             --image-ref "${{ inputs.image }}"
-            --image-digest "$FLAGCICD_IMAGE_DIGEST"
-            --config-hash "$FLAGCICD_CONFIG_HASH"
             --status "$report_status"
             --source-root "transformer_engine"
             --scope "unit"
