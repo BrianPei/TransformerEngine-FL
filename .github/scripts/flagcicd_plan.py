@@ -93,9 +93,7 @@ def resolve(args: argparse.Namespace) -> dict[str, Any]:
     inferred_risk = "R1"
     for path in changed_files:
         file_rules = [
-            rule
-            for rule in RULES
-            if any(matches(path, pattern) for pattern in rule["patterns"])
+            rule for rule in RULES if any(matches(path, pattern) for pattern in rule["patterns"])
         ]
         if not file_rules:
             unknown_files.append(path)
@@ -143,9 +141,7 @@ def main() -> int:
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
     plan = resolve(args)
-    args.output.write_text(
-        json.dumps(plan, indent=2, sort_keys=True) + "\n", encoding="utf-8"
-    )
+    args.output.write_text(json.dumps(plan, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     print(f"Created FlagCICD plan: {args.output}")
     return 0
 

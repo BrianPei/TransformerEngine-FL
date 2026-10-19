@@ -128,9 +128,7 @@ def statistical_regression(
 
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument(
-        "--current", type=Path, required=True, help="Current FlagCICD report"
-    )
+    parser.add_argument("--current", type=Path, required=True, help="Current FlagCICD report")
     parser.add_argument("--baseline", type=Path, help="Single baseline FlagCICD report")
     parser.add_argument(
         "--historical", type=Path, help="JSON array of historical coverage percentages"
@@ -144,9 +142,7 @@ def main() -> int:
         default=3.0,
         help="Sigma multiplier for statistical bounds",
     )
-    parser.add_argument(
-        "--output", type=Path, required=True, help="Output regression verdict JSON"
-    )
+    parser.add_argument("--output", type=Path, required=True, help="Output regression verdict JSON")
     args = parser.parse_args()
 
     current_report = load_report(args.current)
@@ -163,9 +159,7 @@ def main() -> int:
         verdict["method"] = "absolute_threshold"
         verdict["threshold"] = args.threshold
         verdict["baseline_report"] = str(args.baseline)
-        verdict["result"] = regression_verdict(
-            current_percent, baseline_percent, args.threshold
-        )
+        verdict["result"] = regression_verdict(current_percent, baseline_percent, args.threshold)
     elif args.historical:
         historical_data = json.loads(args.historical.read_text(encoding="utf-8"))
         if not isinstance(historical_data, list) or not all(
@@ -175,9 +169,7 @@ def main() -> int:
         verdict["method"] = "statistical"
         verdict["sigma"] = args.sigma
         verdict["historical_count"] = len(historical_data)
-        verdict["result"] = statistical_regression(
-            current_percent, historical_data, args.sigma
-        )
+        verdict["result"] = statistical_regression(current_percent, historical_data, args.sigma)
     else:
         verdict["result"] = {
             "status": "no_comparison",
@@ -185,9 +177,7 @@ def main() -> int:
             "current_percent": current_percent,
         }
 
-    args.output.write_text(
-        json.dumps(verdict, indent=2, sort_keys=True) + "\n", encoding="utf-8"
-    )
+    args.output.write_text(json.dumps(verdict, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     print(f"Regression verdict: {verdict['result']['status']}")
     print(f"  {verdict['result']['message']}")
     return 1 if verdict["result"]["status"] in {"regression", "outlier_below"} else 0

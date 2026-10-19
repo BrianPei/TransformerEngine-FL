@@ -65,9 +65,7 @@ def main() -> int:
         reports.append(payload)
 
     statuses = [report.get("status", "report_error") for report in reports]
-    actual_platforms = {
-        report.get("platform", {}).get("name", "") for report in reports
-    }
+    actual_platforms = {report.get("platform", {}).get("name", "") for report in reports}
     missing_platforms = set(expected_platforms) - actual_platforms
     if missing_platforms:
         errors.append(f"missing platform reports: {sorted(missing_platforms)}")
@@ -105,9 +103,7 @@ def main() -> int:
         "errors": errors,
         "created_at": utc_now(),
     }
-    args.output.write_text(
-        json.dumps(summary, indent=2, sort_keys=True) + "\n", encoding="utf-8"
-    )
+    args.output.write_text(json.dumps(summary, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     print(f"Created FlagCICD run summary: {args.output}")
     if errors:
         print("Report aggregation completed with errors:")
