@@ -2,10 +2,17 @@ name: Common Unit Tests
 
 on:
   workflow_call:
+    secrets:
+      FLAGCICD_API_TOKEN:
+        required: false
     inputs:
       platform:
         required: true
         type: string
+      checkout_ref:
+        required: false
+        type: string
+        default: ''
       device:
         required: true
         type: string
@@ -72,6 +79,19 @@ on:
         required: false
         type: string
         default: python3
+      flagcicd_test_level:
+        required: false
+        type: string
+        default: L1
+      flagcicd_risk_level:
+        required: false
+        type: string
+        default: R1
+      flagcicd_metadata:
+        required: false
+        type: string
+        default: '{}'
+        description: 'Optional JSON with run_id, task_id, parent_run_id'
 
 jobs:
   unit_test:
@@ -99,6 +119,7 @@ jobs:
       - name: Checkout source code
         uses: actions/checkout@v4
         with:
+          ref: ${{ inputs.checkout_ref }}
           fetch-depth: 0
           submodules: ${{ inputs.checkout_submodules }}
           set-safe-directory: true
@@ -125,6 +146,7 @@ jobs:
           COVERAGE_SOURCES: ${{ inputs.coverage_sources }}
           COVERAGE_INCLUDE: ${{ inputs.coverage_include }}
           COVERAGE_OMIT: ${{ inputs.coverage_omit }}
+          TE_TEST_MAX_RETRIES: '2'
         run: |
           set -euo pipefail
 
@@ -224,7 +246,7 @@ jobs:
   aggregate_coverage:
     name: unit-${{ inputs.device }}-pytorch-unittest-coverage
     needs: unit_test
-    if: ${{ !cancelled() && inputs.coverage_enabled }}
+    if: ${{ always() && inputs.coverage_enabled }}
     defaults:
       run:
         shell: bash
@@ -238,6 +260,7 @@ jobs:
       - name: Checkout source code
         uses: actions/checkout@v4
         with:
+          ref: ${{ inputs.checkout_ref }}
           fetch-depth: 0
           set-safe-directory: true
 
@@ -293,6 +316,179 @@ jobs:
           "${coverage_command[@]}"
           echo "coverage_aggregated=true" >> "$GITHUB_OUTPUT"
 
+      - name: Create FlagCICD report
+        if: always()
+        env:
+          FLAGCICD_TEST_LEVEL: ${{ inputs.flagcicd_test_level }}
+          FLAGCICD_RISK_LEVEL: ${{ inputs.flagcicd_risk_level }}
+          FLAGCICD_METADATA: ${{ inputs.flagcicd_metadata }}
+          COVERAGE_PYTHON: ${{ inputs.coverage_python }}
+          UNIT_TEST_RESULT: ${{ needs.unit_test.result }}
+          AGGREGATE_RESULT: ${{ steps.aggregate.outcome }}
+        run: |
+          set -euo pipefail
+          report_status=passed
+          case "$UNIT_TEST_RESULT" in
+            success) report_status=passed ;;
+            failure) report_status=test_failed ;;
+            cancelled) report_status=cancelled ;;
+            skipped) report_status=skipped ;;
+            *) report_status=infra_error ;;
+          esac
+          if [ "$UNIT_TEST_RESULT" = "success" ] && [ "$AGGREGATE_RESULT" != "success" ]; then
+            report_status=report_error
+          fi
+
+          # Extract metadata from JSON or use defaults
+          TASK_ID=$(echo "$FLAGCICD_METADATA" | python3 -c "import sys,json; print(json.load(sys.stdin).get('task_id',''))" 2>/dev/null || echo "")
+          RUN_ID=$(echo "$FLAGCICD_METADATA" | python3 -c "import sys,json; print(json.load(sys.stdin).get('run_id',''))" 2>/dev/null || echo "$GITHUB_RUN_ID")
+          PARENT_RUN_ID=$(echo "$FLAGCICD_METADATA" | python3 -c "import sys,json; print(json.load(sys.stdin).get('parent_run_id',''))" 2>/dev/null || echo "")
+
+          # Get actual commit SHA
+          ACTUAL_SHA=$(git rev-parse HEAD 2>/dev/null || echo "$GITHUB_SHA")
+
+          coverage_path="coverage-${{ inputs.platform }}-${{ inputs.device }}-pytorch-unittest.json"
+          report_path="flagcicd-report-${{ inputs.platform }}-${{ inputs.device }}-pytorch-unittest.json"
+          report_args=(
+            --output "$report_path"
+            --repository "$GITHUB_REPOSITORY"
+            --source-sha "$ACTUAL_SHA"
+            --run-id "$RUN_ID"
+            --task-id "$TASK_ID"
+            --parent-run-id "$PARENT_RUN_ID"
+            --test-level "$FLAGCICD_TEST_LEVEL"
+            --risk-level "$FLAGCICD_RISK_LEVEL"
+            --platform "${{ inputs.platform }}"
+            --device "${{ inputs.device }}"
+            --image-ref "${{ inputs.image }}"
+            --status "$report_status"
+            --source-root "transformer_engine"
+            --scope "unit"
+            --coverage-version "$($COVERAGE_PYTHON -c 'import importlib.metadata as m; print(m.version("coverage"))' 2>/dev/null || true)"
+          )
+          if [ -f "$coverage_path" ]; then
+            report_args+=(--coverage "$coverage_path" --artifact "$coverage_path")
+          fi
+          python3 "$GITHUB_WORKSPACE/.github/scripts/flagcicd_report.py" "${report_args[@]}"
+          echo "FLAGCICD_REPORT_PATH=$report_path" >> "$GITHUB_ENV"
+
+      - name: Upload FlagCICD report artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        continue-on-error: true
+        with:
+          name: flagcicd-report-${{ inputs.platform }}-${{ inputs.device }}-pytorch-unittest
+          path: flagcicd-report-${{ inputs.platform }}-${{ inputs.device }}-pytorch-unittest.json
+          if-no-files-found: warn
+          retention-days: 90
+
+      - name: Check coverage regression
+        if: |
+          always() &&
+          steps.aggregate.outputs.coverage_aggregated == 'true' &&
+          github.event_name == 'pull_request'
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PLATFORM: ${{ inputs.platform }}
+          DEVICE: ${{ inputs.device }}
+        run: |
+          set -euo pipefail
+          echo "🔍 Checking coverage regression against main branch baseline..."
+
+          artifact_name="flagcicd-report-${PLATFORM}-${DEVICE}-pytorch-unittest"
+          baseline_dir="$RUNNER_TEMP/flagcicd-baseline"
+          baseline_run_file="$RUNNER_TEMP/flagcicd-baseline-run-id"
+          baseline_log="$RUNNER_TEMP/flagcicd-baseline-fetch.log"
+          set +e
+          python3 "$GITHUB_WORKSPACE/.github/scripts/fetch_flagcicd_baseline.py" \
+            --repository "$GITHUB_REPOSITORY" \
+            --branch main \
+            --artifact-name "$artifact_name" \
+            --output-dir "$baseline_dir" \
+            >"$baseline_run_file" 2>"$baseline_log"
+          fetch_status=$?
+          set -e
+
+          if [ "$fetch_status" -eq 2 ]; then
+            cat "$baseline_log"
+            echo "⚠️  No baseline report artifact found on main branch for ${PLATFORM}-${DEVICE}"
+            echo "   Skipping regression check (baseline will be established after merge)"
+            exit 0
+          fi
+          if [ "$fetch_status" -ne 0 ]; then
+            cat "$baseline_log" >&2
+            echo "::warning::Unable to query the main-branch FlagCICD baseline; regression check skipped"
+            exit 0
+          fi
+
+          BASELINE_RUN=$(tr -d '[:space:]' < "$baseline_run_file")
+          echo "📥 Downloaded baseline from run ID: $BASELINE_RUN"
+          BASELINE_FILE="$baseline_dir/flagcicd-report-${PLATFORM}-${DEVICE}-pytorch-unittest.json"
+          CURRENT_FILE="${FLAGCICD_REPORT_PATH:-flagcicd-report-${PLATFORM}-${DEVICE}-pytorch-unittest.json}"
+
+          if [ ! -f "$BASELINE_FILE" ]; then
+            echo "⚠️  Baseline report not found in downloaded artifacts"
+            exit 0
+          fi
+
+          if [ ! -f "$CURRENT_FILE" ]; then
+            echo "⚠️  Current coverage file not found: $CURRENT_FILE"
+            exit 0
+          fi
+
+          echo "📊 Running regression analysis..."
+          echo "   Baseline: $BASELINE_FILE"
+          echo "   Current:  $CURRENT_FILE"
+
+          # Get platform-specific threshold from golden_baseline.json
+          THRESHOLD=$(python3 - <<'PYEOF'
+          import json, os
+          try:
+              baseline_config = json.load(open(".flagcicd/golden_baseline.json"))
+              platform = os.environ["PLATFORM"].lower()
+              if platform in baseline_config.get("platforms", {}):
+                  threshold = baseline_config["platforms"][platform]["absolute_threshold_percent"]
+              elif "other" in baseline_config.get("platforms", {}):
+                  threshold = baseline_config["platforms"]["other"]["absolute_threshold_percent"]
+              else:
+                  threshold = 2.0
+              print(threshold)
+          except Exception:
+              print("2.0")
+          PYEOF
+          )
+
+          echo "   Threshold: ${THRESHOLD}%"
+
+          python3 .github/scripts/flagcicd_regression.py \
+            --current "$CURRENT_FILE" \
+            --baseline "$BASELINE_FILE" \
+            --threshold "$THRESHOLD" \
+            --output regression-verdict.json || {
+              echo ""
+              echo "⚠️  Coverage regression detected!"
+              cat regression-verdict.json | python3 -m json.tool || cat regression-verdict.json
+              echo ""
+              echo "📌 Note: This check is currently in advisory mode (non-blocking)"
+              echo "   Coverage regression will not fail the PR"
+              exit 0
+            }
+
+          echo ""
+          echo "✅ No coverage regression detected"
+          cat regression-verdict.json | python3 -m json.tool || cat regression-verdict.json
+
+      - name: Upload regression verdict
+        if: always() && steps.aggregate.outputs.coverage_aggregated == 'true'
+        uses: actions/upload-artifact@v4
+        continue-on-error: true
+        with:
+          name: regression-verdict-${{ inputs.platform }}-${{ inputs.device }}
+          path: regression-verdict.json
+          if-no-files-found: ignore
+          retention-days: 14
+
       - name: Upload aggregated coverage artifact
         if: steps.aggregate.outputs.coverage_aggregated == 'true'
         uses: actions/upload-artifact@v4
@@ -302,13 +498,13 @@ jobs:
           path: coverage-${{ inputs.platform }}-${{ inputs.device }}-pytorch-unittest.json
 
       - name: Upload coverage report to FlagCICD
-        if: steps.aggregate.outputs.coverage_aggregated == 'true'
+        if: ${{ !cancelled() && steps.aggregate.outputs.coverage_aggregated == 'true' }}
         uses: flagos-ai/FlagOps/actions/post-pytest-report@v2
         continue-on-error: true
-        env:
-          NO_PROXY: flagcicd-inner.flagos.net
         with:
-          backend_url: http://flagcicd-inner.flagos.net:8000/metrics/
-          user_id: '000000000000000000'
+          backend_url: 'https://flagcicd.flagos.net/flagcicd/api/v1/cicd/metrics/'
+          api_token: ${{ secrets.FLAGCICD_API_TOKEN }}
           report_path: coverage-${{ inputs.platform }}-${{ inputs.device }}-pytorch-unittest.json
+          # Default github.job is shared by every platform/device.
+          job_name: coverage-${{ inputs.platform }}-${{ inputs.device }}-pytorch-unittest
           fail_on_error: 'false'
