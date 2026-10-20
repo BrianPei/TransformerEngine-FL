@@ -355,6 +355,45 @@ record the reason near the exclusion.
 
 ## Logs, coverage, and failure diagnosis
 
+### FlagCICD entry and reports
+
+The repository-facing FlagCICD contract is declared in
+`.flagcicd/project.yaml`. Use `.github/workflows/flagcicd-entry.yml` for the
+experimental unified entry. It accepts a JSON platform list and a test level
+through `workflow_dispatch`, and accepts the same fields through a
+`repository_dispatch` event with type `flagcicd`.
+
+The entry maps levels to the existing common workflows:
+
+- `L0` validates checkout and platform configuration without running hardware tests.
+- `L1` runs unit tests.
+- `L2` runs unit and integration tests.
+- `L3` currently runs the common unit/integration path and is marked partial
+  until benchmark and version-compatibility jobs are connected.
+- `L4` is reserved for model and release validation and is currently planned.
+
+Each unit coverage aggregation emits a per-platform `flagcicd.report/v1`
+artifact. The entry job also emits a run summary that keeps platform coverage
+as separate children; it never combines Python coverage from different
+platforms into one denominator. Existing platform-specific `coverage.required`
+behavior and the FlagCICD upload remain unchanged while this entry is in shadow
+mode.
+
+#### Regression detection and golden baseline
+
+`.github/scripts/flagcicd_regression.py` compares a current report against a
+baseline or historical window:
+
+- **Absolute threshold mode** (`--baseline`): fail if coverage drops more than
+  `--threshold` percent (default: 2.0%) from the baseline report.
+- **Statistical mode** (`--historical`): fail if coverage is outside
+  mean ± `--sigma` × std (default: 3.0σ) of the historical JSON array.
+
+The golden baseline contract (`.flagcicd/golden_baseline.json`) defines
+per-platform minimum coverage and historical window length. Historical baselines
+are currently stored as workflow artifacts; external storage integration is
+planned. L0 and L4 are excluded from coverage regression checks.
+
 Unit launchers should emit one JUnit XML file per meaningful step under
 `XML_LOG_DIR`. The common unit workflow uploads logs and, when configured,
 collects Python coverage for the selected source and include patterns.

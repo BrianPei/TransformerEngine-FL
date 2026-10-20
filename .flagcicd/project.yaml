@@ -1,0 +1,119 @@
+schema_version: flagcicd.project/v1
+repository: TransformerEngine-FL
+
+# This manifest describes the repository-facing contract. The existing
+# platform files remain the source of truth for runners and test matrices.
+entry_workflow: .github/workflows/flagcicd-entry.yml
+platform_config_glob: .github/configs/*.yml
+
+levels:
+  L0:
+    support: supported
+    purpose: preflight-and-smoke
+    timeout_minutes: 15
+    workflows:
+      - .github/workflows/all_tests_common.yml (preflight job only)
+  L1:
+    support: supported
+    purpose: pull-request-unit
+    timeout_minutes: 60
+    workflows:
+      - .github/workflows/all_tests_common.yml (unit_tests job)
+  L2:
+    support: supported
+    purpose: representative-integration
+    timeout_minutes: 360
+    workflows:
+      - .github/workflows/all_tests_common.yml (unit_tests + integration_tests)
+  L3:
+    support: partial
+    purpose: full-regression-and-compatibility
+    timeout_minutes: 480
+    workflows:
+      - .github/workflows/all_tests_common.yml (unit + integration)
+      - .github/workflows/qa-l3-te-pytorch-fa-versions-test.yml (disabled, requires Hopper+ GPU)
+    test_scope:
+      - Unit tests (all platforms)
+      - Integration tests (all platforms)
+      - Flash Attention version compatibility (requires Hopper+ GPU, currently disabled)
+      - Benchmark regression checks (planned)
+    note: FA tests require Hopper+ GPUs and workflow trigger enablement
+  L4:
+    support: planned
+    purpose: release-and-model-validation
+    timeout_minutes: 2880
+    workflows:
+      - .github/workflows/all_tests_common.yml (full)
+      - Cross-repo integration tests (requires coordination)
+    test_scope:
+      - All L3 tests
+      - End-to-end model training validation
+      - Cross-repository integration (requires manual coordination)
+      - Release artifact validation
+      - Backward compatibility checks
+    note: L4 requires cross-repo coordination and extended runtime (48+ hours)
+
+risk_rules:
+  version: v1
+  default_level: L1
+  unknown_change: escalate
+  rules:
+    - id: ci-and-build
+      paths:
+        - .github/**
+        - CMakeLists.txt
+        - cmake/**
+        - setup.py
+        - pyproject.toml
+      minimum_level: L2
+    - id: native-extension
+      paths:
+        - transformer_engine/**/csrc/**
+        - transformer_engine/**/cpp/**
+        - transformer_engine/**/cuda/**
+      minimum_level: L3
+    - id: numerical-and-performance
+      paths:
+        - tests/pytorch/**
+        - tests/plugin/**
+        - qa/**
+      minimum_level: L1
+
+coverage:
+  language: python
+  tool: coverage.py
+  source_roots:
+    - transformer_engine
+  metric_types:
+    - line
+    - branch
+  preserve_raw_fragments: true
+  report_schema: flagcicd.report/v1
+
+images:
+  layers:
+    - base
+    - vendor
+    - runtime
+    - source
+    - test
+  reuse_key:
+    - base_digest
+    - vendor_sdk
+    - toolchain
+    - lockfile_hash
+    - source_sha
+    - test_level
+    - instrumentation
+
+report:
+  artifact: flagcicd-report.json
+  statuses:
+    - passed
+    - test_failed
+    - build_failed
+    - infra_error
+    - unsupported
+    - skipped
+    - cancelled
+    - report_error
