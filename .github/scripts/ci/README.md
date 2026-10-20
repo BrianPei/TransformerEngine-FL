@@ -19,7 +19,67 @@ not supported. Vendor aliases include `npu` for Ascend and `kunlunxin` for Kunlu
 - Missing diff information or missing watch rules run all platforms. Invalid
   platform configurations fail matrix generation.
 - Renames are treated as deletion plus addition to include both affected paths.
-- Pushes that trigger CI, schedules, and manual runs select all platforms.
+- Pushes that trigger CI and manual runs select all platforms. Scheduled runs
+  use the independent `nightly.yml` entry described below.
+
+## Nightly scope
+
+PR platform routing, test matrices, integration execution, and coverage regression
+checks retain their existing behavior. This change only moves the daily schedule
+from `ci.yml` into an independent Nightly entry.
+
+`nightly.yml` runs at 02:17 Asia/Shanghai (18:17 UTC), discovers all eight current
+platform configs without diff filtering, and executes their entire configured
+unit and integration matrices at L2. Existing platform exclusions still apply;
+Nightly does not imply every upstream test or hardware variant is supported.
+The plan pins a source SHA and passes it through configuration, wheel build,
+tests, coverage collection, and platform reports. Its separate concurrency group
+preserves a running Nightly when pushes or later Nightly runs arrive. Hardware
+allocation still depends on the deployed runner pool; workflow concurrency does
+not provide physical GPU isolation from PR workloads.
+
+Nightly calls `all_tests_common.yml` with `test_profile: nightly`. The default
+`full` profile preserves existing PR, manual, push, comment-requested, and
+FlagCICD entry behavior. Optional wheel builds are still reused across a platform's test jobs.
+Nightly wheel names use the actual checked-out source SHA; other callers retain
+the existing `GITHUB_SHA` naming convention.
+
+Every Nightly platform uploads a `nightly-platform-<platform>` artifact even when
+configuration, build, or tests fail, provided the reporting runner and checkout
+can run. These job-result reports are independent of optional coverage support.
+`Nightly Complete` checks the plan, matrix, artifact download, and complete set of
+platform results. Missing, duplicate, wrong-SHA, wrong-run, failed, cancelled, or
+unexpectedly skipped results fail the run. Failed-job reruns may reuse successful
+platform reports from earlier attempts of the same run and SHA. Unit and
+integration logs are archived separately; coverage remains per platform/device.
+The JSON summary and platform results are retained for 90 days, test logs for 14.
+The existing post-CI Feishu workflow also listens for `Nightly` completion.
+
+Weekly scope, compatibility matrices, performance criteria, and ownership will
+be defined jointly with the SVT team. No Weekly schedule or L3 support is enabled
+by this change. The shared execution workflows remain reusable for that work.
+
+### Nightly validation and activation
+
+Before merging, run the hardware-independent suite below. After pushing this
+branch, use `workflow_dispatch` with this branch selected to validate all real
+platform runners, wheel reuse, full test scope, logs, coverage, and summary.
+Check an intentional test failure, an unavailable build/setup dependency, a
+missing platform report, and a failed-job rerun; none may produce false success.
+Confirm PR runs retain their previous test scope and `CI Complete` gate.
+Changes to protected-branch checks are not required.
+
+GitHub requires a workflow on the default branch for scheduled triggering and
+manual workflow discovery. The new workflow must land there before normal
+scheduling begins. Scheduled runs can be delayed or dropped by GitHub; this
+initial implementation does not include an external missed-run watchdog.
+Local checks do not validate live hardware availability, notifications, or
+GitHub's propagation of results through nested reusable workflow matrices.
+Actionlint 1.7.7 reports four pre-existing syntax diagnostics for expression-valued
+`container.volumes` in the shared workflows. Those mount definitions are unchanged.
+Checking the changed workflows with only those volume nodes normalized to
+empty lists produces no other diagnostics; the original shared files do not pass
+that version's unmodified static check.
 
 ### Optional routing and retries
 

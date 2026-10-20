@@ -1,0 +1,92 @@
+name: Nightly
+
+on:
+  schedule:
+    - cron: '17 18 * * *' # 02:17 Asia/Shanghai
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+# Independent of PR/push CI; preserve a running nightly when another run arrives.
+concurrency:
+  group: nightly-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  plan:
+    name: Plan all-platform nightly
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      platforms: ${{ steps.plan.outputs.platforms }}
+      source_sha: ${{ steps.plan.outputs.source_sha }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install --quiet PyYAML==6.0.3
+      - name: Discover every configured platform and pin source
+        id: plan
+        run: |
+          set -euo pipefail
+          echo "source_sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          python .github/scripts/ci/generate_matrix.py \
+            --event-name schedule --configs-dir .github/configs >> "$GITHUB_OUTPUT"
+
+  platforms:
+    name: Nightly / ${{ matrix.platform }}
+    needs: plan
+    strategy:
+      fail-fast: false
+      matrix:
+        platform: ${{ fromJson(needs.plan.outputs.platforms) }}
+    uses: ./.github/workflows/all_tests_common.yml
+    secrets:
+      FLAGCICD_API_TOKEN: ${{ secrets.FLAGCICD_API_TOKEN }}
+    with:
+      platform: ${{ matrix.platform }}
+      checkout_ref: ${{ needs.plan.outputs.source_sha }}
+      test_profile: nightly
+      run_integration_tests: true
+      test_level: L2
+
+  complete:
+    name: Nightly Complete
+    needs: [plan, platforms]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+      - name: Download platform results
+        id: download
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          pattern: nightly-platform-*
+          path: nightly-reports
+          merge-multiple: true
+      - name: Summarize and verify nightly
+        env:
+          EXPECTED_PLATFORMS: ${{ needs.plan.outputs.platforms || '[]' }}
+          SOURCE_SHA: ${{ needs.plan.outputs.source_sha || github.sha }}
+          PLAN_RESULT: ${{ needs.plan.result }}
+          PIPELINE_RESULT: ${{ needs.platforms.result }}
+          DOWNLOAD_RESULT: ${{ steps.download.outcome }}
+        run: python3 .github/scripts/ci/nightly_report.py summary --output nightly-summary.json
+      - name: Preserve nightly summary, including failures
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: nightly-summary
+          path: nightly-summary.json
+          if-no-files-found: error
+          retention-days: 90
+          overwrite: true

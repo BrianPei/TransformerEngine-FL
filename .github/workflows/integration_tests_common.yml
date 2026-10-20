@@ -3,6 +3,10 @@ name: Common Integration Tests
 on:
   workflow_call:
     inputs:
+      nightly:
+        required: false
+        type: boolean
+        default: false
       checkout_ref:
         required: false
         type: string
@@ -96,6 +100,24 @@ jobs:
           TE_TEST_MAX_RETRIES: '2'
         run: |
           set -euo pipefail
+          if [ "${{ inputs.nightly }}" = true ]; then
+            export XML_LOG_DIR="$GITHUB_WORKSPACE/logs/integration/${{ matrix.test_group.name }}"
+          fi
           export TE_LIB_PATH="${TE_LIB_PATH:-$(python3 -c 'import site; print(site.getsitepackages()[0])')/transformer_engine}"
           python3 tests/test_utils/run_ci_test_group.py
         timeout-minutes: 30
+
+      - name: Upload integration logs and reports
+        if: always() && inputs.nightly
+        uses: actions/upload-artifact@v4
+        continue-on-error: true
+        with:
+          name: integration-reports-${{ inputs.device }}-${{ matrix.test_group.name }}
+          path: |
+            logs/
+            **/*.log
+            **/*.xml
+            **/summary.json
+            **/summary.tsv
+          if-no-files-found: warn
+          retention-days: 14

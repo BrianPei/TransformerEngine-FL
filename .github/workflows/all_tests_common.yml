@@ -15,6 +15,11 @@ on:
         type: string
         default: ''
         description: Optional git ref to checkout
+      test_profile:
+        required: false
+        type: string
+        default: full
+        description: 'Nightly reporting or unchanged full test execution for existing callers'
       platform:
         required: true
         type: string
@@ -89,6 +94,15 @@ jobs:
         run: |
           set -euo pipefail
 
+          case "${{ inputs.test_profile }}" in
+            nightly|full) ;;
+            *) echo "Unsupported test profile" >&2; exit 1 ;;
+          esac
+          if [ "${{ inputs.test_profile }}" = nightly ] && \
+             { [ "${{ inputs.run_unit_tests }}" != true ] || [ "${{ inputs.run_integration_tests }}" != true ]; }; then
+            echo "Nightly requires both unit and integration tests" >&2
+            exit 1
+          fi
           PLATFORM="${{ inputs.platform }}"
           CONFIG_FILE=".github/configs/${PLATFORM}.yml"
 
@@ -141,8 +155,12 @@ jobs:
           TEST_ARTIFACT_PATH=""
           TEST_ARTIFACT_BUILD_SCRIPT=""
           if [ "$TEST_ARTIFACT_ENABLED" = "true" ]; then
-            # Use actual source SHA if provided, otherwise fall back to GITHUB_SHA
-            ACTUAL_SHA="${{ inputs.actual_source_sha }}"
+            # Pin Nightly artifacts to the tested source; preserve the existing
+            # GITHUB_SHA naming convention for other callers.
+            ACTUAL_SHA=""
+            if [ "${{ inputs.test_profile }}" = nightly ]; then
+              ACTUAL_SHA=$(git rev-parse HEAD)
+            fi
             SOURCE_KEY="${ACTUAL_SHA:0:12}"
             if [ -z "$SOURCE_KEY" ]; then
               SOURCE_KEY="${GITHUB_SHA:0:12}"
@@ -382,6 +400,7 @@ jobs:
         device: ${{ fromJson(needs.checkout_and_config.outputs.device_types) }}
     uses: ./.github/workflows/integration_tests_common.yml
     with:
+      nightly: ${{ inputs.test_profile == 'nightly' }}
       device: ${{ matrix.device }}
       checkout_ref: ${{ inputs.checkout_ref }}
       image: ${{ needs.checkout_and_config.outputs.ci_image }}
@@ -466,3 +485,41 @@ jobs:
           fi
 
           echo "✅ All tests completed successfully!"
+
+  nightly_platform_report:
+    name: Nightly platform result
+    if: always() && inputs.test_profile == 'nightly'
+    needs: [checkout_and_config, build_test_artifact, unit_tests, integration_tests, all_tests_complete]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.checkout_ref }}
+      - name: Record build and test outcomes independently of coverage
+        env:
+          PLATFORM_NEEDS: ${{ toJson(needs) }}
+          PLATFORM: ${{ inputs.platform }}
+          SOURCE_SHA: ${{ inputs.checkout_ref }}
+        run: python3 .github/scripts/ci/nightly_report.py platform --output nightly-platform-${{ inputs.platform }}.json
+      - name: Upload platform result
+        uses: actions/upload-artifact@v4
+        with:
+          name: nightly-platform-${{ inputs.platform }}
+          path: nightly-platform-${{ inputs.platform }}.json
+          if-no-files-found: error
+          retention-days: 90
+          overwrite: true
+      - name: Enforce recorded platform result
+        env:
+          REPORT_FILE: nightly-platform-${{ inputs.platform }}.json
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          report = json.loads(Path(os.environ['REPORT_FILE']).read_text())
+          if report['status'] != 'passed':
+              raise SystemExit('Nightly platform did not pass; failure report was preserved')
+          PY
