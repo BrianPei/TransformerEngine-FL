@@ -294,7 +294,9 @@ def cmd_platform(args: argparse.Namespace) -> int:
         except (OSError, json.JSONDecodeError) as exc:
             print(f"WARNING: Failed to load {report_file}: {exc}", file=sys.stderr)
 
-    print(f"INFO: Found {len(group_reports)} group reports for platform {platform}", file=sys.stderr)
+    print(
+        f"INFO: Found {len(group_reports)} group reports for platform {platform}", file=sys.stderr
+    )
 
     # Expected reports: groups from plan for this platform
     expected = [(g["device"], g["group"]) for g in plan["test_groups"] if g["platform"] == platform]
