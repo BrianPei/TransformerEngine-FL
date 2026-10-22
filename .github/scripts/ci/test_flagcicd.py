@@ -63,7 +63,7 @@ class ContractSchemaTests(unittest.TestCase):
             "source_sha": "a" * 40,
             "stage": "pr",
             "platforms": ["cuda"],
-            "test_groups": []
+            "test_groups": [],
         }
         hash1 = contract.compute_plan_hash(plan)
         self.assertEqual(len(hash1), 64)
@@ -98,7 +98,7 @@ class IdentityTests(unittest.TestCase):
                 image_ref="flagscale/te-cuda:latest",
                 image_digest="sha256:abc123",
                 test_level="L1",
-                timestamp="2024-01-01T00:00:00Z"
+                timestamp="2024-01-01T00:00:00Z",
             )
 
             identity.cmd_write(args)
@@ -119,22 +119,26 @@ class IdentityTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmpdir:
             artifact_dir = Path(tmpdir)
             identity_file = artifact_dir / "artifact-identity.json"
-            identity_file.write_text(json.dumps({
-                "schema_version": contract.IDENTITY_SCHEMA,
-                "platform": "cuda",
-                "source_sha": "a" * 40,
-                "config_hash": "b" * 64,
-                "coverage_active": False,
-                "test_marker": None,
-                "wheels": [],
-                "toolchain": {}
-            }))
+            identity_file.write_text(
+                json.dumps(
+                    {
+                        "schema_version": contract.IDENTITY_SCHEMA,
+                        "platform": "cuda",
+                        "source_sha": "a" * 40,
+                        "config_hash": "b" * 64,
+                        "coverage_active": False,
+                        "test_marker": None,
+                        "wheels": [],
+                        "toolchain": {},
+                    }
+                )
+            )
 
             args = Mock(
                 artifact_dir=str(artifact_dir),
                 platform="cuda",
                 source_sha="a" * 40,
-                config_hash="b" * 64
+                config_hash="b" * 64,
             )
 
             # Should not raise
@@ -146,22 +150,26 @@ class IdentityTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmpdir:
             artifact_dir = Path(tmpdir)
             identity_file = artifact_dir / "artifact-identity.json"
-            identity_file.write_text(json.dumps({
-                "schema_version": contract.IDENTITY_SCHEMA,
-                "platform": "cuda",
-                "source_sha": "a" * 40,
-                "config_hash": "b" * 64,
-                "coverage_active": False,
-                "test_marker": None,
-                "wheels": [],
-                "toolchain": {}
-            }))
+            identity_file.write_text(
+                json.dumps(
+                    {
+                        "schema_version": contract.IDENTITY_SCHEMA,
+                        "platform": "cuda",
+                        "source_sha": "a" * 40,
+                        "config_hash": "b" * 64,
+                        "coverage_active": False,
+                        "test_marker": None,
+                        "wheels": [],
+                        "toolchain": {},
+                    }
+                )
+            )
 
             args = Mock(
                 artifact_dir=str(artifact_dir),
                 platform="ascend",  # Mismatch
                 source_sha="a" * 40,
-                config_hash="b" * 64
+                config_hash="b" * 64,
             )
 
             result = identity.cmd_verify(args)
@@ -172,22 +180,26 @@ class IdentityTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmpdir:
             artifact_dir = Path(tmpdir)
             identity_file = artifact_dir / "artifact-identity.json"
-            identity_file.write_text(json.dumps({
-                "schema_version": contract.IDENTITY_SCHEMA,
-                "platform": "cuda",
-                "source_sha": "a" * 40,
-                "config_hash": "b" * 64,
-                "coverage_active": False,
-                "test_marker": None,
-                "wheels": [],
-                "toolchain": {}
-            }))
+            identity_file.write_text(
+                json.dumps(
+                    {
+                        "schema_version": contract.IDENTITY_SCHEMA,
+                        "platform": "cuda",
+                        "source_sha": "a" * 40,
+                        "config_hash": "b" * 64,
+                        "coverage_active": False,
+                        "test_marker": None,
+                        "wheels": [],
+                        "toolchain": {},
+                    }
+                )
+            )
 
             args = Mock(
                 artifact_dir=str(artifact_dir),
                 platform="cuda",
                 source_sha="c" * 40,  # Mismatch
-                config_hash="b" * 64
+                config_hash="b" * 64,
             )
 
             result = identity.cmd_verify(args)
@@ -201,14 +213,18 @@ class GateSliceTests(unittest.TestCase):
         """Test slice command requires FLAGCICD_PLAN environment variable."""
         with tempfile.TemporaryDirectory() as tmpdir:
             plan_file = Path(tmpdir) / "plan.json"
-            plan_file.write_text(json.dumps({
-                "schema_version": "flagcicd.plan/v1",
-                "plan_hash": "x" * 64,
-                "source_sha": "a" * 40,
-                "stage": "pr",
-                "platforms": ["cuda"],
-                "test_groups": []
-            }))
+            plan_file.write_text(
+                json.dumps(
+                    {
+                        "schema_version": "flagcicd.plan/v1",
+                        "plan_hash": "x" * 64,
+                        "source_sha": "a" * 40,
+                        "stage": "pr",
+                        "platforms": ["cuda"],
+                        "test_groups": [],
+                    }
+                )
+            )
 
             # Without FLAGCICD_PLAN env var, should error
             args = Mock(plan=str(plan_file), platform="cuda")
@@ -230,7 +246,7 @@ class GatePlatformReportTests(unittest.TestCase):
             "source_sha": "a" * 40,
             "platform": "cuda",
             "groups": [],
-            "errors": []
+            "errors": [],
         }
 
         self.assertEqual(report["schema_version"], contract.PLATFORM_REPORT_SCHEMA)
@@ -250,7 +266,7 @@ class GateValidationTests(unittest.TestCase):
             "plan_hash": "x" * 64,
             "source_sha": "a" * 40,
             "verdict": "pass",
-            "platforms": ["cuda", "ascend"]
+            "platforms": ["cuda", "ascend"],
         }
 
         self.assertEqual(gate_data["schema_version"], contract.GATE_SCHEMA)
