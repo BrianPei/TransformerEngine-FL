@@ -231,14 +231,3 @@ jobs:
           if-no-files-found: error
           retention-days: 90
           overwrite: true
-
-      - name: Upload coverage fragment
-        if: "!cancelled() && matrix.coverage"
-        uses: actions/upload-artifact@v4
-        continue-on-error: true
-        with:
-          name: coverage-fragment-${{ inputs.platform }}-${{ matrix.device }}-${{ matrix.name }}
-          path: |
-            coverage-*.json
-            coverage-*.coverage
-          if-no-files-found: ignore

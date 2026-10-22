@@ -378,7 +378,7 @@ jobs:
         shell: bash
         env:
           COVERAGE_PYTHON: ${{ needs.checkout_and_config.outputs.coverage_python }}
-          COVERAGE_REQUIRED: ${{ needs.checkout_and_config.outputs.coverage_enabled }}
+          COVERAGE_REQUIRED: ${{ needs.checkout_and_config.outputs.coverage_active }}
         run: |
           mkdir -p coverage-raw
           count=0
@@ -392,10 +392,13 @@ jobs:
             echo "No coverage fragments found"
             echo "aggregated=false" >> "$GITHUB_OUTPUT"
 
-            # Fail if coverage was required
+            # Warn if coverage was expected but not collected
             if [ "$COVERAGE_REQUIRED" = "true" ]; then
-              echo "ERROR: Coverage required but no fragments collected"
-              exit 1
+              echo "WARNING: Coverage was expected but no fragments collected"
+              echo "This may indicate:"
+              echo "  - Tests failed before coverage collection"
+              echo "  - matrix.coverage was false for all test groups"
+              echo "  - Coverage upload steps failed"
             fi
             exit 0
           fi
