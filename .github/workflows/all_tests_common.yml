@@ -52,6 +52,8 @@ jobs:
       has_serial: ${{ steps.slice.outputs.has_serial }}
       preflight_selected: ${{ steps.slice.outputs.preflight_selected }}
       preflight_timeout: ${{ steps.slice.outputs.preflight_timeout }}
+      preflight_device: ${{ steps.slice.outputs.preflight_device }}
+      preflight_name: ${{ steps.slice.outputs.preflight_name }}
       coverage_active: ${{ steps.slice.outputs.coverage_active }}
       stage: ${{ steps.slice.outputs.stage }}
       test_level: ${{ steps.slice.outputs.test_level }}
@@ -164,8 +166,10 @@ jobs:
           ref: ${{ inputs.checkout_ref }}
 
       - name: Run preflight checks
+        id: execute
         shell: bash
         run: |
+          echo "started_at=$(date +%s)" >> "$GITHUB_OUTPUT"
           echo "Preflight validation for ${{ inputs.platform }}"
           echo "Source SHA: ${{ needs.checkout_and_config.outputs.source_sha }}"
           echo "Test level: ${{ needs.checkout_and_config.outputs.test_level }}"
@@ -182,6 +186,44 @@ jobs:
           python3 -m py_compile setup.py
 
           echo "✓ Preflight checks passed"
+
+      - name: Generate preflight report
+        if: always()
+        shell: bash
+        env:
+          FLAGCICD_PLAN: ${{ inputs.plan }}
+          FLAGCICD_STEPS: ${{ toJson(steps) }}
+        run: |
+          START_TIME="${{ steps.execute.outputs.started_at || 0 }}"
+          DURATION=$(($(date +%s) - ${START_TIME:-0}))
+
+          # Write exit code to file for group-report command
+          if [ "${{ steps.execute.outcome }}" = "success" ]; then
+            echo "0" > "$RUNNER_TEMP/preflight_exit_code"
+          else
+            echo "1" > "$RUNNER_TEMP/preflight_exit_code"
+          fi
+
+          python3 .github/scripts/ci/flagcicd_gate.py group-report \
+            --platform "${{ inputs.platform }}" \
+            --device "${{ needs.checkout_and_config.outputs.preflight_device }}" \
+            --group "${{ needs.checkout_and_config.outputs.preflight_name }}" \
+            --kind "preflight" \
+            --level "L0" \
+            --required "true" \
+            --duration "$DURATION" \
+            --exit-code-file "$RUNNER_TEMP/preflight_exit_code" \
+            --output group-report.json
+
+      - name: Upload preflight report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: flagcicd-group-${{ inputs.platform }}-${{ needs.checkout_and_config.outputs.preflight_device }}-${{ needs.checkout_and_config.outputs.preflight_name }}
+          path: group-report.json
+          if-no-files-found: error
+          retention-days: 90
+          overwrite: true
 
   build_test_artifact:
     name: build-test-artifact

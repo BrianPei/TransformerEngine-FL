@@ -113,6 +113,8 @@ def cmd_slice(args: argparse.Namespace) -> int:
         "has_serial": json.dumps(len(serial) > 0),
         "preflight_selected": json.dumps(preflight_entry is not None),
         "preflight_timeout": preflight_entry["timeout"] if preflight_entry else 90,
+        "preflight_device": preflight_entry["device"] if preflight_entry else "",
+        "preflight_name": preflight_entry["name"] if preflight_entry else "",
         "coverage_active": json.dumps(
             any(g.get("coverage") for g in plan["test_groups"] if g["platform"] == platform)
         ),
