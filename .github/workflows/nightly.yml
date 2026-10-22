@@ -47,6 +47,7 @@ jobs:
       - name: pre-commit (changed files only)
         env:
           BASE_REF: main
+        shell: bash
         run: |
           git fetch --no-tags origin "$BASE_REF"
           # Nightly runs from main, diff is empty, passes trivially

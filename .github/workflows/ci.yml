@@ -59,6 +59,7 @@ jobs:
       - name: pre-commit (changed files)
         env:
           BASE_REF: ${{ github.base_ref || 'main' }}
+        shell: bash
         run: |
           git fetch --no-tags origin "$BASE_REF"
           pre-commit run --show-diff-on-failure \

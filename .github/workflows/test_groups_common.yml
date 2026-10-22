@@ -117,6 +117,7 @@ jobs:
 
       - name: Execute tests
         id: execute
+        shell: bash
         env:
           TE_TEST_GROUP_JSON: ${{ toJson(matrix) }}
           TE_TEST_MAX_RETRIES: '2'
@@ -155,6 +156,7 @@ jobs:
 
       - name: Generate group report
         if: always()
+        shell: bash
         env:
           FLAGCICD_PLAN: ${{ inputs.plan }}
           FLAGCICD_STEPS: ${{ toJson(steps) }}

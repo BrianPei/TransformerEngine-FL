@@ -64,12 +64,14 @@ jobs:
           ref: ${{ inputs.checkout_ref }}
 
       - name: Install yq
+        shell: bash
         run: |
           sudo wget -qO /usr/local/bin/yq https://github.com/mikefarah/yq/releases/download/v4.45.1/yq_linux_amd64
           sudo chmod +x /usr/local/bin/yq
 
       - name: Load config and slice plan
         id: slice
+        shell: bash
         env:
           FLAGCICD_PLAN: ${{ inputs.plan }}
           PLATFORM: ${{ inputs.platform }}
@@ -152,6 +154,7 @@ jobs:
     timeout-minutes: 90
     steps:
       - name: Prepare checkout
+        shell: bash
         run: |
           /usr/bin/git config --global --replace-all safe.directory '*'
           /usr/bin/git config --global --unset-all credential.helper 2>/dev/null || true
@@ -170,6 +173,7 @@ jobs:
         run: bash "$GITHUB_WORKSPACE/${{ needs.checkout_and_config.outputs.test_artifact_build_script }}"
 
       - name: Write artifact identity
+        shell: bash
         run: |
           python3 .github/scripts/ci/flagcicd_identity.py write \
             --platform "${{ inputs.platform }}" \
@@ -281,6 +285,7 @@ jobs:
 
       - name: Aggregate coverage
         id: aggregate
+        shell: bash
         env:
           COVERAGE_PYTHON: ${{ needs.checkout_and_config.outputs.coverage_python }}
         run: |
@@ -308,6 +313,7 @@ jobs:
           steps.aggregate.outputs.aggregated == 'true' &&
           github.event_name == 'pull_request'
         continue-on-error: true
+        shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -406,6 +412,7 @@ jobs:
           merge-multiple: false
 
       - name: Aggregate platform report
+        shell: bash
         env:
           FLAGCICD_PLAN: ${{ inputs.plan }}
         run: |
