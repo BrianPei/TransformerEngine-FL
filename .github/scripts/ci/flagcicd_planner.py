@@ -152,6 +152,13 @@ def group_matches_paths(group_def: dict, changed: list[str], platform: str) -> b
     if not changed:
         return True  # No diff means conservative - run all
 
+    # CI/config changes should always trigger tests (bypass paths_watch)
+    ci_config_patterns = [".github/", ".flagcicd/", "setup.py", "pyproject.toml", "CMakeLists.txt"]
+    for path in changed:
+        for pattern in ci_config_patterns:
+            if path.startswith(pattern):
+                return True
+
     # Expand {platform} placeholder
     expanded = [p.replace("{platform}", platform) for p in paths_watch]
 
