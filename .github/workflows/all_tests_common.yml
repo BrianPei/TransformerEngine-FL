@@ -419,6 +419,128 @@ jobs:
 
           echo "PASS: No coverage regression"
 
+      - name: Check nightly 3-sigma regression
+        if: |
+          always() &&
+          steps.aggregate.outputs.aggregated == 'true' &&
+          github.event_name == 'schedule'
+        continue-on-error: true
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          echo "Fetching last 14 nightly coverage reports..."
+          history_dir="$RUNNER_TEMP/coverage-history"
+          mkdir -p "$history_dir"
+
+          artifact_name="coverage-${{ inputs.platform }}-${{ matrix.device }}-pytorch-unittest"
+
+          # Fetch last 14 nightly runs
+          python3 << 'FETCH_EOF'
+          import json, os, subprocess, sys
+          from pathlib import Path
+
+          repo = os.environ["GITHUB_REPOSITORY"]
+          history_dir = Path(os.environ["RUNNER_TEMP"]) / "coverage-history"
+          artifact_name = os.environ["artifact_name"]
+
+          # Get last 20 workflow runs on main with schedule event
+          result = subprocess.run([
+              "gh", "run", "list",
+              "--repo", repo,
+              "--workflow", "nightly.yml",
+              "--branch", "main",
+              "--limit", "20",
+              "--json", "databaseId,status,conclusion,createdAt"
+          ], capture_output=True, text=True)
+
+          if result.returncode != 0:
+              print(f"ERROR: Failed to list runs: {result.stderr}", file=sys.stderr)
+              sys.exit(1)
+
+          runs = json.loads(result.stdout)
+          successful = [r for r in runs if r.get("status") == "completed" and r.get("conclusion") == "success"][:14]
+
+          print(f"Found {len(successful)} successful nightly runs")
+
+          # Download artifacts
+          for i, run in enumerate(successful):
+              run_id = run["databaseId"]
+              output_file = history_dir / f"coverage-{i}.json"
+
+              result = subprocess.run([
+                  "gh", "run", "download", str(run_id),
+                  "--repo", repo,
+                  "--name", artifact_name,
+                  "--dir", str(history_dir / f"run-{i}")
+              ], capture_output=True, text=True)
+
+              if result.returncode == 0:
+                  # Move the downloaded file
+                  downloaded = list((history_dir / f"run-{i}").glob("*.json"))
+                  if downloaded:
+                      downloaded[0].rename(output_file)
+                      print(f"Downloaded coverage from run {run_id}")
+              else:
+                  print(f"WARNING: Failed to download from run {run_id}")
+
+          print(f"Downloaded {len(list(history_dir.glob('coverage-*.json')))} coverage reports")
+          FETCH_EOF
+
+          # Calculate 3-sigma threshold
+          coverage_files=$(ls -1 "$history_dir"/coverage-*.json 2>/dev/null | wc -l)
+
+          if [ "$coverage_files" -lt 5 ]; then
+            echo "Not enough history (need 5+, have $coverage_files), skipping 3-sigma check"
+            exit 0
+          fi
+
+          # Calculate mean and stddev
+          python3 << 'SIGMA_EOF'
+          import json, sys, statistics
+          from pathlib import Path
+
+          history_dir = Path(sys.argv[1])
+          current_file = sys.argv[2]
+
+          # Load historical coverage
+          historical = []
+          for f in sorted(history_dir.glob("coverage-*.json")):
+              try:
+                  data = json.load(f.open())
+                  historical.append(data["totals"]["percent_covered"])
+              except (OSError, KeyError, json.JSONDecodeError):
+                  continue
+
+          if len(historical) < 5:
+              print(f"ERROR: Not enough valid historical data: {len(historical)}")
+              sys.exit(0)
+
+          mean = statistics.mean(historical)
+          stdev = statistics.stdev(historical)
+          threshold_3sigma = mean - 3 * stdev
+
+          # Load current coverage
+          try:
+              current = json.load(open(current_file))
+              current_cov = current["totals"]["percent_covered"]
+          except (OSError, KeyError, json.JSONDecodeError) as e:
+              print(f"ERROR: Cannot load current coverage: {e}")
+              sys.exit(1)
+
+          print(f"Historical coverage (n={len(historical)}):")
+          print(f"  Mean: {mean:.2f}%")
+          print(f"  Stddev: {stdev:.2f}%")
+          print(f"  3-sigma threshold: {threshold_3sigma:.2f}%")
+          print(f"Current coverage: {current_cov:.2f}%")
+
+          if current_cov < threshold_3sigma:
+              print(f"FAIL: Coverage below 3-sigma threshold")
+              sys.exit(1)
+          else:
+              print(f"PASS: Coverage within 3-sigma range")
+          SIGMA_EOF "$history_dir" "coverage-${{ inputs.platform }}-${{ matrix.device }}-pytorch-unittest.json"
+
       - name: Upload coverage report
         if: steps.aggregate.outputs.aggregated == 'true'
         uses: actions/upload-artifact@v4

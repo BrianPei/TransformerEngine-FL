@@ -221,21 +221,21 @@ def build_test_groups(
                 continue  # Already added
 
             # Check blocked at catalog level
-            if group_def.get("blocked"):
-                continue  # Blocked groups not included in execution
+            catalog_blocked = group_def.get("blocked")
 
-            # Check paths_watch filter
-            if not group_matches_paths(group_def, changed, platform):
+            # Check paths_watch filter (skip if blocked)
+            if not catalog_blocked and not group_matches_paths(group_def, changed, platform):
                 continue  # Changed files don't match this group's watch paths
 
             # Check if platform has matrix entry
             matrix_key = group_def.get("matrix")
+            exec_blocked = None
             if matrix_key:
                 matrix_entries = platform_cfg.get(matrix_key, [])
                 matched = [e for e in matrix_entries if e.get("name") == name]
 
                 if not matched:
-                    if group_def.get("required"):
+                    if group_def.get("required") and not catalog_blocked:
                         raise ValueError(
                             f"{platform} missing required group {name} in {matrix_key}"
                         )
@@ -247,8 +247,7 @@ def build_test_groups(
                 exec_entry = dict(matched[0])
 
                 # Check for exec-level blocking
-                if exec_entry.get("blocked"):
-                    continue  # Blocked at platform level
+                exec_blocked = exec_entry.get("blocked")
 
                 # Strip planner-only keys
                 exec_entry.pop("timeout_minutes", None)
@@ -256,6 +255,13 @@ def build_test_groups(
                 exec_entry.pop("name", None)
             else:
                 exec_entry = None
+
+            # Determine if blocked
+            blocked_reason = catalog_blocked or exec_blocked
+
+            # Skip blocked groups (don't add to execution plan)
+            if blocked_reason:
+                continue
 
             # Resolve resources
             res_class = group_def["resources"]["class"]
