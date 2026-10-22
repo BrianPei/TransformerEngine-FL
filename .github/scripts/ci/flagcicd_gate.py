@@ -280,9 +280,8 @@ def cmd_platform(args: argparse.Namespace) -> int:
     platform = args.platform
     reports_dir = Path(args.reports_dir)
 
-    if not reports_dir.exists():
-        print(f"ERROR: Reports directory does not exist: {reports_dir}", file=sys.stderr)
-        return 1
+    # Ensure reports directory exists (may be empty if no groups ran)
+    reports_dir.mkdir(parents=True, exist_ok=True)
 
     # Collect group reports
     group_reports = []
@@ -307,20 +306,29 @@ def cmd_platform(args: argparse.Namespace) -> int:
     actual_keys = {(r["device"], r["group"]) for r in group_reports}
     expected_keys = set(expected)
 
-    missing = expected_keys - actual_keys
-    unexpected = actual_keys - expected_keys
-    duplicates = [
-        k
-        for k in actual_keys
-        if sum(1 for r in group_reports if (r["device"], r["group"]) == k) > 1
-    ]
+    # If lint_only or no groups expected, this is valid
+    if len(expected) == 0:
+        print(
+            f"INFO: No groups expected for platform {platform} (lint_only or all blocked)",
+            file=sys.stderr,
+        )
+        if len(group_reports) > 0:
+            errors.append(f"Unexpected reports when no groups were planned: {actual_keys}")
+    else:
+        missing = expected_keys - actual_keys
+        unexpected = actual_keys - expected_keys
+        duplicates = [
+            k
+            for k in actual_keys
+            if sum(1 for r in group_reports if (r["device"], r["group"]) == k) > 1
+        ]
 
-    if missing:
-        errors.append(f"Missing reports: {missing}")
-    if unexpected:
-        errors.append(f"Unexpected reports: {unexpected}")
-    if duplicates:
-        errors.append(f"Duplicate reports: {duplicates}")
+        if missing:
+            errors.append(f"Missing reports: {missing}")
+        if unexpected:
+            errors.append(f"Unexpected reports: {unexpected}")
+        if duplicates:
+            errors.append(f"Duplicate reports: {duplicates}")
 
     # Validate each report
     for report in group_reports:

@@ -583,10 +583,19 @@ jobs:
 
       - name: Download all group reports
         uses: actions/download-artifact@v4
+        continue-on-error: true
+        id: download_reports
         with:
           pattern: flagcicd-group-${{ inputs.platform }}-*
           path: group-reports
           merge-multiple: false
+
+      - name: Ensure reports directory exists
+        shell: bash
+        run: |
+          mkdir -p group-reports
+          echo "Reports directory created/verified"
+          ls -la group-reports/ || echo "Directory is empty"
 
       - name: Debug plan input
         shell: bash
