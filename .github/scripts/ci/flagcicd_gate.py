@@ -324,6 +324,23 @@ def cmd_platform(args: argparse.Namespace) -> int:
         ]
 
         if missing:
+            print(f"ERROR: Missing group reports for platform {platform}:", file=sys.stderr)
+            for device, group in sorted(missing):
+                print(f"  - {device}/{group}", file=sys.stderr)
+            print(f"", file=sys.stderr)
+            print(f"Possible causes:", file=sys.stderr)
+            print(
+                f"  1. parallel_groups or serial_groups job was skipped (check job conditions)",
+                file=sys.stderr,
+            )
+            print(f"  2. test_groups_common.yml failed before uploading reports", file=sys.stderr)
+            print(
+                f"  3. group-report.json was not generated (check 'Generate group report' step)",
+                file=sys.stderr,
+            )
+            print(
+                f"  4. artifact upload failed (check 'Upload group report' step)", file=sys.stderr
+            )
             errors.append(f"Missing reports: {missing}")
         if unexpected:
             errors.append(f"Unexpected reports: {unexpected}")

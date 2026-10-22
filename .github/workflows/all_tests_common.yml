@@ -581,6 +581,20 @@ jobs:
         with:
           ref: ${{ inputs.checkout_ref }}
 
+      - name: Debug job results
+        shell: bash
+        run: |
+          echo "Job results:"
+          echo "  checkout_and_config: ${{ needs.checkout_and_config.result }}"
+          echo "  build_test_artifact: ${{ needs.build_test_artifact.result }}"
+          echo "  parallel_groups: ${{ needs.parallel_groups.result }}"
+          echo "  serial_groups: ${{ needs.serial_groups.result }}"
+          echo "  coverage: ${{ needs.coverage.result }}"
+          echo ""
+          echo "Config outputs:"
+          echo "  has_parallel: ${{ needs.checkout_and_config.outputs.has_parallel }}"
+          echo "  has_serial: ${{ needs.checkout_and_config.outputs.has_serial }}"
+
       - name: Download all group reports
         uses: actions/download-artifact@v4
         continue-on-error: true
