@@ -588,6 +588,19 @@ jobs:
           path: group-reports
           merge-multiple: false
 
+      - name: Debug plan input
+        shell: bash
+        run: |
+          echo "Plan length: ${#FLAGCICD_PLAN}"
+          echo "Plan first 200 chars: ${FLAGCICD_PLAN:0:200}"
+          echo "Plan last 200 chars: ${FLAGCICD_PLAN: -200}"
+          if [ -z "$FLAGCICD_PLAN" ]; then
+            echo "ERROR: FLAGCICD_PLAN is empty"
+            exit 1
+          fi
+        env:
+          FLAGCICD_PLAN: ${{ inputs.plan }}
+
       - name: Aggregate platform report
         shell: bash
         env:
