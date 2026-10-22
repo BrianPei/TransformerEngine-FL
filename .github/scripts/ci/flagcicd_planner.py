@@ -72,24 +72,112 @@ def select_platforms(
     raise ValueError(f"Unknown stage: {stage}")
 
 
-def resolve_level(stage_def: dict, requested: str, project: dict, changed: list[str]) -> str:
-    """Resolve test level."""
+def match_risk_rules(changed: list[str], risk_rules: dict) -> tuple[str, str]:
+    """Match changed files against risk rules.
+
+    Returns: (minimum_level, risk_level)
+    """
+    import fnmatch
+
+    if not changed:
+        return "L0", "R0"
+
+    max_level = "L0"
+    max_risk = "R0"
+
+    for rule in risk_rules.get("rules", []):
+        patterns = rule.get("paths", [])
+        matched = any(any(fnmatch.fnmatch(path, pat) for pat in patterns) for path in changed)
+
+        if matched:
+            rule_level = rule.get("minimum_level", "L0")
+            rule_risk = rule.get("risk", "R0")
+
+            if rule_level > max_level:
+                max_level = rule_level
+            if rule_risk > max_risk:
+                max_risk = rule_risk
+
+    # If no rules matched, use unknown defaults
+    if max_level == "L0":
+        max_level = risk_rules.get("unknown_level", "L2")
+        max_risk = risk_rules.get("unknown_risk", "R2")
+
+    return max_level, max_risk
+
+
+def resolve_level(
+    stage_def: dict, requested: str, project: dict, changed: list[str], labels: list[str]
+) -> tuple[str, str]:
+    """Resolve test level and risk level.
+
+    Returns: (test_level, risk_level)
+    """
     if stage_def.get("fixed_level"):
-        return stage_def["default_level"]
+        return stage_def["default_level"], stage_def.get("default_risk", "R1")
 
-    level = stage_def["default_level"] if requested == "auto" else requested
-    if level == "unknown":
-        level = project.get("risk_rules", {}).get("unknown_level", "L2")
+    # Start with stage default
+    test_level = stage_def["default_level"] if requested == "auto" else requested
+    risk_level = stage_def.get("default_risk", "R1")
 
-    # Simplified: escalate if changed files suggest higher level
-    # (Full implementation would match risk_rules patterns)
-    return level
+    # Apply risk rules
+    if changed and "risk_rules" in project:
+        rule_level, rule_risk = match_risk_rules(changed, project["risk_rules"])
+        if rule_level > test_level:
+            test_level = rule_level
+        if rule_risk > risk_level:
+            risk_level = rule_risk
+
+    # Label-based escalation
+    for label in labels:
+        if label.startswith("level:"):
+            requested_level = label.split(":", 1)[1].upper()
+            if requested_level > test_level:
+                test_level = requested_level
+
+    return test_level, risk_level
+
+
+def group_matches_paths(group_def: dict, changed: list[str], platform: str) -> bool:
+    """Check if test group should run based on paths_watch.
+
+    Returns: True if group should run (paths_watch empty or matched)
+    """
+    import fnmatch
+
+    paths_watch = group_def.get("paths_watch", [])
+    if not paths_watch:
+        return True  # No filter means always run
+
+    if not changed:
+        return True  # No diff means conservative - run all
+
+    # Expand {platform} placeholder
+    expanded = [p.replace("{platform}", platform) for p in paths_watch]
+
+    # Check if any changed file matches any pattern
+    for path in changed:
+        for pattern in expanded:
+            if pattern.endswith("/"):
+                # Directory prefix match
+                if path.startswith(pattern):
+                    return True
+            else:
+                # Exact or glob match
+                if fnmatch.fnmatch(path, pattern):
+                    return True
+
+    return False
 
 
 def build_test_groups(
-    project: dict, platforms: dict, selected_platforms: list[str], test_level: str
+    project: dict,
+    platforms: dict,
+    selected_platforms: list[str],
+    test_level: str,
+    changed: list[str],
 ) -> list[dict]:
-    """Build test_groups list from catalog."""
+    """Build test_groups list from catalog, filtered by level and paths_watch."""
     catalog = project["test_groups"]
     level_num = LEVEL_ORDER[test_level]
     groups = []
@@ -132,6 +220,14 @@ def build_test_groups(
             if name == "preflight":
                 continue  # Already added
 
+            # Check blocked at catalog level
+            if group_def.get("blocked"):
+                continue  # Blocked groups not included in execution
+
+            # Check paths_watch filter
+            if not group_matches_paths(group_def, changed, platform):
+                continue  # Changed files don't match this group's watch paths
+
             # Check if platform has matrix entry
             matrix_key = group_def.get("matrix")
             if matrix_key:
@@ -149,17 +245,15 @@ def build_test_groups(
                     raise ValueError(f"{platform} has duplicate {name} in {matrix_key}")
 
                 exec_entry = dict(matched[0])
-                # Check for catalog-level blocking
-                if group_def.get("blocked"):
-                    continue  # Blocked at catalog
 
                 # Check for exec-level blocking
                 if exec_entry.get("blocked"):
-                    continue  # Blocked at platform
+                    continue  # Blocked at platform level
 
                 # Strip planner-only keys
                 exec_entry.pop("timeout_minutes", None)
                 exec_entry.pop("blocked", None)
+                exec_entry.pop("name", None)
             else:
                 exec_entry = None
 
@@ -267,8 +361,9 @@ def build_plan(args: argparse.Namespace) -> dict[str, Any]:
     )
 
     # Resolve level and risk
-    test_level = resolve_level(stage_def, args.requested_level, project, changed)
-    risk_level = stage_def.get("default_risk", "R1")  # Simplified
+    test_level, risk_level = resolve_level(
+        stage_def, args.requested_level, project, changed, labels
+    )
 
     # Build platform entries
     platform_entries = []
@@ -287,7 +382,9 @@ def build_plan(args: argparse.Namespace) -> dict[str, Any]:
 
     # Build test groups
     test_groups = (
-        build_test_groups(project, platforms, selected, test_level) if not lint_only else []
+        build_test_groups(project, platforms, selected, test_level, changed)
+        if not lint_only
+        else []
     )
 
     # Build plan

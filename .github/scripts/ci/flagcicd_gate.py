@@ -308,12 +308,44 @@ def cmd_platform(args: argparse.Namespace) -> int:
     if duplicates:
         errors.append(f"Duplicate reports: {duplicates}")
 
-    # Check required groups passed
-    status = "passed"
+    # Validate each report
     for report in group_reports:
-        if report.get("required") and report.get("status") != "passed":
-            status = report["status"]
-            break
+        # Check schema
+        if report.get("schema_version") != contract.GROUP_REPORT_SCHEMA:
+            errors.append(
+                f"Group {report.get('group')}: wrong schema {report.get('schema_version')}"
+            )
+
+        # Check plan consistency
+        if report.get("plan_hash") != plan["plan_hash"]:
+            errors.append(f"Group {report.get('group')}: plan_hash mismatch")
+        if report.get("source_sha") != plan["source_sha"]:
+            errors.append(f"Group {report.get('group')}: source_sha mismatch")
+        if report.get("platform") != platform:
+            errors.append(f"Group {report.get('group')}: platform mismatch")
+
+    # Check required groups passed and executed
+    status = "passed"
+    required_failed = []
+    required_not_executed = []
+
+    for report in group_reports:
+        if report.get("required"):
+            if report.get("status") != "passed":
+                required_failed.append((report["device"], report["group"], report["status"]))
+                status = "failed"
+            # Check execution (status != skipped means it was attempted)
+            if report.get("status") == "skipped" and not report.get("explicitly_skipped"):
+                required_not_executed.append((report["device"], report["group"]))
+
+    if required_failed:
+        errors.append(f"Required groups failed: {required_failed}")
+    if required_not_executed:
+        errors.append(f"Required groups not executed: {required_not_executed}")
+
+    # Fail if any errors
+    if errors:
+        status = "failed"
 
     # Build platform report
     platform_report = {
@@ -334,7 +366,7 @@ def cmd_platform(args: argparse.Namespace) -> int:
     args.output.write_text(json.dumps(platform_report, indent=2, sort_keys=True) + "\n")
 
     # Exit with failure if not passed
-    return 0 if status == "passed" else 1
+    return 0 if status == "passed" and not errors else 1
 
 
 def cmd_gate(args: argparse.Namespace) -> int:
@@ -374,8 +406,36 @@ def cmd_gate(args: argparse.Namespace) -> int:
     for platform in [p["name"] for p in plan["platforms"]]:
         if platform not in platform_reports:
             errors.append(f"Missing platform report: {platform}")
-        elif platform_reports[platform].get("status") != "passed":
-            errors.append(f"Platform {platform} failed")
+            continue
+
+        report = platform_reports[platform]
+
+        # Validate schema
+        if report.get("schema_version") != contract.PLATFORM_REPORT_SCHEMA:
+            errors.append(f"Platform {platform}: wrong schema {report.get('schema_version')}")
+
+        # Validate consistency
+        if report.get("plan_hash") != plan["plan_hash"]:
+            errors.append(f"Platform {platform}: plan_hash mismatch")
+        if report.get("source_sha") != plan["source_sha"]:
+            errors.append(f"Platform {platform}: source_sha mismatch")
+        if report.get("repository") != plan["repository"]:
+            errors.append(f"Platform {platform}: repository mismatch")
+        if report.get("stage") != plan["stage"]:
+            errors.append(f"Platform {platform}: stage mismatch")
+
+        # Validate status
+        if report.get("status") != "passed":
+            errors.append(f"Platform {platform}: status={report.get('status')}")
+
+        # Check for platform-level errors
+        if report.get("errors"):
+            errors.append(f"Platform {platform}: has errors: {report['errors']}")
+
+    # Fail closed on unexpected platforms
+    unexpected_platforms = set(platform_reports.keys()) - {p["name"] for p in plan["platforms"]}
+    if unexpected_platforms:
+        errors.append(f"Unexpected platform reports: {unexpected_platforms}")
 
     # Build gate summary
     gate_status = "passed" if not errors else "failed"

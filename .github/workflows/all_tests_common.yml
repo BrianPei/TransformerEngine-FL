@@ -142,10 +142,54 @@ jobs:
             --configs-dir .github/configs \
             --github-output
 
+  preflight:
+    name: preflight
+    needs: checkout_and_config
+    if: needs.checkout_and_config.outputs.preflight_selected == 'true'
+    runs-on: ${{ fromJson(needs.checkout_and_config.outputs.runs_on) }}
+    container:
+      image: ${{ needs.checkout_and_config.outputs.ci_image }}
+      options: ${{ needs.checkout_and_config.outputs.container_options }}
+      volumes: ${{ fromJson(needs.checkout_and_config.outputs.container_volumes) }}
+    timeout-minutes: ${{ fromJson(needs.checkout_and_config.outputs.preflight_timeout) }}
+    steps:
+      - name: Prepare checkout
+        shell: bash
+        run: |
+          /usr/bin/git config --global --replace-all safe.directory '*'
+          /usr/bin/git config --global --unset-all credential.helper 2>/dev/null || true
+
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.checkout_ref }}
+
+      - name: Run preflight checks
+        shell: bash
+        run: |
+          echo "Preflight validation for ${{ inputs.platform }}"
+          echo "Source SHA: ${{ needs.checkout_and_config.outputs.source_sha }}"
+          echo "Test level: ${{ needs.checkout_and_config.outputs.test_level }}"
+
+          # Quick smoke tests
+          python3 --version
+          python3 -c "import sys; print(f'Python {sys.version}')"
+
+          # Verify repository structure
+          test -f setup.py || { echo "ERROR: setup.py not found"; exit 1; }
+          test -d transformer_engine || { echo "ERROR: transformer_engine/ not found"; exit 1; }
+
+          # Check for obvious syntax errors
+          python3 -m py_compile setup.py
+
+          echo "✓ Preflight checks passed"
+
   build_test_artifact:
     name: build-test-artifact
-    needs: checkout_and_config
-    if: needs.checkout_and_config.outputs.test_artifact_enabled == 'true'
+    needs: [checkout_and_config, preflight]
+    if: |
+      always() &&
+      needs.checkout_and_config.outputs.test_artifact_enabled == 'true' &&
+      (needs.checkout_and_config.outputs.preflight_selected != 'true' || needs.preflight.result == 'success')
     runs-on: ${{ fromJson(needs.checkout_and_config.outputs.test_artifact_runs_on) }}
     container:
       image: ${{ needs.checkout_and_config.outputs.ci_image }}
@@ -292,10 +336,11 @@ jobs:
         shell: bash
         env:
           COVERAGE_PYTHON: ${{ needs.checkout_and_config.outputs.coverage_python }}
+          COVERAGE_REQUIRED: ${{ needs.checkout_and_config.outputs.coverage_enabled }}
         run: |
           mkdir -p coverage-raw
           count=0
-          for f in coverage-fragments/*.coverage; do
+          for f in coverage-fragments/.coverage.*; do
             [ -f "$f" ] || continue
             count=$((count + 1))
             cp "$f" "coverage-raw/.coverage.$count"
@@ -304,6 +349,12 @@ jobs:
           if [ "$count" -eq 0 ]; then
             echo "No coverage fragments found"
             echo "aggregated=false" >> "$GITHUB_OUTPUT"
+
+            # Fail if coverage was required
+            if [ "$COVERAGE_REQUIRED" = "true" ]; then
+              echo "ERROR: Coverage required but no fragments collected"
+              exit 1
+            fi
             exit 0
           fi
 

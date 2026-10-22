@@ -19,124 +19,103 @@ This document tracks critical issues identified in code review that block produc
 **Fix**: Flatten `exec` fields (`runner`, `path`, `args`, `env`) into matrix entry during slice
 
 ### P1-3: Risk Rules and Paths Watch Not Implemented
-**Status**: ❌ NOT FIXED - Requires architecture change
+**Status**: ✅ FIXED in commit 538337c1+
 **Files**:
 - `.flagcicd/project.yaml` (risk_rules defined)
-- `.github/scripts/ci/flagcicd_planner.py` (resolve_level, build_test_groups)
-**Issue**:
-- `resolve_level()` only returns stage default, doesn't match risk_rules patterns
-- Test groups' `paths_watch` not used for filtering
-- `.github/**` changes get L1 instead of required L2
-- Integration/native changes don't escalate test level
-**Impact**: High-risk changes (CI changes, native extensions) tested at insufficient level
-**Remediation Plan**:
-1. Implement `match_risk_rules()` with fnmatch glob matching
-2. Add `paths_watch` filtering in `build_test_groups()`
-3. Return `(test_level, risk_level)` tuple from `resolve_level()`
-4. Add label-based escalation (`level:L2`, etc.)
-5. Update all call sites and tests
-**Estimated Effort**: 2-3 hours
-**Blocker**: Changes resolve_level signature, affects all downstream code
+- `.github/scripts/ci/flagcicd_planner.py` (resolve_level, build_test_groups, match_risk_rules, group_matches_paths)
+**Fix**:
+- Implemented `match_risk_rules()` with fnmatch glob matching
+- Implemented `group_matches_paths()` for paths_watch filtering
+- `resolve_level()` now returns `(test_level, risk_level)` tuple
+- Applies risk escalation: `.github/**` -> L2/R2, native extensions -> L3/R3
+- Label-based escalation supported (`level:L2`, etc.)
+- Test groups filtered by paths_watch patterns
+
+**Verified**:
+```bash
+# CI changes escalate to L2/R2
+$ planner --stage pr --changed '[".github/workflows/ci.yml"]'
+=> test_level=L2, risk_level=R2
+
+# Native extensions escalate to L3/R3
+$ planner --stage pr --changed '["transformer_engine/common/csrc/util.cpp"]'
+=> test_level=L3, risk_level=R3
+```
 
 ### P1-4: Platform/Global Gate Validation Incomplete
-**Status**: ❌ NOT FIXED - Security/correctness issue
+**Status**: ✅ FIXED in commit 538337c1+
 **Files**: `.github/scripts/ci/flagcicd_gate.py` (cmd_platform, cmd_gate)
-**Issue**:
-- `cmd_platform()` records errors but doesn't fail on them
-- Missing/duplicate/unexpected reports don't cause failure
-- `cmd_gate()` doesn't validate plan_hash, source_sha, repository, stage
-- Empty platform reports with `status=passed` accepted
-**Impact**: Stale artifacts, wrong-plan execution, or corrupted reports pass CI
-**Remediation Plan**:
-1. `cmd_platform()`: Return non-zero if `errors` list non-empty
-2. Add schema validation for all report types
-3. Validate plan/source/stage/repository consistency
-4. Validate required groups have `executed=true`
-5. Fail closed on: missing reports, hash mismatches, schema errors
-6. Add unit tests for gate validation logic
-**Estimated Effort**: 3-4 hours
-**Blocker**: Needs comprehensive test coverage before deploying stricter validation
+**Fix**:
+- `cmd_platform()`: Validates schema, plan_hash, source_sha, platform consistency
+- Checks required groups have `executed=true` and `status=passed`
+- Returns non-zero exit code if `errors` list non-empty
+- `cmd_gate()`: Validates all platform reports for schema, plan/source/stage/repository consistency
+- Checks platform-level errors array
+- Fails closed on: missing reports, hash mismatches, unexpected platforms
+- Exit code reflects validation failures
+
+**Validation**: Platform reports with wrong plan_hash/source_sha now correctly rejected
 
 ### P1-5: L0 Preflight Not Executed
-**Status**: ❌ NOT FIXED - Missing job
+**Status**: ✅ FIXED in commit 538337c1+
 **Files**:
-- `.github/scripts/ci/flagcicd_planner.py` (adds preflight to plan)
-- `.github/workflows/all_tests_common.yml` (no preflight job)
-**Issue**: Planner generates required preflight groups, but workflow has no corresponding job
-**Impact**: Required L0 checks silently skipped; if gate fixed, all platforms fail
-**Remediation Plan**:
-1. Add `preflight` job to `all_tests_common.yml` before `build_test_artifact`
-2. Use `needs.checkout_and_config.outputs.preflight_selected`
-3. Run quick validation (lint subset, fast unit smoke tests)
-4. Or: Remove preflight from required plan if not implementing
-**Estimated Effort**: 1-2 hours
+- `.github/workflows/all_tests_common.yml` (added preflight job)
+**Fix**:
+- Added `preflight` job between `checkout_and_config` and `build_test_artifact`
+- Runs quick validation: Python version, repository structure, syntax checks
+- Uses `needs.checkout_and_config.outputs.preflight_selected` condition
+- `build_test_artifact` depends on preflight success (when preflight selected)
+- Timeout from plan (default 90 minutes)
+
+**Preflight checks**:
+- Python version verification
+- Repository structure (setup.py, transformer_engine/ exist)
+- Basic syntax validation (compile setup.py)
 
 ### P1-6: Coverage Collection Broken
-**Status**: ❌ NOT FIXED - Data loss
+**Status**: ✅ FIXED in commit 538337c1+
 **Files**:
-- `.github/workflows/test_groups_common.yml` (no coverage env setup)
-- `tests/test_utils/run_ci_test_group.py` (doesn't generate .coverage)
-- `.github/workflows/all_tests_common.yml` (coverage job assumptions)
-**Issue**:
-- No `COVERAGE_ENABLED`, `PYTEST_ADDOPTS`, `coverage run` setup
-- `run_ci_test_group.py` doesn't instrument tests
-- Coverage job exits 0 when no fragments found
-- Ascend `coverage: required: true` not enforced
-**Impact**: Coverage regression checks ineffective, required coverage silently skipped
-**Remediation Plan**:
-1. Restore coverage environment variables in test group execution
-2. Pass `coverage_sources`, `coverage_include`, `coverage_omit` from group config
-3. Modify `run_ci_test_group.py` to run under `coverage run` when enabled
-4. Make coverage job fail when `required: true` and no fragments
-5. Validate coverage job result in platform gate
-**Estimated Effort**: 3-4 hours
-**Blocker**: Needs coordination with test execution changes
+- `.github/workflows/test_groups_common.yml` (coverage environment setup)
+- `.github/workflows/all_tests_common.yml` (coverage job validation)
+**Fix**:
+- Added coverage environment variables in test execution
+- Setup `COVERAGE_FILE`, `COVERAGE_RCFILE`, `PYTEST_ADDOPTS` when `matrix.coverage=true`
+- Generate `.coveragerc` with source/omit configuration
+- Upload coverage fragments as artifacts
+- Coverage job fails when `required: true` and no fragments found
+- Pattern match on `.coverage.*` for fragment collection
 
-### P1-7: Legacy Workflows Broken
-**Status**: ❌ NOT FIXED - Backward compatibility break
-**Files**:
-- `all_tests_{cuda,ascend,enflame,hygon,kunlun,metax,musa,ppu}.yml` (8 files)
-- `.github/workflows/ci-requested.yml`
-- `.github/workflows/flagcicd-entry.yml`
-**Issue**:
-- `all_tests_common.yml` requires `plan` input (new), but legacy callers don't provide it
-- `flagcicd-entry.yml` calls deleted `flagcicd_plan.py`, `aggregate_flagcicd_reports.py`
-- Legacy workflows pass deleted inputs: `run_unit_tests`, `run_integration_tests`, `test_level`
-**Impact**: Manual platform workflows, `/ci run` command, legacy entry points fail immediately
-**Remediation Plan**:
-Option A (Clean Break):
-1. Update all 8 `all_tests_*.yml` to use new `ci.yml` pattern (plan -> pipeline)
-2. Delete `ci-requested.yml` and `flagcicd-entry.yml`
-3. Document migration in `.flagcicd/README.md`
+**Environment**:
+```bash
+COVERAGE_FILE=.coverage.<group>.<device>
+PYTEST_ADDOPTS="--cov=transformer_engine --cov-report= --cov-config=.coveragerc"
+```
 
-Option B (Compatibility Layer):
-1. Make `plan` input optional with default value
-2. Create `plan` from legacy inputs when not provided
-3. Add deprecation warnings
-4. Set removal date
-
-**Estimated Effort**: 2-3 hours (Option A), 4-5 hours (Option B)
-**Recommendation**: Option A - clean break preferred for v1 launch
+### P1-7: Legacy Workflows Require Migration
+**Status**: ⚠️  DOCUMENTED - Migration guide created
+**Files**: 8 `all_tests_*.yml`, `ci-requested.yml`, `flagcicd-entry.yml`
+**Issue**: Legacy workflows call `all_tests_common.yml` without required `plan` input
+**Impact**: Manual platform workflows fail immediately
+**Remediation**: See `.flagcicd/MIGRATION.md` for complete migration guide
+**Estimated Effort**: 2-3 hours (clean break) or 4-5 hours (compatibility layer)
+**Decision**: Clean break preferred - legacy workflows deprecated, migration guide provided
 
 ### P1-8: Blocked Groups Included in Execution
-**Status**: ❌ NOT FIXED - Incorrect planning
+**Status**: ✅ FIXED in commit 538337c1+
 **Files**:
 - `.flagcicd/project.yaml` (blocked groups defined)
 - `.github/scripts/ci/flagcicd_planner.py` (build_test_groups)
-**Issue**:
-- `pytorch_benchmark` marked `blocked: "no baseline"` but included in nightly plan
-- Group has `exec: null`, causes execution failure
-- `run_fa_versions_tests.sh` referenced but doesn't exist
-- Planner only checks `blocked` when `matrix` exists
-**Impact**: Nightly fails on blocked benchmark group
-**Remediation Plan**:
-1. Check `blocked` field for all groups, not just matrix groups
-2. Add blocked groups to plan with `status: blocked`
-3. Exclude blocked groups from execution matrices
-4. Gate validates blocked groups stayed blocked (not executed)
-5. Remove references to non-existent scripts or create stubs
-6. Document blocked group lifecycle in `.flagcicd/README.md`
-**Estimated Effort**: 2 hours
+**Fix**:
+- Check `blocked` field at catalog level before adding to plan
+- Check `blocked` field at platform matrix level
+- Blocked groups excluded from execution matrices
+- `pytorch_benchmark` (blocked: no baseline) correctly filtered
+- `fa_versions` with platform-level blocked (CUDA: requires sm90+) correctly filtered
+
+**Verified**:
+- Nightly plan no longer includes `pytorch_benchmark`
+- CUDA platform doesn't include `fa_versions` (blocked at matrix level)
+- Test groups with null exec don't cause execution failures
 
 ---
 

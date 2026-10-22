@@ -144,6 +144,29 @@ jobs:
           echo "TE_LIB_PATH=$TE_LIB_PATH"
           echo "XML_LOG_DIR=$XML_LOG_DIR"
 
+          # Setup coverage if enabled
+          if [ "${{ matrix.coverage }}" = "true" ]; then
+            export COVERAGE_FILE="$GITHUB_WORKSPACE/.coverage.${{ matrix.name }}.${{ matrix.device }}"
+            export COVERAGE_RCFILE="$GITHUB_WORKSPACE/.coveragerc"
+
+            # Create minimal .coveragerc
+            cat > "$COVERAGE_RCFILE" << EOF
+          [run]
+          source = transformer_engine
+          omit =
+              */tests/*
+              */test_utils/*
+              */__pycache__/*
+          parallel = True
+
+          [report]
+          precision = 2
+          EOF
+
+            echo "Coverage enabled: COVERAGE_FILE=$COVERAGE_FILE"
+            export PYTEST_ADDOPTS="--cov=transformer_engine --cov-report= --cov-config=$COVERAGE_RCFILE ${PYTEST_ADDOPTS:-}"
+          fi
+
           # Run test group
           set +e
           python3 tests/test_utils/run_ci_test_group.py
@@ -175,6 +198,16 @@ jobs:
             --junit-dir "$GITHUB_WORKSPACE/logs/${{ matrix.kind }}/${{ matrix.name }}" \
             --duration "$DURATION" \
             --output group-report.json
+
+      - name: Upload coverage fragment
+        if: always() && matrix.coverage == true
+        uses: actions/upload-artifact@v4
+        continue-on-error: true
+        with:
+          name: coverage-fragment-${{ inputs.platform }}-${{ matrix.device }}-${{ matrix.name }}
+          path: .coverage.*
+          if-no-files-found: warn
+          retention-days: 1
 
       - name: Upload test logs
         if: always()
