@@ -266,18 +266,27 @@ def parse_junit_status(junit_dir: str | None) -> tuple[str, str | None]:
 def cmd_platform(args: argparse.Namespace) -> int:
     """Aggregate group reports into platform report."""
     # Load plan
+    plan_json = os.environ.get("FLAGCICD_PLAN", "")
+    if not plan_json:
+        print("ERROR: FLAGCICD_PLAN environment variable is empty or not set", file=sys.stderr)
+        return 1
+
     try:
-        plan = contract.load_plan(os.environ.get("FLAGCICD_PLAN", ""))
+        plan = contract.load_plan(plan_json)
     except ValueError as exc:
-        print(f"ERROR: {exc}", file=sys.stderr)
+        print(f"ERROR: Failed to load plan: {exc}", file=sys.stderr)
         return 1
 
     platform = args.platform
-    reports_dir = args.reports_dir
+    reports_dir = Path(args.reports_dir)
+
+    if not reports_dir.exists():
+        print(f"ERROR: Reports directory does not exist: {reports_dir}", file=sys.stderr)
+        return 1
 
     # Collect group reports
     group_reports = []
-    for report_file in Path(reports_dir).rglob("group-report.json"):
+    for report_file in reports_dir.rglob("group-report.json"):
         try:
             report = json.loads(report_file.read_text())
             if report.get("platform") == platform:
@@ -285,8 +294,11 @@ def cmd_platform(args: argparse.Namespace) -> int:
         except (OSError, json.JSONDecodeError) as exc:
             print(f"WARNING: Failed to load {report_file}: {exc}", file=sys.stderr)
 
+    print(f"INFO: Found {len(group_reports)} group reports for platform {platform}", file=sys.stderr)
+
     # Expected reports: groups from plan for this platform
     expected = [(g["device"], g["group"]) for g in plan["test_groups"] if g["platform"] == platform]
+    print(f"INFO: Expected {len(expected)} groups for platform {platform}", file=sys.stderr)
 
     # Validate reports
     errors = []
