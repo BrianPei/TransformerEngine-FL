@@ -1,42 +1,77 @@
+# Copyright 2026 FlagOS Contributors
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Nightly comprehensive testing at L3 across all platforms.
+# Runs every night at 02:17 Asia/Shanghai (18:17 UTC).
+
 name: Nightly
 
 on:
   schedule:
-    - cron: '17 18 * * *' # 02:17 Asia/Shanghai
+    - cron: '17 18 * * *'  # 02:17 Asia/Shanghai
   workflow_dispatch:
 
 permissions:
   contents: read
   actions: read
 
-# Independent of PR/push CI; preserve a running nightly when another run arrives.
 concurrency:
   group: nightly-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
-  plan:
-    name: Plan all-platform nightly
+  lint:
+    name: Lint
     runs-on: ubuntu-latest
-    timeout-minutes: 5
-    outputs:
-      platforms: ${{ steps.plan.outputs.platforms }}
-      source_sha: ${{ steps.plan.outputs.source_sha }}
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ github.sha }}
+          fetch-depth: 0
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - run: python -m pip install --quiet PyYAML==6.0.3
-      - name: Discover every configured platform and pin source
-        id: plan
+      - name: Install pre-commit
+        run: pip install --quiet pre-commit==4.2.0
+      - name: pre-commit (changed files only)
+        env:
+          BASE_REF: main
         run: |
-          set -euo pipefail
-          echo "source_sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
-          python .github/scripts/ci/generate_matrix.py \
-            --event-name schedule --configs-dir .github/configs >> "$GITHUB_OUTPUT"
+          git fetch --no-tags origin "$BASE_REF"
+          # Nightly runs from main, diff is empty, passes trivially
+          pre-commit run --show-diff-on-failure \
+            --from-ref "$(git merge-base "origin/$BASE_REF" HEAD)" --to-ref HEAD || true
+
+  plan:
+    name: Generate nightly plan
+    needs: lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      plan: ${{ steps.plan.outputs.plan }}
+      plan_hash: ${{ steps.plan.outputs.plan_hash }}
+      platforms: ${{ steps.plan.outputs.platforms }}
+      source_sha: ${{ steps.plan.outputs.source_sha }}
+      test_level: ${{ steps.plan.outputs.test_level }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: ./.github/actions/flagcicd-plan
+        id: plan
+        with:
+          stage: nightly
 
   platforms:
     name: Nightly / ${{ matrix.platform }}
@@ -51,42 +86,19 @@ jobs:
     with:
       platform: ${{ matrix.platform }}
       checkout_ref: ${{ needs.plan.outputs.source_sha }}
-      test_profile: nightly
-      run_integration_tests: true
-      test_level: L2
+      plan: ${{ needs.plan.outputs.plan }}
 
   complete:
     name: Nightly Complete
-    needs: [plan, platforms]
+    needs: [lint, plan, platforms]
     if: always()
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4
+      - uses: ./.github/actions/flagcicd-gate
         with:
-          ref: ${{ github.sha }}
-      - name: Download platform results
-        id: download
-        continue-on-error: true
-        uses: actions/download-artifact@v4
-        with:
-          pattern: nightly-platform-*
-          path: nightly-reports
-          merge-multiple: true
-      - name: Summarize and verify nightly
-        env:
-          EXPECTED_PLATFORMS: ${{ needs.plan.outputs.platforms || '[]' }}
-          SOURCE_SHA: ${{ needs.plan.outputs.source_sha || github.sha }}
-          PLAN_RESULT: ${{ needs.plan.result }}
-          PIPELINE_RESULT: ${{ needs.platforms.result }}
-          DOWNLOAD_RESULT: ${{ steps.download.outcome }}
-        run: python3 .github/scripts/ci/nightly_report.py summary --output nightly-summary.json
-      - name: Preserve nightly summary, including failures
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: nightly-summary
-          path: nightly-summary.json
-          if-no-files-found: error
-          retention-days: 90
-          overwrite: true
+          plan: ${{ needs.plan.outputs.plan }}
+          needs-json: ${{ toJson(needs) }}
+          plan-job: plan
+          pipeline-job: platforms

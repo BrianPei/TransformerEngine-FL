@@ -52,6 +52,9 @@ coverage:
     - '*/setup.py'
     - '*/transformer_engine/plugin/core/_build_config.py'
 
+# Devices per node for multi-device groups; read once by the CI planner.
+nproc_per_node: 8
+
 unit_test_matrix:
   - name: pytorch_unittest
     runner: script

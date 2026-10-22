@@ -1,0 +1,460 @@
+#!/usr/bin/env python3
+"""FlagCICD gate: slice, group-report, platform, gate subcommands (stdlib only)."""
+
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import subprocess
+import sys
+import xml.etree.ElementTree as ET
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any
+
+import flagcicd_contract as contract
+
+
+def utc_now() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def cmd_slice(args: argparse.Namespace) -> int:
+    """Slice plan for one platform, output matrices."""
+    plan_json = os.environ.get("FLAGCICD_PLAN", "")
+    if not plan_json:
+        print("ERROR: FLAGCICD_PLAN environment variable required", file=sys.stderr)
+        return 1
+
+    try:
+        plan = contract.load_plan(plan_json)
+    except ValueError as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        return 1
+
+    # Verify HEAD matches plan
+    result = subprocess.run(
+        ["git", "rev-parse", "HEAD"], capture_output=True, text=True, check=True
+    )
+    current_sha = result.stdout.strip()
+    if current_sha != plan["source_sha"]:
+        print(
+            f"ERROR: HEAD {current_sha[:12]} != plan source_sha {plan['source_sha'][:12]}",
+            file=sys.stderr,
+        )
+        return 1
+
+    # Find platform in plan
+    platform = args.platform
+    platform_entry = next((p for p in plan["platforms"] if p["name"] == platform), None)
+    if not platform_entry:
+        print(f"ERROR: Platform {platform} not in plan", file=sys.stderr)
+        return 1
+
+    # Verify config hash
+    config_path = Path(args.configs_dir) / f"{platform}.yml"
+    if not config_path.exists():
+        print(f"ERROR: Config not found: {config_path}", file=sys.stderr)
+        return 1
+
+    import hashlib
+
+    actual_hash = hashlib.sha256(config_path.read_bytes()).hexdigest()
+    if actual_hash != platform_entry["config_hash"]:
+        print(
+            f"ERROR: Config hash mismatch for {platform} "
+            f"(expected {platform_entry['config_hash'][:12]}..., got {actual_hash[:12]}...)",
+            file=sys.stderr,
+        )
+        return 1
+
+    # Build matrices
+    parallel = []
+    serial = []
+    preflight_entry = None
+
+    for group in plan["test_groups"]:
+        if group["platform"] != platform:
+            continue
+
+        entry = {
+            "device": group["device"],
+            "name": group["group"],
+            "kind": group["kind"],
+            "level": group["level"],
+            "required": group["required"],
+            "class": group["resources"]["class"],
+            "devices": group["resources"]["devices"],
+            "exclusive": group["resources"]["exclusive"],
+            "timeout": group["resources"]["timeout_minutes"],
+            "coverage": group.get("coverage", False),
+            "exec": group.get("exec"),
+        }
+
+        if group["lane"] == "preflight":
+            if not preflight_entry:
+                preflight_entry = entry
+        elif group["lane"] == "parallel":
+            parallel.append(entry)
+        elif group["lane"] == "serial":
+            serial.append(entry)
+
+    # Write outputs
+    output = {
+        "parallel_matrix": json.dumps({"include": parallel}),
+        "serial_matrix": json.dumps({"include": serial}),
+        "has_parallel": json.dumps(len(parallel) > 0),
+        "has_serial": json.dumps(len(serial) > 0),
+        "preflight_selected": json.dumps(preflight_entry is not None),
+        "preflight_timeout": preflight_entry["timeout"] if preflight_entry else 90,
+        "coverage_active": json.dumps(
+            any(g.get("coverage") for g in plan["test_groups"] if g["platform"] == platform)
+        ),
+        "stage": plan["stage"],
+        "test_level": plan["test_level"],
+        "plan_hash": plan["plan_hash"],
+        "source_sha": plan["source_sha"],
+    }
+
+    if args.github_output:
+        gh_out = os.environ.get("GITHUB_OUTPUT")
+        if gh_out:
+            with open(gh_out, "a") as f:
+                for key, value in output.items():
+                    f.write(f"{key}={value}\n")
+
+    return 0
+
+
+def cmd_group_report(args: argparse.Namespace) -> int:
+    """Generate group report from step outcomes and test results."""
+    # Load inputs
+    try:
+        steps = json.loads(os.environ.get("FLAGCICD_STEPS", "{}"))
+        plan = contract.load_plan(os.environ.get("FLAGCICD_PLAN", ""))
+    except (json.JSONDecodeError, ValueError) as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        return 1
+
+    platform = args.platform
+    device = args.device
+    group = args.group
+
+    # Determine status from steps
+    status = "passed"
+    failure_stage = None
+    executed = False
+
+    # Check step outcomes in order
+    step_names = ["checkout", "artifact", "identity", "setup", "execute"]
+    for step_name in step_names:
+        step = steps.get(step_name, {})
+        outcome = step.get("outcome", "")
+
+        if outcome == "cancelled":
+            status = "cancelled"
+            failure_stage = "execute" if step_name == "execute" else step_name
+            break
+        elif outcome == "failure":
+            if step_name == "execute":
+                # Execute failure: check exit code
+                if args.exit_code_file and Path(args.exit_code_file).exists():
+                    try:
+                        exit_code = int(Path(args.exit_code_file).read_text().strip())
+                        executed = True
+                        if exit_code == 0:
+                            # Parse junit to determine actual status
+                            status, failure_stage = parse_junit_status(args.junit_dir)
+                        else:
+                            status = "test_failed"
+                            failure_stage = "test_execution"
+                    except (OSError, ValueError):
+                        status = "infra_error"
+                        failure_stage = "execute"
+                else:
+                    # Missing exit code file
+                    status = "infra_error"
+                    failure_stage = "execute"
+            elif step_name == "setup":
+                status = (
+                    "build_failed" if "build" in step.get("name", "").lower() else "infra_error"
+                )
+                failure_stage = step_name
+                break
+            else:
+                status = "infra_error"
+                failure_stage = step_name
+                break
+        elif outcome == "success" and step_name == "execute":
+            executed = True
+
+    # Build report
+    report = {
+        "schema_version": contract.GROUP_REPORT_SCHEMA,
+        "repository": plan["repository"],
+        "stage": plan["stage"],
+        "plan_hash": plan["plan_hash"],
+        "source_sha": plan["source_sha"],
+        "run_id": os.environ.get("GITHUB_RUN_ID", ""),
+        "run_attempt": int(os.environ.get("GITHUB_RUN_ATTEMPT", "1")),
+        "platform": platform,
+        "device": device,
+        "group": group,
+        "kind": args.kind,
+        "level": args.level,
+        "status": status,
+        "failure_stage": failure_stage,
+        "required": args.required,
+        "executed": executed,
+        "duration_seconds": int(float(args.duration)) if args.duration else 0,
+        "created_at": utc_now(),
+    }
+
+    # Write report
+    args.output.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n")
+    return 0
+
+
+def parse_junit_status(junit_dir: str | None) -> tuple[str, str | None]:
+    """Parse junit XML files, return (status, failure_stage)."""
+    if not junit_dir or not Path(junit_dir).exists():
+        return "passed", None
+
+    total_tests = 0
+    total_failures = 0
+    total_errors = 0
+    total_skipped = 0
+    has_corrupt = False
+
+    for xml_file in Path(junit_dir).rglob("*.xml"):
+        try:
+            tree = ET.parse(xml_file)
+            root = tree.getroot()
+
+            # Handle both <testsuites> and <testsuite> roots
+            suites = [root] if root.tag == "testsuite" else root.findall("testsuite")
+
+            for suite in suites:
+                total_tests += int(suite.get("tests", 0))
+                total_failures += int(suite.get("failures", 0))
+                total_errors += int(suite.get("errors", 0))
+                total_skipped += int(suite.get("skipped", 0))
+        except (ET.ParseError, OSError, ValueError):
+            has_corrupt = True
+
+    if has_corrupt and total_tests == 0:
+        return "report_error", "junit_parsing"
+
+    if total_tests == 0:
+        return "skipped", "no_tests_collected"
+
+    if total_tests == total_skipped:
+        return "skipped", "all_skipped"
+
+    if total_failures > 0 or total_errors > 0:
+        return "test_failed", "test_execution"
+
+    return "passed", None
+
+
+def cmd_platform(args: argparse.Namespace) -> int:
+    """Aggregate group reports into platform report."""
+    # Load plan
+    try:
+        plan = contract.load_plan(os.environ.get("FLAGCICD_PLAN", ""))
+    except ValueError as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        return 1
+
+    platform = args.platform
+    reports_dir = args.reports_dir
+
+    # Collect group reports
+    group_reports = []
+    for report_file in Path(reports_dir).rglob("group-report.json"):
+        try:
+            report = json.loads(report_file.read_text())
+            if report.get("platform") == platform:
+                group_reports.append(report)
+        except (OSError, json.JSONDecodeError) as exc:
+            print(f"WARNING: Failed to load {report_file}: {exc}", file=sys.stderr)
+
+    # Expected reports: groups from plan for this platform
+    expected = [(g["device"], g["group"]) for g in plan["test_groups"] if g["platform"] == platform]
+
+    # Validate reports
+    errors = []
+    actual_keys = {(r["device"], r["group"]) for r in group_reports}
+    expected_keys = set(expected)
+
+    missing = expected_keys - actual_keys
+    unexpected = actual_keys - expected_keys
+    duplicates = [
+        k
+        for k in actual_keys
+        if sum(1 for r in group_reports if (r["device"], r["group"]) == k) > 1
+    ]
+
+    if missing:
+        errors.append(f"Missing reports: {missing}")
+    if unexpected:
+        errors.append(f"Unexpected reports: {unexpected}")
+    if duplicates:
+        errors.append(f"Duplicate reports: {duplicates}")
+
+    # Check required groups passed
+    status = "passed"
+    for report in group_reports:
+        if report.get("required") and report.get("status") != "passed":
+            status = report["status"]
+            break
+
+    # Build platform report
+    platform_report = {
+        "schema_version": contract.PLATFORM_REPORT_SCHEMA,
+        "repository": plan["repository"],
+        "stage": plan["stage"],
+        "plan_hash": plan["plan_hash"],
+        "source_sha": plan["source_sha"],
+        "run_id": os.environ.get("GITHUB_RUN_ID", ""),
+        "platform": platform,
+        "status": status,
+        "groups": group_reports,
+        "errors": errors,
+        "created_at": utc_now(),
+    }
+
+    # Write report
+    args.output.write_text(json.dumps(platform_report, indent=2, sort_keys=True) + "\n")
+
+    # Exit with failure if not passed
+    return 0 if status == "passed" else 1
+
+
+def cmd_gate(args: argparse.Namespace) -> int:
+    """Global gate: validate all platform reports."""
+    # Load plan and needs
+    try:
+        plan = contract.load_plan(os.environ.get("FLAGCICD_PLAN", ""))
+        needs = json.loads(os.environ.get("FLAGCICD_NEEDS", "{}"))
+    except (ValueError, json.JSONDecodeError) as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        return 1
+
+    # Check plan job succeeded
+    errors = []
+    if needs.get(args.plan_job, {}).get("result") != "success":
+        errors.append(f"Plan job {args.plan_job} did not succeed")
+
+    # Check pipeline job
+    expected_pipeline = "success" if len(plan["platforms"]) > 0 else "skipped"
+    if needs.get(args.pipeline_job, {}).get("result") != expected_pipeline:
+        errors.append(f"Pipeline job must be {expected_pipeline}")
+
+    # Load platform reports
+    platform_reports = {}
+    if args.reports_dir and Path(args.reports_dir).exists():
+        for report_file in Path(args.reports_dir).rglob("*.json"):
+            try:
+                report = json.loads(report_file.read_text())
+                if report.get("schema_version") == contract.PLATFORM_REPORT_SCHEMA:
+                    pname = report.get("platform")
+                    if pname:
+                        platform_reports[pname] = report
+            except (OSError, json.JSONDecodeError):
+                pass
+
+    # Validate platforms
+    for platform in [p["name"] for p in plan["platforms"]]:
+        if platform not in platform_reports:
+            errors.append(f"Missing platform report: {platform}")
+        elif platform_reports[platform].get("status") != "passed":
+            errors.append(f"Platform {platform} failed")
+
+    # Build gate summary
+    gate_status = "passed" if not errors else "failed"
+    gate_summary = {
+        "schema_version": contract.GATE_SCHEMA,
+        "repository": plan["repository"],
+        "stage": plan["stage"],
+        "test_level": plan["test_level"],
+        "plan_hash": plan["plan_hash"],
+        "source_sha": plan["source_sha"],
+        "run_id": os.environ.get("GITHUB_RUN_ID", ""),
+        "status": gate_status,
+        "platforms": platform_reports,
+        "errors": errors,
+        "created_at": utc_now(),
+    }
+
+    # Write summary
+    args.output.write_text(json.dumps(gate_summary, indent=2, sort_keys=True) + "\n")
+
+    # Write step summary
+    if summary_path := os.environ.get("GITHUB_STEP_SUMMARY"):
+        with open(summary_path, "a") as f:
+            f.write(f"### CI Gate: {gate_status}\n\n")
+            f.write(f"- Stage: {plan['stage']}\n")
+            f.write(f"- Level: {plan['test_level']}\n")
+            f.write(f"- Platforms: {len(plan['platforms'])}\n\n")
+            if errors:
+                f.write("**Errors:**\n\n")
+                for error in errors:
+                    f.write(f"- {error}\n")
+
+    return 0 if gate_status == "passed" else 1
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    subparsers = parser.add_subparsers(dest="command", required=True)
+
+    # slice
+    slice_parser = subparsers.add_parser("slice", help="Slice plan for platform matrices")
+    slice_parser.add_argument("--platform", required=True)
+    slice_parser.add_argument("--configs-dir", default=".github/configs")
+    slice_parser.add_argument("--github-output", action="store_true")
+
+    # group-report
+    group_parser = subparsers.add_parser("group-report", help="Generate group report")
+    group_parser.add_argument("--platform", required=True)
+    group_parser.add_argument("--device", required=True)
+    group_parser.add_argument("--group", required=True)
+    group_parser.add_argument("--kind", required=True)
+    group_parser.add_argument("--level", required=True)
+    group_parser.add_argument("--required", type=lambda x: x.lower() == "true", required=True)
+    group_parser.add_argument("--exit-code-file", type=Path)
+    group_parser.add_argument("--junit-dir")
+    group_parser.add_argument("--duration", default="0")
+    group_parser.add_argument("--output", type=Path, required=True)
+
+    # platform
+    platform_parser = subparsers.add_parser("platform", help="Aggregate platform report")
+    platform_parser.add_argument("--platform", required=True)
+    platform_parser.add_argument("--reports-dir", type=Path, required=True)
+    platform_parser.add_argument("--output", type=Path, required=True)
+
+    # gate
+    gate_parser = subparsers.add_parser("gate", help="Global gate check")
+    gate_parser.add_argument("--plan-job", default="plan")
+    gate_parser.add_argument("--pipeline-job", default="platform-pipeline")
+    gate_parser.add_argument("--reports-dir", type=Path)
+    gate_parser.add_argument("--output", type=Path, required=True)
+
+    args = parser.parse_args()
+
+    if args.command == "slice":
+        return cmd_slice(args)
+    elif args.command == "group-report":
+        return cmd_group_report(args)
+    elif args.command == "platform":
+        return cmd_platform(args)
+    elif args.command == "gate":
+        return cmd_gate(args)
+
+    return 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

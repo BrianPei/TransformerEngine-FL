@@ -1,4 +1,4 @@
-name: Common All Tests
+name: All Tests Common (FlagCICD)
 
 permissions:
   contents: read
@@ -10,247 +10,153 @@ on:
       FLAGCICD_API_TOKEN:
         required: false
     inputs:
+      platform:
+        required: true
+        type: string
+        description: Platform name
       checkout_ref:
         required: false
         type: string
         default: ''
-        description: Optional git ref to checkout
-      test_profile:
-        required: false
-        type: string
-        default: full
-        description: 'Nightly reporting or unchanged full test execution for existing callers'
-      platform:
+        description: Git ref to checkout
+      plan:
         required: true
         type: string
-        description: Platform configuration name
-      run_unit_tests:
-        required: false
-        type: boolean
-        default: true
-        description: Whether to run unit tests in this workflow
-      run_integration_tests:
-        required: false
-        type: boolean
-        default: true
-        description: Whether to run integration tests in this workflow
-      test_level:
-        required: false
-        type: string
-        default: L2
-        description: FlagCICD test capability level
-      risk_level:
-        required: false
-        type: string
-        default: R1
-        description: FlagCICD change risk level
-      flagcicd_metadata:
-        required: false
-        type: string
-        default: '{}'
-        description: 'Optional JSON with run_id, task_id, parent_run_id, actual_sha'
+        description: Full plan JSON from planner
 
 jobs:
   checkout_and_config:
-    name: checkout_and_config
-    defaults:
-      run:
-        shell: bash
+    name: checkout-and-config
     runs-on: ubuntu-latest
     outputs:
-      ci_image: ${{ steps.config.outputs.ci_image }}
-      image_digest: ${{ steps.config.outputs.image_digest }}
-      container_pull_policy: ${{ steps.config.outputs.container_pull_policy }}
-      runs_on: ${{ steps.config.outputs.runs_on }}
-      container_volumes: ${{ steps.config.outputs.container_volumes }}
-      container_options: ${{ steps.config.outputs.container_options }}
-      device_types: ${{ steps.config.outputs.device_types }}
-      setup_script: ${{ steps.config.outputs.setup_script }}
-      checkout_submodules: ${{ steps.config.outputs.checkout_submodules }}
-      unit_test_matrix: ${{ steps.config.outputs.unit_test_matrix }}
-      unit_test_timeout_minutes: ${{ steps.config.outputs.unit_test_timeout_minutes }}
-      integration_test_matrix: ${{ steps.config.outputs.integration_test_matrix }}
-      coverage_enabled: ${{ steps.config.outputs.coverage_enabled }}
-      coverage_required: ${{ steps.config.outputs.coverage_required }}
-      coverage_sources: ${{ steps.config.outputs.coverage_sources }}
-      coverage_include: ${{ steps.config.outputs.coverage_include }}
-      coverage_omit: ${{ steps.config.outputs.coverage_omit }}
-      coverage_python: ${{ steps.config.outputs.coverage_python }}
-      config_hash: ${{ steps.config.outputs.config_hash }}
-      test_artifact_enabled: ${{ steps.config.outputs.test_artifact_enabled }}
-      test_artifact_name: ${{ steps.config.outputs.test_artifact_name }}
-      test_artifact_path: ${{ steps.config.outputs.test_artifact_path }}
-      test_artifact_build_script: ${{ steps.config.outputs.test_artifact_build_script }}
-      test_artifact_runs_on: ${{ steps.config.outputs.test_artifact_runs_on }}
-      test_artifact_container_options: ${{ steps.config.outputs.test_artifact_container_options }}
+      ci_image: ${{ steps.slice.outputs.ci_image }}
+      container_pull_policy: ${{ steps.slice.outputs.container_pull_policy }}
+      runs_on: ${{ steps.slice.outputs.runs_on }}
+      container_volumes: ${{ steps.slice.outputs.container_volumes }}
+      container_options: ${{ steps.slice.outputs.container_options }}
+      device_types: ${{ steps.slice.outputs.device_types }}
+      setup_script: ${{ steps.slice.outputs.setup_script }}
+      checkout_submodules: ${{ steps.slice.outputs.checkout_submodules }}
+      test_artifact_enabled: ${{ steps.slice.outputs.test_artifact_enabled }}
+      test_artifact_name: ${{ steps.slice.outputs.test_artifact_name }}
+      test_artifact_path: ${{ steps.slice.outputs.test_artifact_path }}
+      test_artifact_build_script: ${{ steps.slice.outputs.test_artifact_build_script }}
+      test_artifact_runs_on: ${{ steps.slice.outputs.test_artifact_runs_on }}
+      test_artifact_container_options: ${{ steps.slice.outputs.test_artifact_container_options }}
+      config_hash: ${{ steps.slice.outputs.config_hash }}
+      coverage_enabled: ${{ steps.slice.outputs.coverage_enabled }}
+      coverage_python: ${{ steps.slice.outputs.coverage_python }}
+      parallel_matrix: ${{ steps.slice.outputs.parallel_matrix }}
+      serial_matrix: ${{ steps.slice.outputs.serial_matrix }}
+      has_parallel: ${{ steps.slice.outputs.has_parallel }}
+      has_serial: ${{ steps.slice.outputs.has_serial }}
+      preflight_selected: ${{ steps.slice.outputs.preflight_selected }}
+      preflight_timeout: ${{ steps.slice.outputs.preflight_timeout }}
+      coverage_active: ${{ steps.slice.outputs.coverage_active }}
+      stage: ${{ steps.slice.outputs.stage }}
+      test_level: ${{ steps.slice.outputs.test_level }}
+      plan_hash: ${{ steps.slice.outputs.plan_hash }}
+      source_sha: ${{ steps.slice.outputs.source_sha }}
     steps:
-      - name: Checkout source code
+      - name: Checkout source
         uses: actions/checkout@v4
         with:
           ref: ${{ inputs.checkout_ref }}
 
-      - name: Load platform configuration
-        id: config
+      - name: Install yq
         run: |
-          set -euo pipefail
-
-          case "${{ inputs.test_profile }}" in
-            nightly|full) ;;
-            *) echo "Unsupported test profile" >&2; exit 1 ;;
-          esac
-          if [ "${{ inputs.test_profile }}" = nightly ] && \
-             { [ "${{ inputs.run_unit_tests }}" != true ] || [ "${{ inputs.run_integration_tests }}" != true ]; }; then
-            echo "Nightly requires both unit and integration tests" >&2
-            exit 1
-          fi
-          PLATFORM="${{ inputs.platform }}"
-          CONFIG_FILE=".github/configs/${PLATFORM}.yml"
-
-          # Install mikefarah/yq (v4) for YAML parsing
           sudo wget -qO /usr/local/bin/yq https://github.com/mikefarah/yq/releases/download/v4.45.1/yq_linux_amd64
           sudo chmod +x /usr/local/bin/yq
-          /usr/local/bin/yq --version
-          echo "Loading configuration from $CONFIG_FILE"
+
+      - name: Load config and slice plan
+        id: slice
+        env:
+          FLAGCICD_PLAN: ${{ inputs.plan }}
+          PLATFORM: ${{ inputs.platform }}
+        run: |
+          CONFIG_FILE=".github/configs/${PLATFORM}.yml"
+
+          # Read platform config
+          CI_IMAGE=$(yq '.ci_image' "$CONFIG_FILE")
+          echo "ci_image=$CI_IMAGE" >> "$GITHUB_OUTPUT"
+
+          CONTAINER_PULL_POLICY=$(yq '.container_pull_policy // "never"' "$CONFIG_FILE")
+          echo "container_pull_policy=$CONTAINER_PULL_POLICY" >> "$GITHUB_OUTPUT"
+
+          RUNS_ON=$(yq '.runner_labels | tojson(0)' "$CONFIG_FILE")
+          echo "runs_on=$RUNS_ON" >> "$GITHUB_OUTPUT"
+
+          VOLUMES=$(yq '.container_volumes | tojson(0)' "$CONFIG_FILE")
+          echo "container_volumes=$VOLUMES" >> "$GITHUB_OUTPUT"
+
+          OPTIONS=$(yq '.container_options' "$CONFIG_FILE")
+          echo "container_options=$OPTIONS" >> "$GITHUB_OUTPUT"
+
+          DEVICE_TYPES=$(yq '.device_types | tojson(0)' "$CONFIG_FILE")
+          echo "device_types=$DEVICE_TYPES" >> "$GITHUB_OUTPUT"
+
+          SETUP_SCRIPT=$(yq '.setup_script // ""' "$CONFIG_FILE")
+          echo "setup_script=$SETUP_SCRIPT" >> "$GITHUB_OUTPUT"
+
+          CHECKOUT_SUBMODULES=$(yq '.checkout_submodules // "false"' "$CONFIG_FILE")
+          echo "checkout_submodules=$CHECKOUT_SUBMODULES" >> "$GITHUB_OUTPUT"
+
+          # Test artifact config
+          TEST_ARTIFACT_ENABLED=$(yq '.test_artifact.enabled // false' "$CONFIG_FILE")
+          echo "test_artifact_enabled=$TEST_ARTIFACT_ENABLED" >> "$GITHUB_OUTPUT"
+
+          if [ "$TEST_ARTIFACT_ENABLED" = "true" ]; then
+            CONFIG_HASH=$(sha256sum "$CONFIG_FILE" | awk '{print $1}')
+            SOURCE_SHA=$(git rev-parse HEAD)
+            TEST_ARTIFACT_NAME="test-artifact-${PLATFORM}-${SOURCE_SHA:0:12}-${CONFIG_HASH:0:12}"
+            echo "test_artifact_name=$TEST_ARTIFACT_NAME" >> "$GITHUB_OUTPUT"
+
+            TEST_ARTIFACT_PATH=$(yq '.test_artifact.path' "$CONFIG_FILE")
+            echo "test_artifact_path=$TEST_ARTIFACT_PATH" >> "$GITHUB_OUTPUT"
+
+            TEST_ARTIFACT_BUILD_SCRIPT=$(yq '.test_artifact.build_script' "$CONFIG_FILE")
+            echo "test_artifact_build_script=$TEST_ARTIFACT_BUILD_SCRIPT" >> "$GITHUB_OUTPUT"
+
+            TEST_ARTIFACT_RUNS_ON=$(yq '(.test_artifact.runner_labels // .runner_labels) | tojson(0)' "$CONFIG_FILE")
+            echo "test_artifact_runs_on=$TEST_ARTIFACT_RUNS_ON" >> "$GITHUB_OUTPUT"
+
+            TEST_ARTIFACT_OPTIONS=$(yq '.test_artifact.container_options // .container_options' "$CONFIG_FILE")
+            echo "test_artifact_container_options=$TEST_ARTIFACT_OPTIONS" >> "$GITHUB_OUTPUT"
+          fi
+
+          # Coverage config
+          COVERAGE_ENABLED=$(yq '.coverage.enabled // false' "$CONFIG_FILE")
+          echo "coverage_enabled=$COVERAGE_ENABLED" >> "$GITHUB_OUTPUT"
+
+          COVERAGE_PYTHON=$(yq '.coverage.python // "python3"' "$CONFIG_FILE")
+          echo "coverage_python=$COVERAGE_PYTHON" >> "$GITHUB_OUTPUT"
 
           CONFIG_HASH=$(sha256sum "$CONFIG_FILE" | awk '{print $1}')
           echo "config_hash=$CONFIG_HASH" >> "$GITHUB_OUTPUT"
 
-          # Read CI image
-          CI_IMAGE=$(yq '.ci_image' "$CONFIG_FILE")
-          echo "ci_image=$CI_IMAGE" >> $GITHUB_OUTPUT
-
-          IMAGE_DIGEST=$(yq '.image_digest // ""' "$CONFIG_FILE")
-          echo "image_digest=$IMAGE_DIGEST" >> "$GITHUB_OUTPUT"
-
-          CONTAINER_PULL_POLICY=$(yq '.container_pull_policy // "never"' "$CONFIG_FILE")
-          echo "container_pull_policy=$CONTAINER_PULL_POLICY" >> $GITHUB_OUTPUT
-
-          # Read runner labels and format as JSON array
-          RUNS_ON=$(yq '.runner_labels | tojson(0)' "$CONFIG_FILE")
-          echo "runs_on=$RUNS_ON" >> $GITHUB_OUTPUT
-
-          # Read container volumes and format as JSON array
-          VOLUMES=$(yq '.container_volumes | tojson(0)' "$CONFIG_FILE")
-          echo "container_volumes=$VOLUMES" >> $GITHUB_OUTPUT
-
-          # Read container options
-          OPTIONS=$(yq '.container_options' "$CONFIG_FILE")
-          echo "container_options=$OPTIONS" >> $GITHUB_OUTPUT
-
-          # Read device types
-          DEVICE_TYPES=$(yq '.device_types | tojson(0)' "$CONFIG_FILE")
-          echo "device_types=$DEVICE_TYPES" >> $GITHUB_OUTPUT
-
-          # Read setup script path
-          SETUP_SCRIPT=$(yq '.setup_script // ""' "$CONFIG_FILE")
-          echo "setup_script=$SETUP_SCRIPT" >> $GITHUB_OUTPUT
-
-          CHECKOUT_SUBMODULES=$(yq '.checkout_submodules // "false"' "$CONFIG_FILE")
-          echo "checkout_submodules=$CHECKOUT_SUBMODULES" >> $GITHUB_OUTPUT
-
-          TEST_ARTIFACT_ENABLED=$(yq '.test_artifact.enabled // false' "$CONFIG_FILE")
-          TEST_ARTIFACT_RUNS_ON=$(yq '(.test_artifact.runner_labels // .runner_labels) | tojson(0)' "$CONFIG_FILE")
-          TEST_ARTIFACT_OPTIONS=$(yq '.test_artifact.container_options // .container_options' "$CONFIG_FILE")
-          TEST_ARTIFACT_NAME=""
-          TEST_ARTIFACT_PATH=""
-          TEST_ARTIFACT_BUILD_SCRIPT=""
-          if [ "$TEST_ARTIFACT_ENABLED" = "true" ]; then
-            # Pin Nightly artifacts to the tested source; preserve the existing
-            # GITHUB_SHA naming convention for other callers.
-            ACTUAL_SHA=""
-            if [ "${{ inputs.test_profile }}" = nightly ]; then
-              ACTUAL_SHA=$(git rev-parse HEAD)
-            fi
-            SOURCE_KEY="${ACTUAL_SHA:0:12}"
-            if [ -z "$SOURCE_KEY" ]; then
-              SOURCE_KEY="${GITHUB_SHA:0:12}"
-            fi
-            CONFIG_KEY="${CONFIG_HASH:0:12}"
-            TEST_ARTIFACT_NAME="test-artifact-$PLATFORM-$SOURCE_KEY-$CONFIG_KEY"
-            TEST_ARTIFACT_PATH=$(yq '.test_artifact.path // ""' "$CONFIG_FILE")
-            TEST_ARTIFACT_BUILD_SCRIPT=$(yq '.test_artifact.build_script // ""' "$CONFIG_FILE")
-            if [ -z "$TEST_ARTIFACT_PATH" ] || [ -z "$TEST_ARTIFACT_BUILD_SCRIPT" ]; then
-              echo "test_artifact.path and test_artifact.build_script are required in $CONFIG_FILE" >&2
-              exit 1
-            fi
-            if [[ "$TEST_ARTIFACT_PATH" = /* ]]; then
-              echo "test_artifact.path must be repository-relative: $TEST_ARTIFACT_PATH" >&2
-              exit 1
-            fi
-            if [ ! -f "$TEST_ARTIFACT_BUILD_SCRIPT" ]; then
-              echo "test_artifact.build_script does not exist: $TEST_ARTIFACT_BUILD_SCRIPT" >&2
-              exit 1
-            fi
-          fi
-          echo "test_artifact_enabled=$TEST_ARTIFACT_ENABLED" >> $GITHUB_OUTPUT
-          echo "test_artifact_name=$TEST_ARTIFACT_NAME" >> $GITHUB_OUTPUT
-          echo "test_artifact_path=$TEST_ARTIFACT_PATH" >> $GITHUB_OUTPUT
-          echo "test_artifact_build_script=$TEST_ARTIFACT_BUILD_SCRIPT" >> $GITHUB_OUTPUT
-          echo "test_artifact_runs_on=$TEST_ARTIFACT_RUNS_ON" >> $GITHUB_OUTPUT
-          echo "test_artifact_container_options=$TEST_ARTIFACT_OPTIONS" >> $GITHUB_OUTPUT
-
-          UNIT_TEST_MATRIX=$(yq '.unit_test_matrix | tojson(0)' "$CONFIG_FILE")
-          if [ "$UNIT_TEST_MATRIX" = "null" ] || [ "$UNIT_TEST_MATRIX" = "[]" ]; then
-            echo "unit_test_matrix must be defined in $CONFIG_FILE" >&2
-            exit 1
-          fi
-          echo "unit_test_matrix=$UNIT_TEST_MATRIX" >> $GITHUB_OUTPUT
-
-          UNIT_TEST_TIMEOUT_MINUTES=$(yq '.unit_test_timeout_minutes // 90' "$CONFIG_FILE")
-          if ! [[ "$UNIT_TEST_TIMEOUT_MINUTES" =~ ^[1-9][0-9]*$ ]]; then
-            echo "unit_test_timeout_minutes must be a positive integer in $CONFIG_FILE" >&2
-            exit 1
-          fi
-          echo "unit_test_timeout_minutes=$UNIT_TEST_TIMEOUT_MINUTES" >> $GITHUB_OUTPUT
-
-          INTEGRATION_TEST_MATRIX=$(yq '.integration_test_matrix // [] | tojson(0)' "$CONFIG_FILE")
-          if [ "${{ inputs.run_integration_tests }}" = "true" ] && \
-             { [ "$INTEGRATION_TEST_MATRIX" = "null" ] || [ "$INTEGRATION_TEST_MATRIX" = "[]" ]; }; then
-            echo "integration_test_matrix must be defined in $CONFIG_FILE" >&2
-            exit 1
-          fi
-          echo "integration_test_matrix=$INTEGRATION_TEST_MATRIX" >> $GITHUB_OUTPUT
-
-          COVERAGE_ENABLED=$(yq '.coverage.enabled // false' "$CONFIG_FILE")
-          COVERAGE_REQUIRED=$(yq '.coverage.required // false' "$CONFIG_FILE")
-          COVERAGE_SOURCES=$(yq '.coverage.sources // [] | join(",")' "$CONFIG_FILE")
-          COVERAGE_INCLUDE=$(yq '.coverage.include // [] | join(",")' "$CONFIG_FILE")
-          COVERAGE_OMIT=$(yq '.coverage.omit // [] | join(",")' "$CONFIG_FILE")
-          COVERAGE_PYTHON=$(yq '.coverage.python // "python3"' "$CONFIG_FILE")
-          if [ "$COVERAGE_ENABLED" = "true" ] && [ -z "$COVERAGE_SOURCES" ]; then
-            echo "coverage.sources must define at least one importable package or directory in $CONFIG_FILE" >&2
-            exit 1
-          fi
-          echo "coverage_enabled=$COVERAGE_ENABLED" >> $GITHUB_OUTPUT
-          echo "coverage_required=$COVERAGE_REQUIRED" >> $GITHUB_OUTPUT
-          echo "coverage_sources=$COVERAGE_SOURCES" >> $GITHUB_OUTPUT
-          echo "coverage_include=$COVERAGE_INCLUDE" >> $GITHUB_OUTPUT
-          echo "coverage_omit=$COVERAGE_OMIT" >> $GITHUB_OUTPUT
-          echo "coverage_python=$COVERAGE_PYTHON" >> $GITHUB_OUTPUT
+          # Slice plan
+          python3 .github/scripts/ci/flagcicd_gate.py slice \
+            --platform "$PLATFORM" \
+            --configs-dir .github/configs \
+            --github-output
 
   build_test_artifact:
-    name: build_test_artifact
-    needs:
-      - checkout_and_config
-    if: >-
-      (inputs.run_unit_tests || inputs.run_integration_tests) &&
-      needs.checkout_and_config.outputs.test_artifact_enabled == 'true'
+    name: build-test-artifact
+    needs: checkout_and_config
+    if: needs.checkout_and_config.outputs.test_artifact_enabled == 'true'
     runs-on: ${{ fromJson(needs.checkout_and_config.outputs.test_artifact_runs_on) }}
-    defaults:
-      run:
-        shell: bash
     container:
       image: ${{ needs.checkout_and_config.outputs.ci_image }}
       volumes: ${{ fromJson(needs.checkout_and_config.outputs.container_volumes) }}
       options: --pull ${{ needs.checkout_and_config.outputs.container_pull_policy }} ${{ needs.checkout_and_config.outputs.test_artifact_container_options }}
+    timeout-minutes: 90
     steps:
-      - name: Prepare checkout environment
+      - name: Prepare checkout
         run: |
           /usr/bin/git config --global --replace-all safe.directory '*'
           /usr/bin/git config --global --unset-all credential.helper 2>/dev/null || true
-          /usr/bin/git config --system --unset-all credential.helper 2>/dev/null || true
 
-      - name: Checkout source code
+      - name: Checkout source
         uses: actions/checkout@v4
         with:
           ref: ${{ inputs.checkout_ref }}
@@ -262,264 +168,258 @@ jobs:
         env:
           TE_CI_ARTIFACT_DIR: ${{ github.workspace }}/${{ needs.checkout_and_config.outputs.test_artifact_path }}
         run: bash "$GITHUB_WORKSPACE/${{ needs.checkout_and_config.outputs.test_artifact_build_script }}"
-        timeout-minutes: 90
+
+      - name: Write artifact identity
+        run: |
+          python3 .github/scripts/ci/flagcicd_identity.py write \
+            --platform "${{ inputs.platform }}" \
+            --source-sha "${{ needs.checkout_and_config.outputs.source_sha }}" \
+            --config-hash "${{ needs.checkout_and_config.outputs.config_hash }}" \
+            --image-ref "${{ needs.checkout_and_config.outputs.ci_image }}" \
+            --test-level "${{ needs.checkout_and_config.outputs.test_level }}" \
+            --coverage-active=${{ needs.checkout_and_config.outputs.coverage_active == 'true' }} \
+            --artifact-dir "${{ github.workspace }}/${{ needs.checkout_and_config.outputs.test_artifact_path }}" \
+            --timestamp "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 
       - name: Upload test artifact
         uses: actions/upload-artifact@v4
         with:
           name: ${{ needs.checkout_and_config.outputs.test_artifact_name }}
-          path: ${{ github.workspace }}/${{ needs.checkout_and_config.outputs.test_artifact_path }}/*.whl
+          path: ${{ github.workspace }}/${{ needs.checkout_and_config.outputs.test_artifact_path }}/*
           if-no-files-found: error
           retention-days: 1
           overwrite: true
 
-  flagcicd_preflight_report:
-    name: flagcicd_preflight_report
-    needs:
-      - checkout_and_config
-    if: >-
+  parallel_groups:
+    name: parallel-lane
+    needs: [checkout_and_config, build_test_artifact]
+    if: |
       always() &&
       needs.checkout_and_config.result == 'success' &&
-      !inputs.run_unit_tests &&
-      !inputs.run_integration_tests
+      needs.checkout_and_config.outputs.has_parallel == 'true' &&
+      (needs.build_test_artifact.result == 'success' ||
+       needs.build_test_artifact.result == 'skipped')
+    uses: ./.github/workflows/test_groups_common.yml
+    with:
+      platform: ${{ inputs.platform }}
+      checkout_ref: ${{ inputs.checkout_ref }}
+      plan: ${{ inputs.plan }}
+      matrix: ${{ needs.checkout_and_config.outputs.parallel_matrix }}
+      max_parallel: 256
+      image: ${{ needs.checkout_and_config.outputs.ci_image }}
+      container_pull_policy: ${{ needs.checkout_and_config.outputs.container_pull_policy }}
+      runs_on: ${{ needs.checkout_and_config.outputs.runs_on }}
+      container_volumes: ${{ needs.checkout_and_config.outputs.container_volumes }}
+      container_options: ${{ needs.checkout_and_config.outputs.container_options }}
+      setup_script: ${{ needs.checkout_and_config.outputs.setup_script }}
+      checkout_submodules: ${{ needs.checkout_and_config.outputs.checkout_submodules }}
+      test_artifact_name: ${{ needs.checkout_and_config.outputs.test_artifact_name }}
+      test_artifact_path: ${{ needs.checkout_and_config.outputs.test_artifact_path }}
+      config_hash: ${{ needs.checkout_and_config.outputs.config_hash }}
+      source_sha: ${{ needs.checkout_and_config.outputs.source_sha }}
+
+  serial_groups:
+    name: serial-lane
+    needs: [checkout_and_config, build_test_artifact, parallel_groups]
+    if: |
+      !cancelled() &&
+      needs.checkout_and_config.result == 'success' &&
+      needs.checkout_and_config.outputs.has_serial == 'true' &&
+      (needs.build_test_artifact.result == 'success' ||
+       needs.build_test_artifact.result == 'skipped') &&
+      (needs.parallel_groups.result == 'success' ||
+       needs.parallel_groups.result == 'skipped')
+    uses: ./.github/workflows/test_groups_common.yml
+    with:
+      platform: ${{ inputs.platform }}
+      checkout_ref: ${{ inputs.checkout_ref }}
+      plan: ${{ inputs.plan }}
+      matrix: ${{ needs.checkout_and_config.outputs.serial_matrix }}
+      max_parallel: 1
+      image: ${{ needs.checkout_and_config.outputs.ci_image }}
+      container_pull_policy: ${{ needs.checkout_and_config.outputs.container_pull_policy }}
+      runs_on: ${{ needs.checkout_and_config.outputs.runs_on }}
+      container_volumes: ${{ needs.checkout_and_config.outputs.container_volumes }}
+      container_options: ${{ needs.checkout_and_config.outputs.container_options }}
+      setup_script: ${{ needs.checkout_and_config.outputs.setup_script }}
+      checkout_submodules: ${{ needs.checkout_and_config.outputs.checkout_submodules }}
+      test_artifact_name: ${{ needs.checkout_and_config.outputs.test_artifact_name }}
+      test_artifact_path: ${{ needs.checkout_and_config.outputs.test_artifact_path }}
+      config_hash: ${{ needs.checkout_and_config.outputs.config_hash }}
+      source_sha: ${{ needs.checkout_and_config.outputs.source_sha }}
+
+  coverage:
+    name: coverage-${{ matrix.device }}
+    needs: [checkout_and_config, build_test_artifact, parallel_groups, serial_groups]
+    if: |
+      always() &&
+      needs.checkout_and_config.outputs.coverage_active == 'true'
+    runs-on: ${{ fromJson(needs.checkout_and_config.outputs.runs_on) }}
+    strategy:
+      fail-fast: false
+      matrix:
+        device: ${{ fromJson(needs.checkout_and_config.outputs.device_types) }}
+    container:
+      image: ${{ needs.checkout_and_config.outputs.ci_image }}
+      volumes: ${{ fromJson(needs.checkout_and_config.outputs.container_volumes) }}
+      options: --pull ${{ needs.checkout_and_config.outputs.container_pull_policy }} ${{ needs.checkout_and_config.outputs.container_options }}
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.checkout_ref }}
+          fetch-depth: 0
+          set-safe-directory: true
+
+      - name: Download coverage fragments
+        uses: actions/download-artifact@v4
+        continue-on-error: true
+        with:
+          pattern: coverage-fragment-${{ inputs.platform }}-${{ matrix.device }}-*
+          path: coverage-fragments
+          merge-multiple: true
+
+      - name: Aggregate coverage
+        id: aggregate
+        env:
+          COVERAGE_PYTHON: ${{ needs.checkout_and_config.outputs.coverage_python }}
+        run: |
+          mkdir -p coverage-raw
+          count=0
+          for f in coverage-fragments/*.coverage; do
+            [ -f "$f" ] || continue
+            count=$((count + 1))
+            cp "$f" "coverage-raw/.coverage.$count"
+          done
+
+          if [ "$count" -eq 0 ]; then
+            echo "No coverage fragments found"
+            echo "aggregated=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          "$COVERAGE_PYTHON" -m coverage combine coverage-raw
+          "$COVERAGE_PYTHON" -m coverage json -o coverage-${{ inputs.platform }}-${{ matrix.device }}-pytorch-unittest.json
+          echo "aggregated=true" >> "$GITHUB_OUTPUT"
+
+      - name: Check PR coverage regression
+        if: |
+          always() &&
+          steps.aggregate.outputs.aggregated == 'true' &&
+          github.event_name == 'pull_request'
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          echo "Fetching baseline from main branch..."
+          baseline_dir="$RUNNER_TEMP/baseline"
+          artifact_name="flagcicd-report-${{ inputs.platform }}-${{ matrix.device }}-pytorch-unittest"
+
+          set +e
+          python3 .github/scripts/fetch_flagcicd_baseline.py \
+            --repository "$GITHUB_REPOSITORY" \
+            --branch main \
+            --artifact-name "$artifact_name" \
+            --output-dir "$baseline_dir" \
+            >"$RUNNER_TEMP/baseline-run-id" 2>"$RUNNER_TEMP/baseline-fetch.log"
+          status=$?
+          set -e
+
+          if [ "$status" -eq 2 ]; then
+            echo "No baseline found, skipping regression check"
+            exit 0
+          fi
+
+          if [ "$status" -ne 0 ]; then
+            echo "WARNING: Baseline fetch failed, skipping regression"
+            cat "$RUNNER_TEMP/baseline-fetch.log"
+            exit 0
+          fi
+
+          # Get threshold from golden_baseline.json
+          threshold=$(python3 -c "
+          import json
+          baseline = json.load(open('.flagcicd/golden_baseline.json'))
+          platform = '${{ inputs.platform }}'.lower()
+          print(baseline.get('platforms', {}).get(platform, {}).get('absolute_threshold_percent',
+                baseline.get('platforms', {}).get('other', {}).get('absolute_threshold_percent', 2.0)))
+          ")
+
+          echo "Running regression check (threshold: ${threshold}%)..."
+          python3 .github/scripts/flagcicd_regression.py \
+            --current "coverage-${{ inputs.platform }}-${{ matrix.device }}-pytorch-unittest.json" \
+            --baseline "$baseline_dir/${artifact_name}.json" \
+            --threshold "$threshold" \
+            --output regression-verdict.json || {
+            echo "WARNING: Coverage regression detected (advisory)"
+            cat regression-verdict.json
+            exit 0
+          }
+
+          echo "PASS: No coverage regression"
+
+      - name: Upload coverage report
+        if: steps.aggregate.outputs.aggregated == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-${{ inputs.platform }}-${{ matrix.device }}-pytorch-unittest
+          path: coverage-${{ inputs.platform }}-${{ matrix.device }}-pytorch-unittest.json
+          retention-days: 90
+
+      - name: Upload regression verdict
+        if: always()
+        uses: actions/upload-artifact@v4
+        continue-on-error: true
+        with:
+          name: regression-verdict-${{ inputs.platform }}-${{ matrix.device }}
+          path: regression-verdict.json
+          if-no-files-found: ignore
+          retention-days: 14
+
+      - name: Post coverage to FlagOps
+        if: steps.aggregate.outputs.aggregated == 'true'
+        uses: flagos-ai/FlagOps/actions/post-pytest-report@v2
+        continue-on-error: true
+        with:
+          backend_url: 'https://flagcicd.flagos.net/flagcicd/api/v1/cicd/metrics/'
+          api_token: ${{ secrets.FLAGCICD_API_TOKEN }}
+          report_path: coverage-${{ inputs.platform }}-${{ matrix.device }}-pytorch-unittest.json
+          job_name: coverage-${{ inputs.platform }}-${{ matrix.device }}-pytorch-unittest
+          fail_on_error: 'false'
+
+  platform_gate:
+    name: platform-gate
+    needs: [checkout_and_config, build_test_artifact, parallel_groups, serial_groups, coverage]
+    if: always()
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout source code
+      - name: Checkout source
         uses: actions/checkout@v4
         with:
           ref: ${{ inputs.checkout_ref }}
 
-      - name: Create preflight report
-        env:
-          FLAGCICD_METADATA: ${{ inputs.flagcicd_metadata }}
-        run: |
-          set -euo pipefail
-          # Extract metadata
-          TASK_ID=$(echo "$FLAGCICD_METADATA" | python3 -c "import sys,json; print(json.load(sys.stdin).get('task_id',''))" 2>/dev/null || echo "")
-          RUN_ID=$(echo "$FLAGCICD_METADATA" | python3 -c "import sys,json; print(json.load(sys.stdin).get('run_id',''))" 2>/dev/null || echo "$GITHUB_RUN_ID")
-          PARENT_RUN_ID=$(echo "$FLAGCICD_METADATA" | python3 -c "import sys,json; print(json.load(sys.stdin).get('parent_run_id',''))" 2>/dev/null || echo "")
-          ACTUAL_SHA=$(git rev-parse HEAD 2>/dev/null || echo "$GITHUB_SHA")
+      - name: Download all group reports
+        uses: actions/download-artifact@v4
+        with:
+          pattern: flagcicd-group-${{ inputs.platform }}-*
+          path: group-reports
+          merge-multiple: false
 
-          python3 .github/scripts/flagcicd_report.py \
-            --output "flagcicd-report-${{ inputs.platform }}-preflight.json" \
-            --repository "$GITHUB_REPOSITORY" \
-            --source-sha "$ACTUAL_SHA" \
-            --run-id "$RUN_ID" \
-            --task-id "$TASK_ID" \
-            --parent-run-id "$PARENT_RUN_ID" \
-            --test-level "${{ inputs.test_level }}" \
-            --risk-level "${{ inputs.risk_level }}" \
+      - name: Aggregate platform report
+        env:
+          FLAGCICD_PLAN: ${{ inputs.plan }}
+        run: |
+          python3 .github/scripts/ci/flagcicd_gate.py platform \
             --platform "${{ inputs.platform }}" \
-            --image-ref "${{ needs.checkout_and_config.outputs.ci_image }}" \
-            --status passed \
-            --scope preflight
+            --reports-dir group-reports \
+            --output platform-report.json
 
-      - name: Upload preflight report
+      - name: Upload platform report
+        if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: flagcicd-report-${{ inputs.platform }}-preflight
-          path: flagcicd-report-${{ inputs.platform }}-preflight.json
-          if-no-files-found: error
-          retention-days: 14
-
-  unit_tests:
-    name: unit_tests
-    if: >-
-      always() && inputs.run_unit_tests &&
-      needs.checkout_and_config.result == 'success' &&
-      (needs.build_test_artifact.result == 'success' ||
-      (needs.build_test_artifact.result == 'skipped' &&
-      needs.checkout_and_config.outputs.test_artifact_enabled != 'true'))
-    needs:
-      - checkout_and_config
-      - build_test_artifact
-    strategy:
-      fail-fast: false
-      matrix:
-        device: ${{ fromJson(needs.checkout_and_config.outputs.device_types) }}
-    uses: ./.github/workflows/unit_tests_common.yml
-    secrets:
-      FLAGCICD_API_TOKEN: ${{ secrets.FLAGCICD_API_TOKEN }}
-    with:
-      platform: ${{ inputs.platform }}
-      checkout_ref: ${{ inputs.checkout_ref }}
-      device: ${{ matrix.device }}
-      image: ${{ needs.checkout_and_config.outputs.ci_image }}
-      container_pull_policy: ${{ needs.checkout_and_config.outputs.container_pull_policy }}
-      runs_on: ${{ needs.checkout_and_config.outputs.runs_on }}
-      container_volumes: ${{ needs.checkout_and_config.outputs.container_volumes }}
-      container_options: ${{ needs.checkout_and_config.outputs.container_options }}
-      setup_script: ${{ needs.checkout_and_config.outputs.setup_script }}
-      checkout_submodules: ${{ needs.checkout_and_config.outputs.checkout_submodules }}
-      test_matrix: ${{ needs.checkout_and_config.outputs.unit_test_matrix }}
-      timeout_minutes: ${{ fromJson(needs.checkout_and_config.outputs.unit_test_timeout_minutes) }}
-      coverage_enabled: ${{ fromJson(needs.checkout_and_config.outputs.coverage_enabled) }}
-      coverage_required: ${{ fromJson(needs.checkout_and_config.outputs.coverage_required) }}
-      coverage_sources: ${{ needs.checkout_and_config.outputs.coverage_sources }}
-      coverage_include: ${{ needs.checkout_and_config.outputs.coverage_include }}
-      coverage_omit: ${{ needs.checkout_and_config.outputs.coverage_omit }}
-      coverage_python: ${{ needs.checkout_and_config.outputs.coverage_python }}
-      flagcicd_test_level: ${{ inputs.test_level }}
-      flagcicd_risk_level: ${{ inputs.risk_level }}
-      flagcicd_metadata: ${{ inputs.flagcicd_metadata }}
-      test_artifact_name: ${{ needs.checkout_and_config.outputs.test_artifact_name }}
-      test_artifact_path: ${{ needs.checkout_and_config.outputs.test_artifact_path }}
-
-  unit_tests_complete:
-    name: unit_tests_complete
-    needs: 
-      - unit_tests
-    runs-on: ubuntu-latest
-    if: always() && inputs.run_unit_tests
-    steps:
-      - name: Check unit tests result
-        run: |
-          if [ "${{ needs.unit_tests.result }}" != "success" ]; then
-            echo "❌ Unit tests failed: ${{ needs.unit_tests.result }}"
-            exit 1
-          fi
-          echo "✅ Unit tests passed"
-
-  integration_tests:
-    name: integration_tests
-    if: >-
-      always() && inputs.run_integration_tests &&
-      needs.checkout_and_config.result == 'success' &&
-      (needs.build_test_artifact.result == 'success' ||
-      (needs.build_test_artifact.result == 'skipped' &&
-      needs.checkout_and_config.outputs.test_artifact_enabled != 'true')) &&
-      (needs.unit_tests_complete.result == 'success' ||
-      (!inputs.run_unit_tests && needs.unit_tests_complete.result == 'skipped'))
-    needs:
-      - checkout_and_config
-      - build_test_artifact
-      - unit_tests_complete
-    strategy:
-      fail-fast: false
-      matrix:
-        device: ${{ fromJson(needs.checkout_and_config.outputs.device_types) }}
-    uses: ./.github/workflows/integration_tests_common.yml
-    with:
-      nightly: ${{ inputs.test_profile == 'nightly' }}
-      device: ${{ matrix.device }}
-      checkout_ref: ${{ inputs.checkout_ref }}
-      image: ${{ needs.checkout_and_config.outputs.ci_image }}
-      container_pull_policy: ${{ needs.checkout_and_config.outputs.container_pull_policy }}
-      runs_on: ${{ needs.checkout_and_config.outputs.runs_on }}
-      container_volumes: ${{ needs.checkout_and_config.outputs.container_volumes }}
-      container_options: ${{ needs.checkout_and_config.outputs.container_options }}
-      setup_script: ${{ needs.checkout_and_config.outputs.setup_script }}
-      checkout_submodules: ${{ needs.checkout_and_config.outputs.checkout_submodules }}
-      test_matrix: ${{ needs.checkout_and_config.outputs.integration_test_matrix }}
-      test_artifact_name: ${{ needs.checkout_and_config.outputs.test_artifact_name }}
-      test_artifact_path: ${{ needs.checkout_and_config.outputs.test_artifact_path }}
-
-  integration_tests_complete:
-    name: integration_tests_complete
-    if: always() && inputs.run_integration_tests
-    needs: 
-      - integration_tests
-    runs-on: ubuntu-latest
-    steps:
-      - name: Check integration tests result
-        run: |
-          if [ "${{ needs.integration_tests.result }}" != "success" ]; then
-            echo "❌ Integration tests failed: ${{ needs.integration_tests.result }}"
-            exit 1
-          fi
-          echo "✅ Integration tests passed"
-
-  all_tests_complete:
-    defaults:
-      run:
-        shell: bash
-    needs:
-      - checkout_and_config
-      - build_test_artifact
-      - unit_tests_complete
-      - integration_tests_complete
-    runs-on: ubuntu-latest
-    if: always()
-    steps:
-      - name: Verify all tests passed
-        run: |
-          # Only explicitly disabled work is allowed to be skipped.
-          failed=false
-
-          if [ "${{ needs.checkout_and_config.result }}" != "success" ]; then
-            echo "Checkout or platform configuration failed: ${{ needs.checkout_and_config.result }}"
-            failed=true
-          fi
-
-          expected_build=skipped
-          if [ "${{ needs.checkout_and_config.outputs.test_artifact_enabled }}" = "true" ]; then
-            if [ "${{ inputs.run_unit_tests }}" = "true" ] || [ "${{ inputs.run_integration_tests }}" = "true" ]; then
-              expected_build=success
-            fi
-          fi
-          if [ "${{ needs.build_test_artifact.result }}" != "$expected_build" ]; then
-            echo "Test artifact build failed or was cancelled: ${{ needs.build_test_artifact.result }}"
-            failed=true
-          fi
-
-          expected_unit=skipped
-          if [ "${{ inputs.run_unit_tests }}" = "true" ]; then
-            expected_unit=success
-          fi
-          if [ "${{ needs.unit_tests_complete.result }}" != "$expected_unit" ]; then
-            echo "❌ Unit tests failed or cancelled: ${{ needs.unit_tests_complete.result }}"
-            failed=true
-          fi
-
-          expected_integration=skipped
-          if [ "${{ inputs.run_integration_tests }}" = "true" ]; then
-            expected_integration=success
-          fi
-          if [ "${{ needs.integration_tests_complete.result }}" != "$expected_integration" ]; then
-            echo "❌ Integration tests failed or cancelled: ${{ needs.integration_tests_complete.result }}"
-            failed=true
-          fi
-
-          if [ "$failed" = "true" ]; then
-            exit 1
-          fi
-
-          echo "✅ All tests completed successfully!"
-
-  nightly_platform_report:
-    name: Nightly platform result
-    if: always() && inputs.test_profile == 'nightly'
-    needs: [checkout_and_config, build_test_artifact, unit_tests, integration_tests, all_tests_complete]
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: ${{ inputs.checkout_ref }}
-      - name: Record build and test outcomes independently of coverage
-        env:
-          PLATFORM_NEEDS: ${{ toJson(needs) }}
-          PLATFORM: ${{ inputs.platform }}
-          SOURCE_SHA: ${{ inputs.checkout_ref }}
-        run: python3 .github/scripts/ci/nightly_report.py platform --output nightly-platform-${{ inputs.platform }}.json
-      - name: Upload platform result
-        uses: actions/upload-artifact@v4
-        with:
-          name: nightly-platform-${{ inputs.platform }}
-          path: nightly-platform-${{ inputs.platform }}.json
+          name: flagcicd-platform-${{ inputs.platform }}
+          path: platform-report.json
           if-no-files-found: error
           retention-days: 90
           overwrite: true
-      - name: Enforce recorded platform result
-        env:
-          REPORT_FILE: nightly-platform-${{ inputs.platform }}.json
-        run: |
-          python3 - <<'PY'
-          import json
-          import os
-          from pathlib import Path
-
-          report = json.loads(Path(os.environ['REPORT_FILE']).read_text())
-          if report['status'] != 'passed':
-              raise SystemExit('Nightly platform did not pass; failure report was preserved')
-          PY
