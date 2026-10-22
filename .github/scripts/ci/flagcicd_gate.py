@@ -78,6 +78,8 @@ def cmd_slice(args: argparse.Namespace) -> int:
         if group["platform"] != platform:
             continue
 
+        # Flatten exec into entry for compatibility with run_ci_test_group.py
+        exec_data = group.get("exec", {})
         entry = {
             "device": group["device"],
             "name": group["group"],
@@ -89,7 +91,10 @@ def cmd_slice(args: argparse.Namespace) -> int:
             "exclusive": group["resources"]["exclusive"],
             "timeout": group["resources"]["timeout_minutes"],
             "coverage": group.get("coverage", False),
-            "exec": group.get("exec"),
+            "runner": exec_data.get("runner") if exec_data else None,
+            "path": exec_data.get("path") if exec_data else None,
+            "args": exec_data.get("args", []) if exec_data else [],
+            "env": exec_data.get("env", {}) if exec_data else {},
         }
 
         if group["lane"] == "preflight":

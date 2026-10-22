@@ -175,15 +175,19 @@ jobs:
       - name: Write artifact identity
         shell: bash
         run: |
-          python3 .github/scripts/ci/flagcicd_identity.py write \
-            --platform "${{ inputs.platform }}" \
-            --source-sha "${{ needs.checkout_and_config.outputs.source_sha }}" \
-            --config-hash "${{ needs.checkout_and_config.outputs.config_hash }}" \
-            --image-ref "${{ needs.checkout_and_config.outputs.ci_image }}" \
-            --test-level "${{ needs.checkout_and_config.outputs.test_level }}" \
-            --coverage-active=${{ needs.checkout_and_config.outputs.coverage_active == 'true' }} \
-            --artifact-dir "${{ github.workspace }}/${{ needs.checkout_and_config.outputs.test_artifact_path }}" \
+          IDENTITY_ARGS=(
+            --platform "${{ inputs.platform }}"
+            --source-sha "${{ needs.checkout_and_config.outputs.source_sha }}"
+            --config-hash "${{ needs.checkout_and_config.outputs.config_hash }}"
+            --image-ref "${{ needs.checkout_and_config.outputs.ci_image }}"
+            --test-level "${{ needs.checkout_and_config.outputs.test_level }}"
+            --artifact-dir "${{ github.workspace }}/${{ needs.checkout_and_config.outputs.test_artifact_path }}"
             --timestamp "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          )
+          if [ "${{ needs.checkout_and_config.outputs.coverage_active }}" = "true" ]; then
+            IDENTITY_ARGS+=(--coverage-active)
+          fi
+          python3 .github/scripts/ci/flagcicd_identity.py write "${IDENTITY_ARGS[@]}"
 
       - name: Upload test artifact
         uses: actions/upload-artifact@v4
