@@ -321,10 +321,7 @@ def cmd_platform(args: argparse.Namespace) -> int:
     # Validate reports
     errors = []
     if args.coverage_required and args.coverage_result != "success":
-        errors.append(
-            "Required coverage job did not succeed: "
-            f"{args.coverage_result or 'unknown'}"
-        )
+        errors.append(f"Required coverage job did not succeed: {args.coverage_result or 'unknown'}")
     actual_keys = set()
     malformed = []
     for report in group_reports:
@@ -519,18 +516,13 @@ def cmd_gate(args: argparse.Namespace) -> int:
         errors.append(f"Unexpected platform reports: {unexpected_platforms}")
     if duplicate_platform_reports:
         errors.append(
-            "Duplicate platform reports: "
-            f"{', '.join(sorted(duplicate_platform_reports))}"
+            f"Duplicate platform reports: {', '.join(sorted(duplicate_platform_reports))}"
         )
 
     # A required blocked group is an explicit contract gap.  Keep it in the
     # plan for visibility and fail the release/manual gate instead of treating
     # the absent matrix entry as a successful run.
-    required_blocked = [
-        item
-        for item in plan.get("blocked", [])
-        if item.get("required")
-    ]
+    required_blocked = [item for item in plan.get("blocked", []) if item.get("required")]
     if required_blocked:
         errors.append(f"Required groups are blocked: {required_blocked}")
 

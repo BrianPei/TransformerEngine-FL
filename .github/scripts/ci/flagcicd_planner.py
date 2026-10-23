@@ -422,12 +422,8 @@ def build_plan(args: argparse.Namespace) -> dict[str, Any]:
                 "config_hash": p["config_hash"],
                 "device_types": p["config"].get("device_types", []),
                 "nproc_per_node": p["config"].get("nproc_per_node", 1),
-                "coverage_enabled": bool(
-                    p["config"].get("coverage", {}).get("enabled", False)
-                ),
-                "coverage_required": bool(
-                    p["config"].get("coverage", {}).get("required", False)
-                ),
+                "coverage_enabled": bool(p["config"].get("coverage", {}).get("enabled", False)),
+                "coverage_required": bool(p["config"].get("coverage", {}).get("required", False)),
                 "reasons": ["selected"],
             }
         )
