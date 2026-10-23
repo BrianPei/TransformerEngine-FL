@@ -68,6 +68,7 @@ def cmd_write(args: argparse.Namespace) -> int:
 
     # Write identity file
     identity_path = artifact_dir / "artifact-identity.json"
+    identity_path.parent.mkdir(parents=True, exist_ok=True)
     identity_path.write_text(json.dumps(identity, indent=2, sort_keys=True) + "\n")
 
     print(f"Wrote artifact identity: {identity_path}")
