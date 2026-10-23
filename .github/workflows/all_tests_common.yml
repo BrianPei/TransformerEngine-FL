@@ -489,55 +489,59 @@ jobs:
           export history_window minimum_history
           echo "Using history window=${history_window}, minimum=${minimum_history}"
 
-          # Fetch last 14 nightly runs
+          # Fetch successful nightly artifacts through the GitHub REST API.
+          # Vendor containers do not necessarily include the gh CLI.
           python3 << 'FETCH_EOF'
-          import json, os, subprocess, sys
+          import os, sys
           from pathlib import Path
+          from urllib.parse import quote, urlencode
+
+          sys.path.insert(0, str(Path(".github/scripts").resolve()))
+          from fetch_flagcicd_baseline import get_json, request, safe_extract
 
           repo = os.environ["GITHUB_REPOSITORY"]
           history_dir = Path(os.environ["RUNNER_TEMP"]) / "coverage-history"
           artifact_name = os.environ["artifact_name"]
-
-          # Get last 20 workflow runs on main with schedule event
-          result = subprocess.run([
-              "gh", "run", "list",
-              "--repo", repo,
-              "--workflow", "nightly.yml",
-              "--branch", "main",
-              "--limit", "20",
-              "--json", "databaseId,status,conclusion,createdAt"
-          ], capture_output=True, text=True)
-
-          if result.returncode != 0:
-              print(f"ERROR: Failed to list runs: {result.stderr}", file=sys.stderr)
+          token = os.environ.get("GH_TOKEN") or os.environ.get("GITHUB_TOKEN")
+          if not token:
+              print("ERROR: GH_TOKEN or GITHUB_TOKEN is required", file=sys.stderr)
               sys.exit(1)
 
-          runs = json.loads(result.stdout)
+          encoded_repo = "/".join(quote(part, safe="") for part in repo.split("/"))
           window = int(os.environ.get("history_window", "14"))
-          successful = [r for r in runs if r.get("status") == "completed" and r.get("conclusion") == "success"][:window]
+          runs_url = (
+              f"https://api.github.com/repos/{encoded_repo}/actions/workflows/nightly.yml/runs?"
+              + urlencode({"branch": "main", "status": "completed", "per_page": "100"})
+          )
+          runs = get_json(runs_url, token).get("workflow_runs", [])
+          successful = [
+              run for run in runs
+              if isinstance(run, dict) and run.get("conclusion") == "success"
+          ][:window]
 
           print(f"Found {len(successful)} successful nightly runs")
 
-          # Download artifacts
           for i, run in enumerate(successful):
-              run_id = run["databaseId"]
+              run_id = run.get("id")
+              artifacts_url = run.get("artifacts_url")
+              if not run_id or not artifacts_url:
+                  continue
+              artifacts = get_json(artifacts_url + "?per_page=100", token).get("artifacts", [])
+              artifact = next(
+                  (item for item in artifacts
+                   if item.get("name") == artifact_name and not item.get("expired", False)),
+                  None,
+              )
+              if not artifact or not artifact.get("archive_download_url"):
+                  print(f"WARNING: Artifact not found for run {run_id}")
+                  continue
               output_file = history_dir / f"coverage-{i}.json"
-
-              result = subprocess.run([
-                  "gh", "run", "download", str(run_id),
-                  "--repo", repo,
-                  "--name", artifact_name,
-                  "--dir", str(history_dir / f"run-{i}")
-              ], capture_output=True, text=True)
-
-              if result.returncode == 0:
-                  # Move the downloaded file
-                  downloaded = list((history_dir / f"run-{i}").glob("*.json"))
-                  if downloaded:
-                      downloaded[0].rename(output_file)
-                      print(f"Downloaded coverage from run {run_id}")
-              else:
-                  print(f"WARNING: Failed to download from run {run_id}")
+              run_dir = history_dir / f"run-{i}"
+              safe_extract(request(artifact["archive_download_url"], token), run_dir)
+              downloaded = list(run_dir.glob("*.json"))
+              if downloaded:
+                  downloaded[0].rename(output_file)
+                  print(f"Downloaded coverage from run {run_id}")
 
           print(f"Downloaded {len(list(history_dir.glob('coverage-*.json')))} coverage reports")
           FETCH_EOF
