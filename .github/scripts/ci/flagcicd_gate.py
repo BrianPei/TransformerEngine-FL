@@ -91,7 +91,9 @@ def cmd_slice(args: argparse.Namespace) -> int:
             "exclusive": group["resources"]["exclusive"],
             "timeout": group["resources"]["timeout_minutes"],
             "coverage": group.get("coverage", False),
-            "runner": exec_data.get("runner") if exec_data else None,
+            # Matrix entries historically omitted runner for shell launchers;
+            # preserve that configuration format by defaulting to script.
+            "runner": exec_data.get("runner", "script") if exec_data else "script",
             "path": exec_data.get("path") if exec_data else None,
             "args": exec_data.get("args", []) if exec_data else [],
             "env": exec_data.get("env", {}) if exec_data else {},
