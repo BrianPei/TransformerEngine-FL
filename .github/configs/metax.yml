@@ -47,7 +47,7 @@ setup_script: .github/scripts/setup_metax.sh
 
 # Device types to run tests on
 device_types:
-  - c500
+  - c550
 
 coverage:
   enabled: true
@@ -79,7 +79,7 @@ integration_test_matrix:
 test_matrix:
   unit:
     devices:
-      - c500
+      - c550
     # Ignored test files for unit tests
     # These files will be skipped when running pytest
     ignored_tests:
