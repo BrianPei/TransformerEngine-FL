@@ -13,6 +13,7 @@ GROUP_REPORT_SCHEMA = "flagcicd.group-report/v1"
 PLATFORM_REPORT_SCHEMA = "flagcicd.platform-report/v1"
 GATE_SCHEMA = "flagcicd.gate/v1"
 IDENTITY_SCHEMA = "flagcicd.artifact-identity/v1"
+EVIDENCE_SCHEMA = "flagcicd.runtime-evidence/v1"
 
 STATUSES = frozenset(
     (
@@ -30,6 +31,34 @@ STATUSES = frozenset(
 LEVELS = ("L0", "L1", "L2", "L3", "L4")
 RISKS = ("R1", "R2", "R3", "R4")
 LANES = ("preflight", "parallel", "serial")
+
+# FastCI selection modes. "static" preserves the existing path-match behaviour
+# and is the default when the fastci block is absent or disabled.
+SELECTION_MODES = ("static", "hybrid")
+EVIDENCE_MODES = ("off", "shadow", "enforced")
+FALLBACK_MODES = ("static", "fail")
+
+# Context dimensions used by equivalence pruning (P3). Two executions are
+# equivalent only when every dimension listed here matches.
+CONTEXT_DIMENSIONS = (
+    "platform",
+    "device",
+    "image",
+    "torch",
+    "cuda",
+    "vendor_sdk",
+    "precision",
+    "world_size",
+    "model_family",
+    "sequence_length",
+    "test_kind",
+    "communication_mode",
+)
+
+# Priority waves for risk-ordered scheduling (P4). The planner assigns each
+# group to a wave based on its risk and resource class; the workflow consumes
+# waves via needs relationships, not JSON ordering.
+PRIORITY_WAVES = ("priority-wave-0", "priority-wave-1", "serial-wave")
 
 
 def canonical_json(obj: Any) -> str:

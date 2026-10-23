@@ -96,21 +96,43 @@ def cmd_slice(args: argparse.Namespace) -> int:
             "path": exec_data.get("path"),
             "args": exec_data.get("args", []),
             "env": exec_data.get("env", {}),
+            # Wave assignment: carried for wave-split routing; not consumed by
+            # run_ci_test_group.py but harmless as an extra matrix key.
+            "wave_assignment": group.get("wave_assignment", "priority-wave-1"),
+            # P5: workload overrides from the resolved workload profile.  The
+            # workflow expands these into TE_WORKLOAD_* env vars so test scripts
+            # can honour them without parsing the full plan JSON.
+            "workload_overrides": plan.get("fastci", {}).get("workload_overrides", {}),
         }
 
         lanes = {"preflight": preflight, "parallel": parallel, "serial": serial}
         if group["lane"] not in lanes:
-            print(f"ERROR: Unknown lane {group['lane']} for {group['group']}", file=sys.stderr)
+            print(
+                f"ERROR: Unknown lane {group['lane']} for {group['group']}",
+                file=sys.stderr,
+            )
             return 1
         lanes[group["lane"]].append(entry)
+
+    # Split parallel lane into priority waves.  wave0 = groups that must finish
+    # before wave1 starts (required L0/L1 smoke tests); wave1 = everything else.
+    # When priority_enabled is False the workflow uses parallel_matrix unchanged.
+    priority_enabled = bool(plan.get("fastci", {}).get("priority_enabled", False))
+    wave0 = [e for e in parallel if e.get("wave_assignment") == "priority-wave-0"]
+    wave1 = [e for e in parallel if e.get("wave_assignment") != "priority-wave-0"]
 
     # Write outputs
     output = {
         "preflight_matrix": json.dumps({"include": preflight}),
         "parallel_matrix": json.dumps({"include": parallel}),
         "serial_matrix": json.dumps({"include": serial}),
+        "wave0_matrix": json.dumps({"include": wave0}),
+        "wave1_matrix": json.dumps({"include": wave1}),
         "has_parallel": json.dumps(len(parallel) > 0),
         "has_serial": json.dumps(len(serial) > 0),
+        "has_wave0": json.dumps(len(wave0) > 0),
+        "has_wave1": json.dumps(len(wave1) > 0),
+        "priority_enabled": json.dumps(priority_enabled),
         "preflight_selected": json.dumps(len(preflight) > 0),
         "coverage_active": json.dumps(
             any(g.get("coverage") for g in plan["test_groups"] if g["platform"] == platform)
@@ -303,7 +325,10 @@ def cmd_platform(args: argparse.Namespace) -> int:
     # Load plan
     plan_json = os.environ.get("FLAGCICD_PLAN", "")
     if not plan_json:
-        print("ERROR: FLAGCICD_PLAN environment variable is empty or not set", file=sys.stderr)
+        print(
+            "ERROR: FLAGCICD_PLAN environment variable is empty or not set",
+            file=sys.stderr,
+        )
         return 1
 
     try:
@@ -329,12 +354,16 @@ def cmd_platform(args: argparse.Namespace) -> int:
             print(f"WARNING: Failed to load {report_file}: {exc}", file=sys.stderr)
 
     print(
-        f"INFO: Found {len(group_reports)} group reports for platform {platform}", file=sys.stderr
+        f"INFO: Found {len(group_reports)} group reports for platform {platform}",
+        file=sys.stderr,
     )
 
     # Expected reports: groups from plan for this platform
     expected = [(g["device"], g["group"]) for g in plan["test_groups"] if g["platform"] == platform]
-    print(f"INFO: Expected {len(expected)} groups for platform {platform}", file=sys.stderr)
+    print(
+        f"INFO: Expected {len(expected)} groups for platform {platform}",
+        file=sys.stderr,
+    )
 
     # Validate reports
     errors = []
@@ -371,7 +400,10 @@ def cmd_platform(args: argparse.Namespace) -> int:
         ]
 
         if missing:
-            print(f"ERROR: Missing group reports for platform {platform}:", file=sys.stderr)
+            print(
+                f"ERROR: Missing group reports for platform {platform}:",
+                file=sys.stderr,
+            )
             for device, group in sorted(missing):
                 print(f"  - {device}/{group}", file=sys.stderr)
             print(f"", file=sys.stderr)
@@ -380,13 +412,17 @@ def cmd_platform(args: argparse.Namespace) -> int:
                 f"  1. parallel_groups or serial_groups job was skipped (check job conditions)",
                 file=sys.stderr,
             )
-            print(f"  2. test_groups_common.yml failed before uploading reports", file=sys.stderr)
+            print(
+                f"  2. test_groups_common.yml failed before uploading reports",
+                file=sys.stderr,
+            )
             print(
                 f"  3. group-report.json was not generated (check 'Generate group report' step)",
                 file=sys.stderr,
             )
             print(
-                f"  4. artifact upload failed (check 'Upload group report' step)", file=sys.stderr
+                f"  4. artifact upload failed (check 'Upload group report' step)",
+                file=sys.stderr,
             )
             errors.append(f"Missing reports: {missing}")
         if unexpected:
@@ -544,6 +580,45 @@ def cmd_gate(args: argparse.Namespace) -> int:
     if required_blocked:
         errors.append(f"Required groups are blocked: {required_blocked}")
 
+    # P6: FastCI efficiency metrics — derived from plan and collected reports so
+    # the gate summary is self-contained and can feed dashboards without re-reading
+    # individual group reports.  All metrics are advisory; none affect gate_status.
+    all_group_reports: list[dict] = []
+    for pr in platform_reports.values():
+        all_group_reports.extend(pr.get("groups", []))
+
+    # selected_test_ratio: fraction of catalog groups that were scheduled to run.
+    # Catalog = selected + blocked + excluded + pruned.
+    n_selected = len(plan.get("test_groups", []))
+    n_blocked = len(plan.get("blocked", []))
+    n_excluded = len(plan.get("excluded", []))
+    n_pruned = len(plan.get("pruned", []))
+    n_catalog = n_selected + n_blocked + n_excluded + n_pruned
+    selected_test_ratio = round(n_selected / n_catalog, 4) if n_catalog else None
+
+    # affected_test_recall: of the required groups that were planned, how many
+    # actually passed?  Measures whether the selection missed required coverage.
+    required_planned = [g for g in plan.get("test_groups", []) if g.get("required")]
+    required_total = len(required_planned)
+    required_passed = sum(
+        1 for r in all_group_reports if r.get("required") and r.get("status") == "passed"
+    )
+    affected_test_recall = round(required_passed / required_total, 4) if required_total else None
+
+    # total_duration_seconds: wall-clock sum across all executed groups — a
+    # proxy for GPU-resource consumption comparable across runs.
+    total_duration = sum(r.get("duration_seconds", 0) for r in all_group_reports)
+
+    fastci_metrics = {
+        "selected_test_ratio": selected_test_ratio,
+        "required_groups_total": required_total,
+        "required_groups_passed": required_passed,
+        "affected_test_recall": affected_test_recall,
+        "total_duration_seconds": total_duration,
+        "workload_profile": plan.get("fastci", {}).get("workload_profile", "nightly_spec"),
+        "priority_enabled": plan.get("fastci", {}).get("priority_enabled", False),
+    }
+
     # Build gate summary
     gate_status = "passed" if not errors else "failed"
     gate_summary = {
@@ -556,6 +631,7 @@ def cmd_gate(args: argparse.Namespace) -> int:
         "run_id": os.environ.get("GITHUB_RUN_ID", ""),
         "status": gate_status,
         "platforms": platform_reports,
+        "fastci_metrics": fastci_metrics,
         "errors": errors,
         "created_at": utc_now(),
     }
@@ -570,6 +646,19 @@ def cmd_gate(args: argparse.Namespace) -> int:
             f.write(f"- Stage: {plan['stage']}\n")
             f.write(f"- Level: {plan['test_level']}\n")
             f.write(f"- Platforms: {len(plan['platforms'])}\n\n")
+            # P6: efficiency metrics block — advisory, always present.
+            m = fastci_metrics
+            f.write("**FastCI Metrics:**\n\n")
+            sr = m["selected_test_ratio"]
+            f.write(f"- Selected test ratio: {sr if sr is not None else 'n/a'}\n")
+            recall = m["affected_test_recall"]
+            f.write(
+                f"- Affected test recall: {recall if recall is not None else 'n/a'}"
+                f" ({m['required_groups_passed']}/{m['required_groups_total']} required)\n"
+            )
+            f.write(f"- Total duration: {m['total_duration_seconds']}s\n")
+            f.write(f"- Workload profile: {m['workload_profile']}\n")
+            f.write(f"- Priority enabled: {m['priority_enabled']}\n\n")
             if errors:
                 f.write("**Errors:**\n\n")
                 for error in errors:

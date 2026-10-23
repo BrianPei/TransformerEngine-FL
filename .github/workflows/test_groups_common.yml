@@ -70,6 +70,16 @@ on:
         type: string
         default: ''
         description: 'Comma-separated coverage sources passed to --cov'
+      evidence_mode:
+        required: false
+        type: string
+        default: 'off'
+        description: 'off | shadow | enforced — controls runtime evidence collection'
+      plan_hash:
+        required: false
+        type: string
+        default: ''
+        description: 'plan_hash from the plan; embedded in the evidence file for traceability'
 
 jobs:
   test_group:
@@ -138,6 +148,29 @@ jobs:
           echo "started_at=$(date +%s)" >> "$GITHUB_OUTPUT"
           export TE_PATH="$GITHUB_WORKSPACE"
 
+          # P5: expand workload profile overrides into TE_WORKLOAD_* env vars.
+          # The matrix carries a JSON object of low-risk knobs; each key becomes
+          # TE_WORKLOAD_<KEY> (uppercased) so test scripts can read them without
+          # re-parsing the full plan.  Empty overrides produce no vars.
+          python3 - <<'PYWORKLOAD'
+          import json, os, sys
+          raw = os.environ.get("TE_TEST_GROUP_JSON", "{}")
+          try:
+              matrix = json.loads(raw)
+          except json.JSONDecodeError:
+              sys.exit(0)
+          overrides = matrix.get("workload_overrides") or {}
+          lines = []
+          for k, v in overrides.items():
+              env_name = f"TE_WORKLOAD_{k.upper()}"
+              lines.append(f"{env_name}={v}")
+          gho = os.environ.get("GITHUB_ENV")
+          if gho and lines:
+              with open(gho, "a") as f:
+                  for line in lines:
+                      f.write(line + "\n")
+          PYWORKLOAD
+
           # Set XML_LOG_DIR for junit output
           export XML_LOG_DIR="$GITHUB_WORKSPACE/logs/${{ matrix.kind }}/${{ matrix.name }}"
           mkdir -p "$XML_LOG_DIR"
@@ -194,6 +227,34 @@ jobs:
           # Save exit code
           echo "$EXIT_CODE" > "$RUNNER_TEMP/test_exit_code"
           exit $EXIT_CODE
+
+      - name: Collect runtime evidence
+        id: evidence
+        if: ${{ !cancelled() && inputs.evidence_mode != 'off' }}
+        shell: bash
+        run: |
+          # Resolve image digest from the container's own label; fall back to
+          # the image ref when the label is absent (digest may be unavailable
+          # in some runtimes — evidence validation will then always fail, which
+          # is the safe fallback rather than silently trusting stale evidence).
+          IMAGE_DIGEST="$(docker inspect --format='{{index .RepoDigests 0}}' "${{ inputs.image }}" 2>/dev/null || echo "unknown")"
+
+          COVERAGE_FILE=""
+          if [ -f "$GITHUB_WORKSPACE/.coverage.${{ matrix.name }}.${{ matrix.device }}" ]; then
+            COVERAGE_FILE="$GITHUB_WORKSPACE/.coverage.${{ matrix.name }}.${{ matrix.device }}"
+          fi
+
+          python3 .github/scripts/ci/flagcicd_sampler.py \
+            --platform "${{ inputs.platform }}" \
+            --device "${{ matrix.device }}" \
+            --group "${{ matrix.name }}" \
+            --source-sha "${{ inputs.source_sha }}" \
+            --plan-hash "${{ inputs.plan_hash }}" \
+            --image-digest "$IMAGE_DIGEST" \
+            --status "$(cat "$RUNNER_TEMP/test_exit_code" 2>/dev/null | grep -q '^0$' && echo passed || echo failed)" \
+            ${COVERAGE_FILE:+--coverage-file "$COVERAGE_FILE"} \
+            --junit-dir "$GITHUB_WORKSPACE/logs/${{ matrix.kind }}/${{ matrix.name }}" \
+            --output "$GITHUB_WORKSPACE/runtime-evidence-${{ inputs.platform }}-${{ matrix.device }}-${{ matrix.name }}.json"
 
       - name: Generate group report
         if: ${{ !cancelled() }}
@@ -252,4 +313,15 @@ jobs:
           path: group-report.json
           if-no-files-found: error
           retention-days: 90
+          overwrite: true
+
+      - name: Upload runtime evidence
+        if: ${{ !cancelled() && inputs.evidence_mode != 'off' }}
+        uses: actions/upload-artifact@v4
+        continue-on-error: true
+        with:
+          name: runtime-evidence-${{ inputs.platform }}-${{ matrix.device }}-${{ matrix.name }}
+          path: runtime-evidence-${{ inputs.platform }}-${{ matrix.device }}-${{ matrix.name }}.json
+          if-no-files-found: warn
+          retention-days: 30
           overwrite: true

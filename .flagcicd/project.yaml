@@ -277,3 +277,76 @@ report:
     - skipped
     - cancelled
     - report_error
+
+# FastCI optimisation switches (P0 placeholder — all capabilities default off).
+# Flip selection_mode to "hybrid" only after runtime evidence is available.
+# fallback_on_error: "static" means any evidence/selection failure reverts to
+# the existing path-match behaviour; "fail" blocks the pipeline instead.
+# This block is the single rollback point: set enabled: false to restore the
+# previous static-only behaviour completely.
+fastci:
+  enabled: false
+  selection_mode: static        # static | hybrid
+  evidence_mode: shadow         # off | shadow | enforced
+  pruning_enabled: false        # P3 equivalence-context pruning
+  priority_enabled: false       # P4 risk-wave ordering
+  workload_profile: nightly_spec # P5 workload config key
+  fallback_on_error: static     # static | fail
+
+# Context dimensions for equivalence pruning (P3). Two test executions are
+# treated as equivalent — and the second can be skipped — only when every
+# listed dimension matches between the cached result and the current run.
+# Do NOT include dimensions that legitimately vary run-to-run (timestamps,
+# run IDs, branch names). The planner validates against this list.
+context_dimensions:
+  - platform
+  - device
+  - image
+  - torch
+  - cuda
+  - vendor_sdk
+  - precision
+  - world_size
+  - model_family
+  - sequence_length
+  - test_kind
+  - communication_mode
+
+# Workload profiles (P5). Only low-risk knobs are listed initially.
+# High-risk parameters (model_size, world_size, precision, batch) require an
+# explicit "risk: high" declaration and must not be reduced without a nightly
+# spec comparison showing no coverage loss.
+workload_profiles:
+  nightly_spec:
+    description: full nightly specification — reference values, do not reduce
+    overrides: {}
+  pr_reduced:
+    description: reduced workload for PR fast-path — low-risk knobs only
+    risk: low
+    overrides:
+      log_interval: 10
+      profile_steps: 0
+      checkpoint_activations: false
+
+# Scheduling contract extensions (P4 wave structure). The planner emits a
+# wave_assignment for each group; the workflow creates needs dependencies that
+# enforce the ordering below. Serial groups always land in serial-wave.
+scheduling:
+  waves:
+    priority-wave-0:
+      description: high-risk, short-running, required smoke tests
+      max_parallel: 8
+    priority-wave-1:
+      description: normal-risk parallel groups
+      max_parallel: 32
+    serial-wave:
+      description: multi-device, communication-exclusive, long-running
+      max_parallel: 1
+
+# Validation scope for automated gate checks.
+validation_scope:
+  require_plan_hash: true
+  require_artifact_identity: true
+  require_group_report_for_required: true
+  allow_missing_optional: true
+  coverage_gate_advisory: true  # coverage failure is advisory, not blocking

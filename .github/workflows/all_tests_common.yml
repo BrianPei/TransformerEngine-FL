@@ -61,6 +61,11 @@ jobs:
       test_level: ${{ steps.slice.outputs.test_level }}
       plan_hash: ${{ steps.slice.outputs.plan_hash }}
       source_sha: ${{ steps.slice.outputs.source_sha }}
+      wave0_matrix: ${{ steps.slice.outputs.wave0_matrix }}
+      wave1_matrix: ${{ steps.slice.outputs.wave1_matrix }}
+      has_wave0: ${{ steps.slice.outputs.has_wave0 }}
+      has_wave1: ${{ steps.slice.outputs.has_wave1 }}
+      priority_enabled: ${{ steps.slice.outputs.priority_enabled }}
     steps:
       - name: Checkout source
         uses: actions/checkout@v4
@@ -326,6 +331,7 @@ jobs:
       !cancelled() &&
       needs.checkout_and_config.result == 'success' &&
       needs.checkout_and_config.outputs.has_parallel == 'true' &&
+      needs.checkout_and_config.outputs.priority_enabled != 'true' &&
       (needs.checkout_and_config.outputs.preflight_selected != 'true' || needs.preflight.result == 'success') &&
       (needs.build_test_artifact.result == 'success' ||
        needs.build_test_artifact.result == 'skipped')
@@ -350,9 +356,75 @@ jobs:
       coverage_required: ${{ needs.checkout_and_config.outputs.coverage_required }}
       coverage_sources: ${{ needs.checkout_and_config.outputs.coverage_sources }}
 
+  wave0_groups:
+    name: wave0-lane
+    needs: [checkout_and_config, preflight, build_test_artifact]
+    if: |
+      !cancelled() &&
+      needs.checkout_and_config.result == 'success' &&
+      needs.checkout_and_config.outputs.priority_enabled == 'true' &&
+      needs.checkout_and_config.outputs.has_wave0 == 'true' &&
+      (needs.checkout_and_config.outputs.preflight_selected != 'true' || needs.preflight.result == 'success') &&
+      (needs.build_test_artifact.result == 'success' ||
+       needs.build_test_artifact.result == 'skipped')
+    uses: ./.github/workflows/test_groups_common.yml
+    with:
+      platform: ${{ inputs.platform }}
+      checkout_ref: ${{ inputs.checkout_ref }}
+      plan: ${{ inputs.plan }}
+      matrix: ${{ needs.checkout_and_config.outputs.wave0_matrix }}
+      max_parallel: 256
+      image: ${{ needs.checkout_and_config.outputs.ci_image }}
+      container_pull_policy: ${{ needs.checkout_and_config.outputs.container_pull_policy }}
+      runs_on: ${{ needs.checkout_and_config.outputs.runs_on }}
+      container_volumes: ${{ needs.checkout_and_config.outputs.container_volumes }}
+      container_options: ${{ needs.checkout_and_config.outputs.container_options }}
+      setup_script: ${{ needs.checkout_and_config.outputs.setup_script }}
+      checkout_submodules: ${{ needs.checkout_and_config.outputs.checkout_submodules }}
+      test_artifact_name: ${{ needs.checkout_and_config.outputs.test_artifact_name }}
+      test_artifact_path: ${{ needs.checkout_and_config.outputs.test_artifact_path }}
+      config_hash: ${{ needs.checkout_and_config.outputs.config_hash }}
+      source_sha: ${{ needs.checkout_and_config.outputs.source_sha }}
+      coverage_required: ${{ needs.checkout_and_config.outputs.coverage_required }}
+      coverage_sources: ${{ needs.checkout_and_config.outputs.coverage_sources }}
+
+  wave1_groups:
+    name: wave1-lane
+    needs: [checkout_and_config, preflight, build_test_artifact, wave0_groups]
+    if: |
+      !cancelled() &&
+      needs.checkout_and_config.result == 'success' &&
+      needs.checkout_and_config.outputs.priority_enabled == 'true' &&
+      needs.checkout_and_config.outputs.has_wave1 == 'true' &&
+      (needs.checkout_and_config.outputs.preflight_selected != 'true' || needs.preflight.result == 'success') &&
+      (needs.build_test_artifact.result == 'success' ||
+       needs.build_test_artifact.result == 'skipped') &&
+      (needs.wave0_groups.result == 'success' ||
+       needs.wave0_groups.result == 'skipped')
+    uses: ./.github/workflows/test_groups_common.yml
+    with:
+      platform: ${{ inputs.platform }}
+      checkout_ref: ${{ inputs.checkout_ref }}
+      plan: ${{ inputs.plan }}
+      matrix: ${{ needs.checkout_and_config.outputs.wave1_matrix }}
+      max_parallel: 256
+      image: ${{ needs.checkout_and_config.outputs.ci_image }}
+      container_pull_policy: ${{ needs.checkout_and_config.outputs.container_pull_policy }}
+      runs_on: ${{ needs.checkout_and_config.outputs.runs_on }}
+      container_volumes: ${{ needs.checkout_and_config.outputs.container_volumes }}
+      container_options: ${{ needs.checkout_and_config.outputs.container_options }}
+      setup_script: ${{ needs.checkout_and_config.outputs.setup_script }}
+      checkout_submodules: ${{ needs.checkout_and_config.outputs.checkout_submodules }}
+      test_artifact_name: ${{ needs.checkout_and_config.outputs.test_artifact_name }}
+      test_artifact_path: ${{ needs.checkout_and_config.outputs.test_artifact_path }}
+      config_hash: ${{ needs.checkout_and_config.outputs.config_hash }}
+      source_sha: ${{ needs.checkout_and_config.outputs.source_sha }}
+      coverage_required: ${{ needs.checkout_and_config.outputs.coverage_required }}
+      coverage_sources: ${{ needs.checkout_and_config.outputs.coverage_sources }}
+
   serial_groups:
     name: serial-lane
-    needs: [checkout_and_config, preflight, build_test_artifact, parallel_groups]
+    needs: [checkout_and_config, preflight, build_test_artifact, parallel_groups, wave0_groups, wave1_groups]
     if: |
       !cancelled() &&
       needs.checkout_and_config.result == 'success' &&
@@ -383,7 +455,7 @@ jobs:
 
   coverage:
     name: coverage-${{ matrix.device }}
-    needs: [checkout_and_config, build_test_artifact, parallel_groups, serial_groups]
+    needs: [checkout_and_config, build_test_artifact, parallel_groups, wave0_groups, wave1_groups, serial_groups]
     if: |
       !cancelled() &&
       needs.checkout_and_config.outputs.coverage_active == 'true'
@@ -642,7 +714,7 @@ jobs:
 
   platform_gate:
     name: platform-gate
-    needs: [checkout_and_config, preflight, build_test_artifact, parallel_groups, serial_groups, coverage]
+    needs: [checkout_and_config, preflight, build_test_artifact, parallel_groups, wave0_groups, wave1_groups, serial_groups, coverage]
     if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     steps:
