@@ -69,6 +69,5 @@ integration_test_matrix:
 paths_watch:
   - .github/configs/kunlun.yml
   - .github/scripts/setup_kunlun.sh
-  - .github/workflows/all_tests_kunlun.yml
   - tests/plugin/backend/kunlun/
   - transformer_engine/plugin/core/backends/vendor/kunlunxin/

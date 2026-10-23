@@ -59,6 +59,5 @@ device_types:
 paths_watch:
   - .github/configs/hygon.yml
   - .github/scripts/setup_hygon.sh
-  - .github/workflows/all_tests_hygon.yml
   - tests/plugin/backend/hygon/
   - transformer_engine/plugin/core/backends/vendor/hygon/

@@ -71,7 +71,6 @@ device_types:
 paths_watch:
   - .github/configs/ascend.yml
   - .github/scripts/setup_ascend.sh
-  - .github/workflows/all_tests_ascend.yml
   - tests/plugin/backend/ascend/
   - transformer_engine/plugin/core/backends/vendor/npu/
   - tests/plugin/backend/npu/

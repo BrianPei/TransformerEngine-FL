@@ -61,6 +61,15 @@ on:
       source_sha:
         required: true
         type: string
+      coverage_required:
+        required: false
+        type: string
+        default: 'false'
+      coverage_sources:
+        required: false
+        type: string
+        default: ''
+        description: 'Comma-separated coverage sources passed to --cov'
 
 jobs:
   test_group:
@@ -122,6 +131,8 @@ jobs:
         env:
           TE_TEST_GROUP_JSON: ${{ toJson(matrix) }}
           TE_TEST_MAX_RETRIES: '2'
+          COVERAGE_REQUIRED: ${{ inputs.coverage_required }}
+          COVERAGE_SOURCES: ${{ inputs.coverage_sources }}
         run: |
           set -euo pipefail
           echo "started_at=$(date +%s)" >> "$GITHUB_OUTPUT"
@@ -140,33 +151,38 @@ jobs:
             integration|compat)
               export TE_LIB_PATH="${TE_LIB_PATH:-$(python3 -c 'import site; print(site.getsitepackages()[0])')/transformer_engine}"
               ;;
+            *)
+              echo "ERROR: unsupported test group kind '${{ matrix.kind }}'" >&2
+              exit 1
+              ;;
           esac
 
           echo "TE_PATH=$TE_PATH"
           echo "TE_LIB_PATH=$TE_LIB_PATH"
           echo "XML_LOG_DIR=$XML_LOG_DIR"
 
-          # Setup coverage if enabled
+          # Coverage uses the platform coverage.sources. Each group writes its
+          # own data file, and --cov-append keeps every pytest call the group
+          # launcher makes instead of letting the last one erase the others.
           if [ "${{ matrix.coverage }}" = "true" ]; then
-            export COVERAGE_FILE="$GITHUB_WORKSPACE/.coverage.${{ matrix.name }}.${{ matrix.device }}"
-            export COVERAGE_RCFILE="$GITHUB_WORKSPACE/.coveragerc"
-
-            # Create minimal .coveragerc
-            cat > "$COVERAGE_RCFILE" << EOF
-          [run]
-          source = transformer_engine
-          omit =
-              */tests/*
-              */test_utils/*
-              */__pycache__/*
-          parallel = True
-
-          [report]
-          precision = 2
-          EOF
-
-            echo "Coverage enabled: COVERAGE_FILE=$COVERAGE_FILE"
-            export PYTEST_ADDOPTS="--cov=transformer_engine --cov-report= --cov-config=$COVERAGE_RCFILE ${PYTEST_ADDOPTS:-}"
+            if python3 -c "import importlib.metadata as m; import coverage, pytest_cov; print('[coverage] coverage', m.version('coverage'), 'pytest-cov', m.version('pytest-cov'))"; then
+              export COVERAGE_FILE="$GITHUB_WORKSPACE/.coverage.${{ matrix.name }}.${{ matrix.device }}"
+              coverage_args=""
+              for source in ${COVERAGE_SOURCES//,/ }; do
+                coverage_args+=" --cov=$source"
+              done
+              if [ -z "$coverage_args" ]; then
+                echo "ERROR: coverage is enabled but the platform config has no coverage.sources" >&2
+                exit 1
+              fi
+              export PYTEST_ADDOPTS="${PYTEST_ADDOPTS:-}${coverage_args} --cov-append --cov-report="
+              echo "Coverage enabled: COVERAGE_FILE=$COVERAGE_FILE PYTEST_ADDOPTS=$PYTEST_ADDOPTS"
+            elif [ "$COVERAGE_REQUIRED" = "true" ]; then
+              echo "Coverage dependencies are required but missing from the CI image: coverage pytest-cov" >&2
+              exit 1
+            else
+              echo "WARNING: Coverage dependencies are missing from the CI image; collection disabled"
+            fi
           fi
 
           # Run test group
@@ -180,14 +196,17 @@ jobs:
           exit $EXIT_CODE
 
       - name: Generate group report
-        if: always()
+        if: ${{ !cancelled() }}
         shell: bash
         env:
           FLAGCICD_PLAN: ${{ inputs.plan }}
           FLAGCICD_STEPS: ${{ toJson(steps) }}
         run: |
-          START_TIME="${{ steps.execute.outputs.started_at || steps.setup.outputs.started_at || 0 }}"
-          DURATION=$(($(date +%s) - ${START_TIME:-0}))
+          START_TIME="${{ steps.execute.outputs.started_at }}"
+          DURATION=0
+          if [ -n "$START_TIME" ]; then
+            DURATION=$(($(date +%s) - START_TIME))
+          fi
 
           python3 .github/scripts/ci/flagcicd_gate.py group-report \
             --platform "${{ inputs.platform }}" \
@@ -202,7 +221,7 @@ jobs:
             --output group-report.json
 
       - name: Upload coverage fragment
-        if: always() && matrix.coverage == true
+        if: ${{ !cancelled() && matrix.coverage == true }}
         uses: actions/upload-artifact@v4
         continue-on-error: true
         with:
@@ -213,7 +232,7 @@ jobs:
           retention-days: 1
 
       - name: Upload test logs
-        if: always()
+        if: ${{ !cancelled() }}
         uses: actions/upload-artifact@v4
         continue-on-error: true
         with:
@@ -226,7 +245,7 @@ jobs:
           retention-days: 14
 
       - name: Upload group report
-        if: always()
+        if: ${{ !cancelled() }}
         uses: actions/upload-artifact@v4
         with:
           name: flagcicd-group-${{ inputs.platform }}-${{ matrix.device }}-${{ matrix.name }}

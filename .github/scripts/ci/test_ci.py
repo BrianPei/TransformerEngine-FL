@@ -7,7 +7,6 @@ Run without importing TransformerEngine or requiring accelerator hardware:
 from __future__ import annotations
 
 import importlib.util
-import itertools
 import json
 import os
 from pathlib import Path
@@ -23,7 +22,6 @@ import generate_matrix as matrix
 
 
 ROOT = Path(__file__).resolve().parents[3]
-STATUSES = ("success", "failure", "cancelled", "skipped")
 
 
 class PlatformRoutingTests(unittest.TestCase):
@@ -167,7 +165,8 @@ class WorkflowGateTests(unittest.TestCase):
 
     def test_top_level_gate_status_combinations(self):
         gate = self.ci["ci-complete"]
-        self.assertEqual(gate["if"], "always()")
+        # !cancelled() still runs after failures but lets a cancel stop the gate.
+        self.assertEqual(gate["if"], "${{ !cancelled() }}")
         self.assertEqual(set(gate["needs"]), {"lint", "plan", "platform-pipeline"})
         # ci-complete now uses flagcicd-gate composite action in steps
         # Gate logic tested in flagcicd_gate.py gate subcommand
@@ -175,25 +174,27 @@ class WorkflowGateTests(unittest.TestCase):
         self.assertEqual(gate["steps"][0]["uses"], "actions/checkout@v4")
         self.assertEqual(gate["steps"][1]["uses"], "./.github/actions/flagcicd-gate")
 
-    def run_common_gate(self, job, values):
-        command = self.common[job]["steps"][0]["run"]
-        for expression, value in values.items():
-            command = command.replace("${{ " + expression + " }}", value)
-        self.assertNotIn("${{", command)
-        return subprocess.run(["bash", "-e", "-c", command], capture_output=True).returncode
+    def test_ci_self_tests_run_in_lint(self):
+        commands = [step.get("run", "") for step in self.ci["lint"]["steps"]]
+        self.assertTrue(
+            any(
+                "python -m unittest discover -s .github/scripts/ci -p 'test_*.py'" in command
+                for command in commands
+            )
+        )
 
-    def test_enabled_test_summaries_reject_skips_and_cancellations(self):
-        # SKIP: unit_tests_complete and integration_tests_complete removed in flagcicd architecture
-        # Gate logic now in flagcicd_gate.py platform-report and gate subcommands
-        pass
-
-    def test_platform_gate_only_accepts_explicitly_disabled_skips(self):
-        # SKIP: all_tests_complete gate logic moved to flagcicd_gate.py
-        pass
-
-    def test_pinned_checkouts_and_requested_gate(self):
-        # SKIP: pinned_checkouts logic moved to flagcicd planner
-        pass
+    def test_no_always_conditions_in_flagcicd_workflows(self):
+        # always() cannot be cancelled; flagcicd jobs and steps use !cancelled().
+        for name in (
+            "ci",
+            "daily",
+            "ci-requested",
+            "release-acceptance",
+            "all_tests_common",
+            "test_groups_common",
+        ):
+            text = (ROOT / f".github/workflows/{name}.yml").read_text()
+            self.assertNotIn("always()", text, name)
 
     def test_label_routing_and_event_payload(self):
         rules = matrix._load_watch_rules(ROOT / ".github/configs")
@@ -314,9 +315,80 @@ class WorkflowGateTests(unittest.TestCase):
                 self.assertEqual(runner.main(), 0)
 
     def test_pinned_checkouts_and_requested_gate(self):
-        # SKIP: test_groups_common.yml replaces unit_tests_common.yml and integration_tests_common.yml
-        # ci-requested.yml removed in favor of flagcicd manual stage trigger
-        pass
+        for name in ("all_tests_common", "test_groups_common"):
+            jobs = yaml.safe_load((ROOT / f".github/workflows/{name}.yml").read_text())["jobs"]
+            for job in jobs.values():
+                if job.get("uses", "").startswith("./.github/workflows/"):
+                    self.assertEqual(job["with"]["checkout_ref"], "${{ inputs.checkout_ref }}")
+                for step in job.get("steps", []):
+                    if step.get("uses", "").startswith("actions/checkout@"):
+                        self.assertEqual(step["with"]["ref"], "${{ inputs.checkout_ref }}")
+        # Every entry plans at a fixed ref, runs that plan's SHA and gates on it.
+        for name, stage in (
+            ("ci", None),
+            ("daily", "nightly"),
+            ("ci-requested", "manual"),
+            ("release-acceptance", "release"),
+        ):
+            workflow = yaml.safe_load((ROOT / f".github/workflows/{name}.yml").read_text())
+            jobs = workflow["jobs"]
+            self.assertEqual(workflow["permissions"]["contents"], "read", name)
+            pipeline = next(job for job in jobs.values() if "uses" in job)
+            self.assertEqual(
+                pipeline["with"]["checkout_ref"], "${{ needs.plan.outputs.source_sha }}", name
+            )
+            self.assertEqual(pipeline["with"]["plan"], "${{ needs.plan.outputs.plan }}", name)
+            plan_step = next(
+                step
+                for step in jobs["plan"]["steps"]
+                if step.get("uses") == "./.github/actions/flagcicd-plan"
+            )
+            if stage:
+                self.assertEqual(plan_step["with"]["stage"], stage, name)
+            gate = next(
+                job
+                for job in jobs.values()
+                if any(
+                    step.get("uses") == "./.github/actions/flagcicd-gate"
+                    for step in job.get("steps", [])
+                )
+            )
+            self.assertIn("!cancelled()", gate["if"], name)
+        requested = yaml.safe_load((ROOT / ".github/workflows/ci-requested.yml").read_text())
+        on = requested.get("on", requested.get(True))
+        self.assertEqual(set(on), {"issue_comment", "workflow_dispatch"})
+        self.assertEqual(
+            requested["jobs"]["plan"]["steps"][0]["with"]["ref"],
+            "${{ needs.resolve.outputs.checkout_ref }}",
+        )
+        plan_inputs = requested["jobs"]["plan"]["steps"][1]["with"]
+        self.assertEqual(plan_inputs["platforms"], "${{ needs.resolve.outputs.platforms }}")
+        self.assertEqual(plan_inputs["requested-level"], "${{ needs.resolve.outputs.test_level }}")
+        self.assertIn("needs.resolve.result != 'skipped'", requested["jobs"]["complete"]["if"])
+
+    def test_dispatch_request_resolution(self):
+        available = {"ascend", "cuda"}
+        self.assertEqual(
+            ci_requests.resolve_dispatch(
+                {"platforms": "cuda", "test_level": "L3", "checkout_ref": "v2.1"},
+                available,
+                "f" * 40,
+            ),
+            (["cuda"], "v2.1", "L3"),
+        )
+        self.assertEqual(
+            ci_requests.resolve_dispatch({"platforms": "all"}, available, "f" * 40),
+            (["ascend", "cuda"], "f" * 40, "auto"),
+        )
+        for inputs in (
+            {"platforms": "unknown"},
+            {"platforms": ""},
+            {"platforms": "cuda;id"},
+            {"platforms": "cuda", "test_level": "L9"},
+            {"platforms": "cuda", "checkout_ref": "main; rm"},
+        ):
+            with self.assertRaises(ValueError, msg=inputs):
+                ci_requests.resolve_dispatch(inputs, available, "f" * 40)
 
 
 if __name__ == "__main__":

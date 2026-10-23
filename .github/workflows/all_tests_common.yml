@@ -46,14 +46,15 @@ jobs:
       config_hash: ${{ steps.slice.outputs.config_hash }}
       coverage_enabled: ${{ steps.slice.outputs.coverage_enabled }}
       coverage_python: ${{ steps.slice.outputs.coverage_python }}
+      coverage_sources: ${{ steps.slice.outputs.coverage_sources }}
+      coverage_include: ${{ steps.slice.outputs.coverage_include }}
+      coverage_omit: ${{ steps.slice.outputs.coverage_omit }}
+      preflight_matrix: ${{ steps.slice.outputs.preflight_matrix }}
       parallel_matrix: ${{ steps.slice.outputs.parallel_matrix }}
       serial_matrix: ${{ steps.slice.outputs.serial_matrix }}
       has_parallel: ${{ steps.slice.outputs.has_parallel }}
       has_serial: ${{ steps.slice.outputs.has_serial }}
       preflight_selected: ${{ steps.slice.outputs.preflight_selected }}
-      preflight_timeout: ${{ steps.slice.outputs.preflight_timeout }}
-      preflight_device: ${{ steps.slice.outputs.preflight_device }}
-      preflight_name: ${{ steps.slice.outputs.preflight_name }}
       coverage_active: ${{ steps.slice.outputs.coverage_active }}
       coverage_required: ${{ steps.slice.outputs.coverage_required }}
       stage: ${{ steps.slice.outputs.stage }}
@@ -68,9 +69,13 @@ jobs:
 
       - name: Install yq
         shell: bash
+        env:
+          # SHA-256 of yq_linux_amd64 from the v4.45.1 release checksums file.
+          YQ_SHA256: 654d2943ca1d3be2024089eb4f270f4070f491a0610481d128509b2834870049
         run: |
-          sudo wget -qO /usr/local/bin/yq https://github.com/mikefarah/yq/releases/download/v4.45.1/yq_linux_amd64
-          sudo chmod +x /usr/local/bin/yq
+          wget -qO "$RUNNER_TEMP/yq" https://github.com/mikefarah/yq/releases/download/v4.45.1/yq_linux_amd64
+          echo "$YQ_SHA256  $RUNNER_TEMP/yq" | sha256sum --check --strict
+          sudo install -m 0755 "$RUNNER_TEMP/yq" /usr/local/bin/yq
 
       - name: Load config and slice plan
         id: slice
@@ -138,6 +143,11 @@ jobs:
           COVERAGE_PYTHON=$(yq '.coverage.python // "python3"' "$CONFIG_FILE")
           echo "coverage_python=$COVERAGE_PYTHON" >> "$GITHUB_OUTPUT"
 
+          # Comma-joined lists; sources feed --cov, include/omit scope the report.
+          for key in sources include omit; do
+            echo "coverage_${key}=$(yq ".coverage.${key} // [] | join(\",\")" "$CONFIG_FILE")" >> "$GITHUB_OUTPUT"
+          done
+
           CONFIG_HASH=$(sha256sum "$CONFIG_FILE" | awk '{print $1}')
           echo "config_hash=$CONFIG_HASH" >> "$GITHUB_OUTPUT"
 
@@ -148,15 +158,18 @@ jobs:
             --github-output
 
   preflight:
-    name: preflight
+    name: preflight-${{ matrix.device }}
     needs: checkout_and_config
     if: needs.checkout_and_config.outputs.preflight_selected == 'true'
     runs-on: ${{ fromJson(needs.checkout_and_config.outputs.runs_on) }}
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJson(needs.checkout_and_config.outputs.preflight_matrix) }}
     container:
       image: ${{ needs.checkout_and_config.outputs.ci_image }}
       options: ${{ needs.checkout_and_config.outputs.container_options }}
       volumes: ${{ fromJson(needs.checkout_and_config.outputs.container_volumes) }}
-    timeout-minutes: ${{ fromJson(needs.checkout_and_config.outputs.preflight_timeout) }}
+    timeout-minutes: ${{ matrix.timeout }}
     steps:
       - name: Prepare checkout
         shell: bash
@@ -192,14 +205,17 @@ jobs:
           echo "✓ Preflight checks passed"
 
       - name: Generate preflight report
-        if: always()
+        if: ${{ !cancelled() }}
         shell: bash
         env:
           FLAGCICD_PLAN: ${{ inputs.plan }}
           FLAGCICD_STEPS: ${{ toJson(steps) }}
         run: |
-          START_TIME="${{ steps.execute.outputs.started_at || 0 }}"
-          DURATION=$(($(date +%s) - ${START_TIME:-0}))
+          START_TIME="${{ steps.execute.outputs.started_at }}"
+          DURATION=0
+          if [ -n "$START_TIME" ]; then
+            DURATION=$(($(date +%s) - START_TIME))
+          fi
 
           # Write exit code to file for group-report command
           if [ "${{ steps.execute.outcome }}" = "success" ]; then
@@ -210,20 +226,20 @@ jobs:
 
           python3 .github/scripts/ci/flagcicd_gate.py group-report \
             --platform "${{ inputs.platform }}" \
-            --device "${{ needs.checkout_and_config.outputs.preflight_device }}" \
-            --group "${{ needs.checkout_and_config.outputs.preflight_name }}" \
-            --kind "preflight" \
-            --level "L0" \
-            --required "true" \
+            --device "${{ matrix.device }}" \
+            --group "${{ matrix.name }}" \
+            --kind "${{ matrix.kind }}" \
+            --level "${{ matrix.level }}" \
+            --required "${{ matrix.required }}" \
             --duration "$DURATION" \
             --exit-code-file "$RUNNER_TEMP/preflight_exit_code" \
             --output group-report.json
 
       - name: Upload preflight report
-        if: always()
+        if: ${{ !cancelled() }}
         uses: actions/upload-artifact@v4
         with:
-          name: flagcicd-group-${{ inputs.platform }}-${{ needs.checkout_and_config.outputs.preflight_device }}-${{ needs.checkout_and_config.outputs.preflight_name }}
+          name: flagcicd-group-${{ inputs.platform }}-${{ matrix.device }}-${{ matrix.name }}
           path: group-report.json
           if-no-files-found: error
           retention-days: 90
@@ -233,7 +249,7 @@ jobs:
     name: build-test-artifact
     needs: [checkout_and_config, preflight]
     if: |
-      always() &&
+      !cancelled() &&
       needs.checkout_and_config.outputs.test_artifact_enabled == 'true' &&
       (needs.checkout_and_config.outputs.preflight_selected != 'true' || needs.preflight.result == 'success')
     runs-on: ${{ fromJson(needs.checkout_and_config.outputs.test_artifact_runs_on) }}
@@ -288,13 +304,18 @@ jobs:
           retention-days: 1
           overwrite: true
 
+  # Both lanes require preflight (when planned) and the test artifact (when
+  # configured). The serial lane only waits for the parallel lane to finish so
+  # the two never share a runner pool; group results are judged by
+  # platform_gate, not by lane success.
   parallel_groups:
     name: parallel-lane
-    needs: [checkout_and_config, build_test_artifact]
+    needs: [checkout_and_config, preflight, build_test_artifact]
     if: |
-      always() &&
+      !cancelled() &&
       needs.checkout_and_config.result == 'success' &&
       needs.checkout_and_config.outputs.has_parallel == 'true' &&
+      (needs.checkout_and_config.outputs.preflight_selected != 'true' || needs.preflight.result == 'success') &&
       (needs.build_test_artifact.result == 'success' ||
        needs.build_test_artifact.result == 'skipped')
     uses: ./.github/workflows/test_groups_common.yml
@@ -315,18 +336,19 @@ jobs:
       test_artifact_path: ${{ needs.checkout_and_config.outputs.test_artifact_path }}
       config_hash: ${{ needs.checkout_and_config.outputs.config_hash }}
       source_sha: ${{ needs.checkout_and_config.outputs.source_sha }}
+      coverage_required: ${{ needs.checkout_and_config.outputs.coverage_required }}
+      coverage_sources: ${{ needs.checkout_and_config.outputs.coverage_sources }}
 
   serial_groups:
     name: serial-lane
-    needs: [checkout_and_config, build_test_artifact, parallel_groups]
+    needs: [checkout_and_config, preflight, build_test_artifact, parallel_groups]
     if: |
       !cancelled() &&
       needs.checkout_and_config.result == 'success' &&
       needs.checkout_and_config.outputs.has_serial == 'true' &&
+      (needs.checkout_and_config.outputs.preflight_selected != 'true' || needs.preflight.result == 'success') &&
       (needs.build_test_artifact.result == 'success' ||
-       needs.build_test_artifact.result == 'skipped') &&
-      (needs.parallel_groups.result == 'success' ||
-       needs.parallel_groups.result == 'skipped')
+       needs.build_test_artifact.result == 'skipped')
     uses: ./.github/workflows/test_groups_common.yml
     with:
       platform: ${{ inputs.platform }}
@@ -345,12 +367,14 @@ jobs:
       test_artifact_path: ${{ needs.checkout_and_config.outputs.test_artifact_path }}
       config_hash: ${{ needs.checkout_and_config.outputs.config_hash }}
       source_sha: ${{ needs.checkout_and_config.outputs.source_sha }}
+      coverage_required: ${{ needs.checkout_and_config.outputs.coverage_required }}
+      coverage_sources: ${{ needs.checkout_and_config.outputs.coverage_sources }}
 
   coverage:
     name: coverage-${{ matrix.device }}
     needs: [checkout_and_config, build_test_artifact, parallel_groups, serial_groups]
     if: |
-      always() &&
+      !cancelled() &&
       needs.checkout_and_config.outputs.coverage_active == 'true'
     runs-on: ${{ fromJson(needs.checkout_and_config.outputs.runs_on) }}
     strategy:
@@ -383,6 +407,8 @@ jobs:
         env:
           COVERAGE_PYTHON: ${{ needs.checkout_and_config.outputs.coverage_python }}
           COVERAGE_REQUIRED: ${{ needs.checkout_and_config.outputs.coverage_required }}
+          COVERAGE_INCLUDE: ${{ needs.checkout_and_config.outputs.coverage_include }}
+          COVERAGE_OMIT: ${{ needs.checkout_and_config.outputs.coverage_omit }}
         run: |
           mkdir -p coverage-raw
           count=0
@@ -408,14 +434,26 @@ jobs:
           fi
 
           "$COVERAGE_PYTHON" -m coverage combine coverage-raw
-          "$COVERAGE_PYTHON" -m coverage json -o coverage-${{ inputs.platform }}-${{ matrix.device }}-pytorch-unittest.json
+          # include/omit come from the platform coverage config; they scope the
+          # report because [run] include is ignored once --cov sources are set.
+          coverage_command=(
+            "$COVERAGE_PYTHON" -m coverage json
+            -o "coverage-${{ inputs.platform }}-${{ matrix.device }}-pytorch-unittest.json"
+            -i
+          )
+          if [ -n "$COVERAGE_INCLUDE" ]; then
+            coverage_command+=(--include="$COVERAGE_INCLUDE")
+          fi
+          if [ -n "$COVERAGE_OMIT" ]; then
+            coverage_command+=(--omit="$COVERAGE_OMIT")
+          fi
+          "${coverage_command[@]}"
           echo "aggregated=true" >> "$GITHUB_OUTPUT"
 
       - name: Check PR coverage regression
         if: |
-          always() &&
           steps.aggregate.outputs.aggregated == 'true' &&
-          github.event_name == 'pull_request'
+          needs.checkout_and_config.outputs.stage == 'pr'
         continue-on-error: true
         shell: bash
         env:
@@ -468,49 +506,44 @@ jobs:
 
           echo "PASS: No coverage regression"
 
-      - name: Check nightly 3-sigma regression
+      - name: Check daily 3-sigma regression
         if: |
-          always() &&
           steps.aggregate.outputs.aggregated == 'true' &&
-          github.event_name == 'schedule'
+          needs.checkout_and_config.outputs.stage == 'nightly'
         continue-on-error: true
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
+          PLATFORM: ${{ inputs.platform }}
+          ARTIFACT_NAME: coverage-${{ inputs.platform }}-${{ matrix.device }}-pytorch-unittest
         run: |
-          echo "Fetching historical nightly coverage reports..."
-          history_dir="$RUNNER_TEMP/coverage-history"
-          mkdir -p "$history_dir"
+          history_file="$RUNNER_TEMP/coverage-history.json"
 
-          artifact_name="coverage-${{ inputs.platform }}-${{ matrix.device }}-pytorch-unittest"
-          export artifact_name
-          history_window=$(python3 -c "import json; print(json.load(open('.flagcicd/golden_baseline.json'))['rules']['statistical']['window_runs'])")
-          minimum_history=$(python3 -c "import json; print(json.load(open('.flagcicd/golden_baseline.json'))['rules']['statistical']['minimum_history'])")
-          export history_window minimum_history
-          echo "Using history window=${history_window}, minimum=${minimum_history}"
-
-          # Fetch successful nightly artifacts through the GitHub REST API.
-          # Vendor containers do not necessarily include the gh CLI.
-          python3 << 'FETCH_EOF'
-          import os, sys
+          # Collect totals.percent_covered from earlier successful daily runs
+          # through the GitHub REST API; vendor containers may lack the gh CLI.
+          # The history file is written only when the window has enough samples.
+          python3 - "$history_file" << 'FETCH_EOF'
+          import json, os, sys
           from pathlib import Path
           from urllib.parse import quote, urlencode
 
           sys.path.insert(0, str(Path(".github/scripts").resolve()))
           from fetch_flagcicd_baseline import get_json, request, safe_extract
 
+          rules = json.loads(Path(".flagcicd/golden_baseline.json").read_text())["rules"]["statistical"]
+          window = int(rules["window_runs"])
+          minimum = int(rules["minimum_history"])
           repo = os.environ["GITHUB_REPOSITORY"]
-          history_dir = Path(os.environ["RUNNER_TEMP"]) / "coverage-history"
-          artifact_name = os.environ["artifact_name"]
+          artifact_name = os.environ["ARTIFACT_NAME"]
           token = os.environ.get("GH_TOKEN") or os.environ.get("GITHUB_TOKEN")
           if not token:
               print("ERROR: GH_TOKEN or GITHUB_TOKEN is required", file=sys.stderr)
               sys.exit(1)
 
           encoded_repo = "/".join(quote(part, safe="") for part in repo.split("/"))
-          window = int(os.environ.get("history_window", "14"))
           runs_url = (
-              f"https://api.github.com/repos/{encoded_repo}/actions/workflows/nightly.yml/runs?"
+              f"https://api.github.com/repos/{encoded_repo}/actions/workflows/"
+              f"{rules['source_workflow']}/runs?"
               + urlencode({"branch": "main", "status": "completed", "per_page": "100"})
           )
           runs = get_json(runs_url, token).get("workflow_runs", [])
@@ -518,13 +551,13 @@ jobs:
               run for run in runs
               if isinstance(run, dict) and run.get("conclusion") == "success"
           ][:window]
+          print(f"Found {len(successful)} successful {rules['source_workflow']} runs (window={window})")
 
-          print(f"Found {len(successful)} successful nightly runs")
-
+          history = []
+          download_root = Path(os.environ["RUNNER_TEMP"]) / "coverage-history"
           for i, run in enumerate(successful):
-              run_id = run.get("id")
               artifacts_url = run.get("artifacts_url")
-              if not run_id or not artifacts_url:
+              if not run.get("id") or not artifacts_url:
                   continue
               artifacts = get_json(artifacts_url + "?per_page=100", token).get("artifacts", [])
               artifact = next(
@@ -533,73 +566,39 @@ jobs:
                   None,
               )
               if not artifact or not artifact.get("archive_download_url"):
-                  print(f"WARNING: Artifact not found for run {run_id}")
+                  print(f"WARNING: {artifact_name} not found for run {run['id']}")
                   continue
-              output_file = history_dir / f"coverage-{i}.json"
-              run_dir = history_dir / f"run-{i}"
+              run_dir = download_root / f"run-{i}"
               safe_extract(request(artifact["archive_download_url"], token), run_dir)
-              downloaded = list(run_dir.glob("*.json"))
-              if downloaded:
-                  downloaded[0].rename(output_file)
-                  print(f"Downloaded coverage from run {run_id}")
+              for report in sorted(run_dir.glob("*.json")):
+                  try:
+                      history.append(float(json.loads(report.read_text())["totals"]["percent_covered"]))
+                      break
+                  except (OSError, KeyError, TypeError, ValueError):
+                      continue
 
-          print(f"Downloaded {len(list(history_dir.glob('coverage-*.json')))} coverage reports")
+          if len(history) < minimum:
+              print(f"Not enough history (need {minimum}+, have {len(history)}), skipping 3-sigma check")
+              sys.exit(0)
+          Path(sys.argv[1]).write_text(json.dumps(history))
+          print(f"Using {len(history)} historical coverage samples")
           FETCH_EOF
 
-          # Calculate 3-sigma threshold
-          coverage_files=$(ls -1 "$history_dir"/coverage-*.json 2>/dev/null | wc -l)
+          [ -f "$history_file" ] || exit 0
 
-          if [ "$coverage_files" -lt "$minimum_history" ]; then
-            echo "Not enough history (need ${minimum_history}+, have $coverage_files), skipping 3-sigma check"
-            exit 0
-          fi
+          sigma=$(python3 -c "
+          import json, os
+          platforms = json.load(open('.flagcicd/golden_baseline.json')).get('platforms', {})
+          platform = os.environ['PLATFORM'].lower()
+          print(platforms.get(platform, platforms.get('other', {})).get('statistical_sigma', 3.0))
+          ")
 
-          # Calculate mean and stddev
-          python3 - "$history_dir" "coverage-${{ inputs.platform }}-${{ matrix.device }}-pytorch-unittest.json" << 'SIGMA_EOF'
-          import json, sys, statistics
-          from pathlib import Path
-
-          history_dir = Path(sys.argv[1])
-          current_file = sys.argv[2]
-
-          # Load historical coverage
-          historical = []
-          for f in sorted(history_dir.glob("coverage-*.json")):
-              try:
-                  data = json.load(f.open())
-                  historical.append(data["totals"]["percent_covered"])
-              except (OSError, KeyError, json.JSONDecodeError):
-                  continue
-
-          minimum_history = int(__import__("os").environ.get("minimum_history", "8"))
-          if len(historical) < minimum_history:
-              print(f"ERROR: Not enough valid historical data: {len(historical)}")
-              sys.exit(0)
-
-          mean = statistics.mean(historical)
-          stdev = statistics.stdev(historical)
-          threshold_3sigma = mean - 3 * stdev
-
-          # Load current coverage
-          try:
-              current = json.load(open(current_file))
-              current_cov = current["totals"]["percent_covered"]
-          except (OSError, KeyError, json.JSONDecodeError) as e:
-              print(f"ERROR: Cannot load current coverage: {e}")
-              sys.exit(1)
-
-          print(f"Historical coverage (n={len(historical)}):")
-          print(f"  Mean: {mean:.2f}%")
-          print(f"  Stddev: {stdev:.2f}%")
-          print(f"  3-sigma threshold: {threshold_3sigma:.2f}%")
-          print(f"Current coverage: {current_cov:.2f}%")
-
-          if current_cov < threshold_3sigma:
-              print(f"FAIL: Coverage below 3-sigma threshold")
-              sys.exit(1)
-          else:
-              print(f"PASS: Coverage within 3-sigma range")
-          SIGMA_EOF
+          # Advisory: an outlier below the bound fails this continue-on-error step.
+          python3 .github/scripts/flagcicd_regression.py \
+            --current "${ARTIFACT_NAME}.json" \
+            --historical "$history_file" \
+            --sigma "$sigma" \
+            --output regression-verdict.json
 
       - name: Upload coverage report
         if: steps.aggregate.outputs.aggregated == 'true'
@@ -610,7 +609,7 @@ jobs:
           retention-days: 90
 
       - name: Upload regression verdict
-        if: always()
+        if: ${{ !cancelled() }}
         uses: actions/upload-artifact@v4
         continue-on-error: true
         with:
@@ -632,28 +631,14 @@ jobs:
 
   platform_gate:
     name: platform-gate
-    needs: [checkout_and_config, build_test_artifact, parallel_groups, serial_groups, coverage]
-    if: always()
+    needs: [checkout_and_config, preflight, build_test_artifact, parallel_groups, serial_groups, coverage]
+    if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     steps:
       - name: Checkout source
         uses: actions/checkout@v4
         with:
           ref: ${{ inputs.checkout_ref }}
-
-      - name: Debug job results
-        shell: bash
-        run: |
-          echo "Job results:"
-          echo "  checkout_and_config: ${{ needs.checkout_and_config.result }}"
-          echo "  build_test_artifact: ${{ needs.build_test_artifact.result }}"
-          echo "  parallel_groups: ${{ needs.parallel_groups.result }}"
-          echo "  serial_groups: ${{ needs.serial_groups.result }}"
-          echo "  coverage: ${{ needs.coverage.result }}"
-          echo ""
-          echo "Config outputs:"
-          echo "  has_parallel: ${{ needs.checkout_and_config.outputs.has_parallel }}"
-          echo "  has_serial: ${{ needs.checkout_and_config.outputs.has_serial }}"
 
       - name: Download all group reports
         uses: actions/download-artifact@v4
@@ -664,26 +649,6 @@ jobs:
           path: group-reports
           merge-multiple: false
 
-      - name: Ensure reports directory exists
-        shell: bash
-        run: |
-          mkdir -p group-reports
-          echo "Reports directory created/verified"
-          ls -la group-reports/ || echo "Directory is empty"
-
-      - name: Debug plan input
-        shell: bash
-        run: |
-          echo "Plan length: ${#FLAGCICD_PLAN}"
-          echo "Plan first 200 chars: ${FLAGCICD_PLAN:0:200}"
-          echo "Plan last 200 chars: ${FLAGCICD_PLAN: -200}"
-          if [ -z "$FLAGCICD_PLAN" ]; then
-            echo "ERROR: FLAGCICD_PLAN is empty"
-            exit 1
-          fi
-        env:
-          FLAGCICD_PLAN: ${{ inputs.plan }}
-
       - name: Aggregate platform report
         shell: bash
         env:
@@ -693,9 +658,9 @@ jobs:
         run: |
           PLATFORM_ARGS=(
             platform
-            --platform "${{ inputs.platform }}" \
-            --reports-dir group-reports \
-            --output platform-report.json \
+            --platform "${{ inputs.platform }}"
+            --reports-dir group-reports
+            --output platform-report.json
             --coverage-result "$COVERAGE_RESULT"
           )
           if [ "$COVERAGE_REQUIRED" = "true" ]; then
@@ -704,7 +669,7 @@ jobs:
           python3 .github/scripts/ci/flagcicd_gate.py "${PLATFORM_ARGS[@]}"
 
       - name: Upload platform report
-        if: always()
+        if: ${{ !cancelled() }}
         uses: actions/upload-artifact@v4
         with:
           name: flagcicd-platform-${{ inputs.platform }}

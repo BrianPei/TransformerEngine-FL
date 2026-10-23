@@ -11,6 +11,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
+import yaml
+
 ROOT = Path(__file__).resolve().parents[3]
 
 
@@ -200,6 +202,76 @@ class PlannerTests(unittest.TestCase):
         preflight_groups = [g for g in plan["test_groups"] if g["group"] == "preflight"]
         for g in preflight_groups:
             self.assertEqual(g["lane"], "preflight")
+
+    def test_vendor_launcher_change_selects_its_group(self):
+        """Changing a platform launcher must run the group it launches, not preflight only."""
+        project = yaml.safe_load((ROOT / ".flagcicd/project.yaml").read_text())
+        checked = 0
+        for config in sorted((ROOT / ".github/configs").glob("*.yml")):
+            if config.stem in {"template", "image_sources", "platforms"}:
+                continue
+            platform_cfg = yaml.safe_load(config.read_text())
+            for group_def in project["test_groups"]:
+                for entry in platform_cfg.get(group_def.get("matrix") or "", []) or []:
+                    if entry.get("name") != group_def["name"] or entry.get("blocked"):
+                        continue
+                    plan = self.run_planner(
+                        "pr", base_ref="main", changed_files=json.dumps([entry["path"]])
+                    )
+                    selected = {(g["platform"], g["group"]) for g in plan["test_groups"]}
+                    self.assertIn((config.stem, group_def["name"]), selected, entry["path"])
+                    self.assertEqual([p["name"] for p in plan["platforms"]], [config.stem])
+                    checked += 1
+        self.assertGreaterEqual(checked, 16)
+
+    def test_mixed_change_takes_highest_file_risk(self):
+        """A low-risk test file must not lower the level of an unmatched core file."""
+        plan = self.run_planner(
+            "pr",
+            base_ref="main",
+            changed_files=json.dumps(
+                ["tests/pytorch/test_sanity.py", "transformer_engine/pytorch/module/linear.py"]
+            ),
+        )
+        self.assertEqual((plan["test_level"], plan["risk_level"]), ("L2", "R2"))
+        self.assertTrue(
+            any(group["group"] == "pytorch_mcore_integration" for group in plan["test_groups"])
+        )
+
+    def test_routing_reasons_and_excluded_ledger(self):
+        plan = self.run_planner(
+            "pr",
+            base_ref="main",
+            requested_level="L2",
+            changed_files=json.dumps(["tests/pytorch/test_sanity.py"]),
+        )
+        self.assertEqual(plan["common_path_triggers"], ["tests/pytorch/test_sanity.py"])
+        self.assertTrue(all(p["reasons"] for p in plan["platforms"]))
+        self.assertIn("common path: tests/pytorch/test_sanity.py", plan["platforms"][0]["reasons"])
+        excluded = {(item["platform"], item["group"], item["reason"]) for item in plan["excluded"]}
+        self.assertIn(
+            ("cuda", "pytorch_mcore_integration", "no changed path matches paths_watch"), excluded
+        )
+        self.assertFalse(
+            any(group["group"] == "pytorch_mcore_integration" for group in plan["test_groups"])
+        )
+
+    def test_every_group_declares_evidence(self):
+        plan = self.run_planner("nightly")
+        evidence = {g["group"]: g["evidence"] for g in plan["test_groups"]}
+        self.assertEqual(evidence["preflight"], "exit_code")
+        self.assertEqual(evidence["pytorch_unittest"], "junit")
+        self.assertEqual(evidence["pytorch_mcore_integration"], "exit_code")
+
+    def test_matrix_entry_timeout_overrides_catalog(self):
+        plan = self.run_planner("nightly")
+        timeouts = {
+            (g["platform"], g["group"]): g["resources"]["timeout_minutes"]
+            for g in plan["test_groups"]
+        }
+        self.assertEqual(timeouts[("musa", "pytorch_unittest")], 120)
+        self.assertEqual(timeouts[("cuda", "pytorch_unittest")], 240)
+        self.assertEqual(timeouts[("ascend", "pytorch_unittest")], 90)
 
 
 if __name__ == "__main__":

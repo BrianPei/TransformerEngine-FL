@@ -75,6 +75,5 @@ integration_test_matrix:
 paths_watch:
   - .github/configs/musa.yml
   - .github/scripts/setup_musa.sh
-  - .github/workflows/all_tests_musa.yml
   - tests/plugin/backend/musa/
   - transformer_engine/plugin/core/backends/vendor/musa/

@@ -23,7 +23,7 @@ stages:
     default_level: L2
     default_risk: R1
   nightly:
-    entry_workflow: .github/workflows/nightly.yml
+    entry_workflow: .github/workflows/daily.yml (schedule, workflow_dispatch)
     selection: all
     default_level: L3
     default_risk: R3
@@ -31,12 +31,12 @@ stages:
   manual:
     # Requested runs keep the previous unit + integration default; callers
     # may request any level, and changed_files (if given) can only raise it.
-    entry_workflow: CLI only (dedicated requested workflow pending)
+    entry_workflow: .github/workflows/ci-requested.yml (/ci comment, workflow_dispatch)
     selection: requested
     default_level: L2
     default_risk: R1
   release:
-    entry_workflow: CLI only (release-acceptance workflow pending)
+    entry_workflow: .github/workflows/release-acceptance.yml (workflow_dispatch)
     selection: all
     default_level: L4
     default_risk: R4
@@ -96,15 +96,22 @@ resource_classes:
     exclusive: true
 
 # Catalog order is the ledger order used by plans and reports.
-# matrix: platform-config key holding executable entries for the group.
-# paths_watch: exact paths or "/"-terminated prefixes; {platform} expands to the
-# platform name and watch_platform_paths adds that platform's paths_watch.
+# matrix: platform-config key holding executable entries for the group. An
+# entry's timeout_minutes overrides the catalog timeout for that platform.
+# evidence: how a finished group proves it ran. junit requires at least one
+# non-skipped JUnit test case under XML_LOG_DIR; exit_code accepts exit 0 from
+# launchers that do not emit JUnit.
+# paths_watch: exact paths, globs, or "/"-terminated prefixes; {platform}
+# expands to the platform name. watch_platform_paths adds that platform's
+# paths_watch and the matrix entry path. A changed non-documentation path that
+# no in-level group watches selects every in-level group of that platform.
 # blocked: catalog-level reason; the group is reported, never executed.
 test_groups:
   - name: preflight
     kind: preflight
     level: L0
     required: true
+    evidence: exit_code
     resources: {class: shared_cpu, timeout_minutes: 90}
     paths_watch: []
   - name: pytorch_unittest
@@ -113,11 +120,13 @@ test_groups:
     matrix: unit_test_matrix
     required: true
     coverage: true
+    evidence: junit
     resources: {class: multi_device, timeout_minutes: 90}
     watch_platform_paths: true
     paths_watch:
       - transformer_engine/
       - tests/pytorch/
+      - tests/plugin/backend/{platform}/
       - qa/L0_pytorch_debug_unittest/
       - qa/L0_pytorch_unittest/
       - qa/L1_pytorch_distributed_unittest/
@@ -127,18 +136,23 @@ test_groups:
     level: L2
     matrix: integration_test_matrix
     required: true
+    # The MCore launcher reports through its exit code and writes no JUnit.
+    evidence: exit_code
     # qa/L1_pytorch_mcore_integration/test.sh launches --nproc_per_node=1.
     resources: {class: single_device, timeout_minutes: 30}
     watch_platform_paths: true
     paths_watch:
       - transformer_engine/
+      - tests/plugin/backend/{platform}/
       - qa/L1_pytorch_mcore_integration/
   - name: fa_versions
     kind: compat
     level: L3
     matrix: compat_test_matrix
     required: false
+    evidence: junit
     resources: {class: hopper_only, timeout_minutes: 240}
+    watch_platform_paths: true
     paths_watch:
       - qa/L3_pytorch_FA_versions_test/
       - transformer_engine/pytorch/attention/
@@ -179,7 +193,9 @@ test_groups:
     resources: {class: release_exclusive, timeout_minutes: 240}
     blocked: golden_baseline.json holds coverage thresholds only, not numerical goldens
 
-# Changed files raise the requested level and risk; unknown files escalate.
+# Changed files raise the requested level and risk. Each file takes the highest
+# level/risk among the rules it matches; a file matching no rule takes
+# unknown_level/unknown_risk. The plan takes the maximum over all files.
 # Documentation (docs/, *.md, *.rst) neither escalates nor selects platforms.
 risk_rules:
   version: v2

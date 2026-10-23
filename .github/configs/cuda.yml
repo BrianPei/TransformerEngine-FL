@@ -110,7 +110,6 @@ test_matrix:
 paths_watch:
   - .github/configs/cuda.yml
   - .github/scripts/setup_cuda.sh
-  - .github/workflows/all_tests_cuda.yml
   - tests/plugin/backend/cuda/
   - transformer_engine/plugin/core/backends/vendor/cuda/
   - .github/scripts/build_cuda_test_wheel.sh

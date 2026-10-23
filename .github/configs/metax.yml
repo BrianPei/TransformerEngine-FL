@@ -92,6 +92,5 @@ test_matrix:
 paths_watch:
   - .github/configs/metax.yml
   - .github/scripts/setup_metax.sh
-  - .github/workflows/all_tests_metax.yml
   - tests/plugin/backend/metax/
   - transformer_engine/plugin/core/backends/vendor/metax/

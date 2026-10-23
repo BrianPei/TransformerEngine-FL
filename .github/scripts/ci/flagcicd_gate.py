@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import subprocess
@@ -58,8 +59,6 @@ def cmd_slice(args: argparse.Namespace) -> int:
         print(f"ERROR: Config not found: {config_path}", file=sys.stderr)
         return 1
 
-    import hashlib
-
     actual_hash = hashlib.sha256(config_path.read_bytes()).hexdigest()
     if actual_hash != platform_entry["config_hash"]:
         print(
@@ -70,16 +69,16 @@ def cmd_slice(args: argparse.Namespace) -> int:
         return 1
 
     # Build matrices
+    preflight = []
     parallel = []
     serial = []
-    preflight_entry = None
 
     for group in plan["test_groups"]:
         if group["platform"] != platform:
             continue
 
         # Flatten exec into entry for compatibility with run_ci_test_group.py
-        exec_data = group.get("exec", {})
+        exec_data = group.get("exec") or {}
         entry = {
             "device": group["device"],
             "name": group["group"],
@@ -93,30 +92,26 @@ def cmd_slice(args: argparse.Namespace) -> int:
             "coverage": group.get("coverage", False),
             # Matrix entries historically omitted runner for shell launchers;
             # preserve that configuration format by defaulting to script.
-            "runner": exec_data.get("runner", "script") if exec_data else "script",
-            "path": exec_data.get("path") if exec_data else None,
-            "args": exec_data.get("args", []) if exec_data else [],
-            "env": exec_data.get("env", {}) if exec_data else {},
+            "runner": exec_data.get("runner", "script"),
+            "path": exec_data.get("path"),
+            "args": exec_data.get("args", []),
+            "env": exec_data.get("env", {}),
         }
 
-        if group["lane"] == "preflight":
-            if not preflight_entry:
-                preflight_entry = entry
-        elif group["lane"] == "parallel":
-            parallel.append(entry)
-        elif group["lane"] == "serial":
-            serial.append(entry)
+        lanes = {"preflight": preflight, "parallel": parallel, "serial": serial}
+        if group["lane"] not in lanes:
+            print(f"ERROR: Unknown lane {group['lane']} for {group['group']}", file=sys.stderr)
+            return 1
+        lanes[group["lane"]].append(entry)
 
     # Write outputs
     output = {
+        "preflight_matrix": json.dumps({"include": preflight}),
         "parallel_matrix": json.dumps({"include": parallel}),
         "serial_matrix": json.dumps({"include": serial}),
         "has_parallel": json.dumps(len(parallel) > 0),
         "has_serial": json.dumps(len(serial) > 0),
-        "preflight_selected": json.dumps(preflight_entry is not None),
-        "preflight_timeout": preflight_entry["timeout"] if preflight_entry else 90,
-        "preflight_device": preflight_entry["device"] if preflight_entry else "",
-        "preflight_name": preflight_entry["name"] if preflight_entry else "",
+        "preflight_selected": json.dumps(len(preflight) > 0),
         "coverage_active": json.dumps(
             any(g.get("coverage") for g in plan["test_groups"] if g["platform"] == platform)
         ),
@@ -137,6 +132,15 @@ def cmd_slice(args: argparse.Namespace) -> int:
     return 0
 
 
+def evidence_status(evidence: str, junit_dir: str | None) -> tuple[str, str | None]:
+    """Judge a group whose command exited 0 by its declared evidence type."""
+    if evidence == "junit":
+        return parse_junit_status(junit_dir)
+    if evidence == "exit_code":
+        return "passed", None
+    return "report_error", "evidence"
+
+
 def cmd_group_report(args: argparse.Namespace) -> int:
     """Generate group report from step outcomes and test results."""
     # Load inputs
@@ -151,6 +155,17 @@ def cmd_group_report(args: argparse.Namespace) -> int:
     device = args.device
     group = args.group
 
+    # The plan owns the evidence type, so a workflow cannot weaken the check.
+    planned = next(
+        (
+            g
+            for g in plan["test_groups"]
+            if (g["platform"], g["device"], g["group"]) == (platform, device, group)
+        ),
+        None,
+    )
+    evidence = planned.get("evidence") if planned else None
+
     # Determine status from steps.  Checkout and execute are mandatory for
     # every executable group; optional artifact/identity/setup steps are
     # present only when configured by the platform.
@@ -159,14 +174,17 @@ def cmd_group_report(args: argparse.Namespace) -> int:
     executed = False
 
     missing_steps = [name for name in ("checkout", "execute") if name not in steps]
-    if missing_steps:
+    if planned is None:
+        status = "report_error"
+        failure_stage = "plan"
+    elif missing_steps:
         status = "infra_error"
         failure_stage = "report"
 
     # Check step outcomes in order
     step_names = ["checkout", "artifact", "identity", "setup", "execute"]
     for step_name in step_names:
-        if status == "infra_error" and failure_stage == "report":
+        if failure_stage in ("plan", "report"):
             break
         step = steps.get(step_name, {})
         outcome = step.get("outcome", "")
@@ -183,8 +201,7 @@ def cmd_group_report(args: argparse.Namespace) -> int:
                         exit_code = int(Path(args.exit_code_file).read_text().strip())
                         executed = True
                         if exit_code == 0:
-                            # Parse junit to determine actual status
-                            status, failure_stage = parse_junit_status(args.junit_dir)
+                            status, failure_stage = evidence_status(evidence, args.junit_dir)
                         else:
                             status = "test_failed"
                             failure_stage = "test_execution"
@@ -207,8 +224,7 @@ def cmd_group_report(args: argparse.Namespace) -> int:
                 break
         elif outcome == "success" and step_name == "execute":
             executed = True
-            if args.junit_dir:
-                status, failure_stage = parse_junit_status(args.junit_dir)
+            status, failure_stage = evidence_status(evidence, args.junit_dir)
         elif step_name == "execute":
             status = "skipped"
             failure_stage = "execute"

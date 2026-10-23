@@ -54,5 +54,4 @@ coverage:
 paths_watch:
   - .github/configs/ppu.yml
   - .github/scripts/setup_ppu.sh
-  - .github/workflows/all_tests_ppu.yml
   - tests/plugin/backend/ppu/

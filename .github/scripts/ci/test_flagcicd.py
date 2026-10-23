@@ -9,7 +9,11 @@ Run: python -m unittest .github/scripts/ci/test_flagcicd.py
 from __future__ import annotations
 
 import argparse
+import hashlib
+import importlib.util
 import json
+import os
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
@@ -22,6 +26,69 @@ import flagcicd_contract as contract
 
 
 ROOT = Path(__file__).resolve().parents[3]
+SHA = "a" * 40
+
+
+def make_plan(platforms=(), test_groups=(), blocked=(), stage="pr"):
+    """Return a hash-valid plan with the fields the gate subcommands read."""
+    plan = {
+        "schema_version": contract.PLAN_SCHEMA,
+        "repository": "TransformerEngine-FL",
+        "stage": stage,
+        "selection": "affected",
+        "lint_only": False,
+        "source_sha": SHA,
+        "base_sha": None,
+        "test_level": "L2",
+        "risk_level": "R1",
+        "risk_rule_version": "v2",
+        "changed_files": {"count": 0, "documentation_only": False},
+        "common_path_triggers": [],
+        "platforms": list(platforms),
+        "test_groups": list(test_groups),
+        "excluded": [],
+        "blocked": list(blocked),
+        "reasons": [],
+        "coverage_policy": {"method": "absolute"},
+    }
+    plan["plan_hash"] = contract.compute_plan_hash(plan)
+    return plan
+
+
+def make_group(name, lane, platform="cuda", device="a100", evidence="junit", kind="unit"):
+    return {
+        "platform": platform,
+        "device": device,
+        "group": name,
+        "kind": kind,
+        "level": "L0" if lane == "preflight" else "L1",
+        "required": True,
+        "lane": lane,
+        "evidence": evidence,
+        "resources": {
+            "class": "single_device",
+            "devices": 0 if lane == "preflight" else (8 if lane == "serial" else 1),
+            "exclusive": lane == "serial",
+            "timeout_minutes": 90 if lane == "preflight" else 30,
+        },
+        "coverage": lane == "parallel",
+        "exec": None if lane == "preflight" else {"path": f"run_{name}.sh", "runner": "script"},
+    }
+
+
+def platform_report(plan, platform, **overrides):
+    report = {
+        "schema_version": contract.PLATFORM_REPORT_SCHEMA,
+        "repository": plan["repository"],
+        "stage": plan["stage"],
+        "plan_hash": plan["plan_hash"],
+        "source_sha": plan["source_sha"],
+        "platform": platform,
+        "status": "passed",
+        "errors": [],
+    }
+    report.update(overrides)
+    return report
 
 
 class ContractSchemaTests(unittest.TestCase):
@@ -207,35 +274,88 @@ class IdentityTests(unittest.TestCase):
 
 
 class GateSliceTests(unittest.TestCase):
-    """Test gate slice command for matrix generation."""
+    """cmd_slice partitions one platform's plan into lane matrices."""
 
-    def test_slice_requires_plan_environment(self):
-        """Test slice command requires FLAGCICD_PLAN environment variable."""
+    def run_slice(self, plan, config_text="device_types: [a100]\n"):
         with tempfile.TemporaryDirectory() as tmpdir:
-            plan_file = Path(tmpdir) / "plan.json"
-            plan_file.write_text(
-                json.dumps(
-                    {
-                        "schema_version": "flagcicd.plan/v1",
-                        "plan_hash": "x" * 64,
-                        "source_sha": "a" * 40,
-                        "stage": "pr",
-                        "platforms": ["cuda"],
-                        "test_groups": [],
-                    }
-                )
+            configs = Path(tmpdir, "configs")
+            configs.mkdir()
+            (configs / "cuda.yml").write_text(config_text)
+            output = Path(tmpdir, "github-output")
+            output.write_text("")
+            args = argparse.Namespace(platform="cuda", configs_dir=str(configs), github_output=True)
+            head = Mock(stdout=SHA + "\n")
+            env = {"FLAGCICD_PLAN": json.dumps(plan), "GITHUB_OUTPUT": str(output)}
+            with patch.object(gate.subprocess, "run", return_value=head), patch.dict(
+                gate.os.environ, env
+            ):
+                code = gate.cmd_slice(args)
+            values = dict(
+                line.split("=", 1) for line in output.read_text().splitlines() if "=" in line
             )
+        return code, values
 
-            # Without FLAGCICD_PLAN env var, should error
-            args = Mock(plan=str(plan_file), platform="cuda")
+    def plan_for(self, groups, config_text="device_types: [a100]\n"):
+        entry = {
+            "name": "cuda",
+            "config_hash": hashlib.sha256(config_text.encode()).hexdigest(),
+            "coverage_required": True,
+        }
+        other = make_group("pytorch_unittest", "parallel", platform="ascend", device="910b")
+        return make_plan(platforms=[entry], test_groups=[*groups, other])
 
-            # Test would require subprocess or environment setup
-            # Skip detailed matrix generation test
-            self.assertTrue(plan_file.exists())
+    def test_lanes_are_partitioned_per_platform(self):
+        plan = self.plan_for(
+            [
+                make_group("preflight", "preflight"),
+                make_group("pytorch_unittest", "parallel"),
+                make_group("pytorch_mcore_integration", "serial", evidence="exit_code"),
+            ]
+        )
+        code, out = self.run_slice(plan)
+        self.assertEqual(code, 0)
+        names = {
+            lane: [entry["name"] for entry in json.loads(out[f"{lane}_matrix"])["include"]]
+            for lane in ("preflight", "parallel", "serial")
+        }
+        self.assertEqual(
+            names,
+            {
+                "preflight": ["preflight"],
+                "parallel": ["pytorch_unittest"],
+                "serial": ["pytorch_mcore_integration"],
+            },
+        )
+        self.assertEqual(
+            (out["has_parallel"], out["has_serial"], out["preflight_selected"]),
+            ("true", "true", "true"),
+        )
+        self.assertEqual((out["coverage_active"], out["coverage_required"]), ("true", "true"))
+        preflight = json.loads(out["preflight_matrix"])["include"][0]
+        self.assertEqual((preflight["device"], preflight["timeout"]), ("a100", 90))
+        serial = json.loads(out["serial_matrix"])["include"][0]
+        self.assertEqual(
+            (serial["path"], serial["devices"]), ("run_pytorch_mcore_integration.sh", 8)
+        )
+
+    def test_empty_lanes_report_false(self):
+        code, out = self.run_slice(self.plan_for([make_group("preflight", "preflight")]))
+        self.assertEqual(code, 0)
+        self.assertEqual((out["has_parallel"], out["has_serial"]), ("false", "false"))
+        self.assertEqual(json.loads(out["parallel_matrix"]), {"include": []})
+
+    def test_unknown_lane_fails(self):
+        code, _ = self.run_slice(self.plan_for([make_group("probe", "fast")]))
+        self.assertEqual(code, 1)
+
+    def test_config_hash_mismatch_fails(self):
+        plan = self.plan_for([make_group("preflight", "preflight")])
+        code, _ = self.run_slice(plan, config_text="device_types: [h100]\n")
+        self.assertEqual(code, 1)
 
 
 class GroupReportEvidenceTests(unittest.TestCase):
-    """Test that a successful command still has test-result evidence."""
+    """A group's declared evidence decides how a zero exit code is judged."""
 
     def test_missing_junit_is_not_reported_as_passed(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -246,6 +366,57 @@ class GroupReportEvidenceTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmpdir:
             status, failure_stage = gate.parse_junit_status(tmpdir)
         self.assertEqual((status, failure_stage), ("skipped", "no_tests_collected"))
+
+    def report(self, group, evidence, outcome="success", exit_code="0", plan_group=None):
+        plan = make_plan(test_groups=[plan_group or make_group(group, "serial", evidence=evidence)])
+        steps = {"checkout": {"outcome": "success"}, "execute": {"outcome": outcome}}
+        with tempfile.TemporaryDirectory() as tmpdir:
+            exit_file = Path(tmpdir, "exit_code")
+            exit_file.write_text(exit_code)
+            junit = Path(tmpdir, "junit")
+            junit.mkdir()
+            output = Path(tmpdir, "group-report.json")
+            args = argparse.Namespace(
+                platform="cuda",
+                device="a100",
+                group=group,
+                kind="integration",
+                level="L2",
+                required=True,
+                exit_code_file=exit_file,
+                junit_dir=str(junit),
+                duration="5",
+                output=output,
+            )
+            env = {"FLAGCICD_PLAN": json.dumps(plan), "FLAGCICD_STEPS": json.dumps(steps)}
+            with patch.dict(gate.os.environ, env):
+                self.assertEqual(gate.cmd_group_report(args), 0)
+            return json.loads(output.read_text())
+
+    def test_exit_code_group_passes_without_junit(self):
+        report = self.report("pytorch_mcore_integration", "exit_code")
+        self.assertEqual((report["status"], report["executed"]), ("passed", True))
+
+    def test_junit_group_without_tests_is_skipped(self):
+        report = self.report("pytorch_unittest", "junit")
+        self.assertEqual(
+            (report["status"], report["failure_stage"]), ("skipped", "no_tests_collected")
+        )
+
+    def test_nonzero_exit_fails_regardless_of_evidence(self):
+        report = self.report("pytorch_mcore_integration", "exit_code", "failure", "1")
+        self.assertEqual(
+            (report["status"], report["failure_stage"]), ("test_failed", "test_execution")
+        )
+
+    def test_group_missing_from_plan_is_report_error(self):
+        other = make_group("pytorch_unittest", "parallel")
+        report = self.report("unplanned", "exit_code", plan_group=other)
+        self.assertEqual((report["status"], report["failure_stage"]), ("report_error", "plan"))
+
+    def test_unknown_evidence_is_report_error(self):
+        report = self.report("pytorch_unittest", "stdout")
+        self.assertEqual((report["status"], report["failure_stage"]), ("report_error", "evidence"))
 
 
 class GatePlatformReportTests(unittest.TestCase):
@@ -292,41 +463,137 @@ class GatePlatformReportTests(unittest.TestCase):
             report = json.loads(output.read_text())
             self.assertTrue(any("coverage" in error.lower() for error in report["errors"]))
 
-    def test_platform_report_structure(self):
-        """Test platform report has correct structure."""
-        # Basic structure validation without full workflow execution
-        report = {
-            "schema_version": contract.PLATFORM_REPORT_SCHEMA,
-            "plan_hash": "x" * 64,
-            "source_sha": "a" * 40,
-            "platform": "cuda",
-            "groups": [],
-            "errors": [],
-        }
 
-        self.assertEqual(report["schema_version"], contract.PLATFORM_REPORT_SCHEMA)
-        self.assertEqual(report["platform"], "cuda")
-        self.assertIsInstance(report["groups"], list)
-        self.assertIsInstance(report["errors"], list)
+class GateTests(unittest.TestCase):
+    """cmd_gate fails closed on every report/plan inconsistency."""
+
+    def run_gate(self, plan, reports, pipeline="success"):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            reports_dir = Path(tmpdir, "reports")
+            for index, report in enumerate(reports):
+                path = reports_dir / f"flagcicd-platform-{index}" / "platform-report.json"
+                path.parent.mkdir(parents=True)
+                path.write_text(json.dumps(report))
+            output = Path(tmpdir, "gate.json")
+            args = argparse.Namespace(
+                plan_job="plan",
+                pipeline_job="platform-pipeline",
+                reports_dir=reports_dir,
+                output=output,
+            )
+            needs = {"plan": {"result": "success"}, "platform-pipeline": {"result": pipeline}}
+            env = {"FLAGCICD_PLAN": json.dumps(plan), "FLAGCICD_NEEDS": json.dumps(needs)}
+            with patch.dict(gate.os.environ, env):
+                code = gate.cmd_gate(args)
+            return code, json.loads(output.read_text())
+
+    def setUp(self):
+        self.plan = make_plan(platforms=[{"name": "cuda"}, {"name": "ascend"}])
+
+    def test_all_reports_pass(self):
+        reports = [platform_report(self.plan, "cuda"), platform_report(self.plan, "ascend")]
+        code, summary = self.run_gate(self.plan, reports)
+        self.assertEqual((code, summary["status"], summary["errors"]), (0, "passed", []))
+
+    def test_missing_platform_report_fails(self):
+        code, summary = self.run_gate(self.plan, [platform_report(self.plan, "cuda")])
+        self.assertEqual(code, 1)
+        self.assertIn("Missing platform report: ascend", summary["errors"])
+
+    def test_duplicate_platform_report_fails(self):
+        reports = [
+            platform_report(self.plan, "cuda"),
+            platform_report(self.plan, "cuda"),
+            platform_report(self.plan, "ascend"),
+        ]
+        code, summary = self.run_gate(self.plan, reports)
+        self.assertEqual(code, 1)
+        self.assertIn("Duplicate platform reports: cuda", summary["errors"])
+
+    def test_plan_hash_mismatch_fails(self):
+        reports = [
+            platform_report(self.plan, "cuda", plan_hash="0" * 64),
+            platform_report(self.plan, "ascend"),
+        ]
+        code, summary = self.run_gate(self.plan, reports)
+        self.assertEqual(code, 1)
+        self.assertIn("Platform cuda: plan_hash mismatch", summary["errors"])
+
+    def test_required_blocked_group_fails(self):
+        blocked = [{"platform": "cuda", "group": "model_validation", "required": True}]
+        plan = make_plan(platforms=[{"name": "cuda"}], blocked=blocked, stage="release")
+        code, summary = self.run_gate(plan, [platform_report(plan, "cuda")])
+        self.assertEqual(code, 1)
+        self.assertTrue(any("Required groups are blocked" in e for e in summary["errors"]))
+
+    def test_optional_blocked_group_does_not_fail(self):
+        blocked = [{"platform": "cuda", "group": "pytorch_benchmark", "required": False}]
+        plan = make_plan(platforms=[{"name": "cuda"}], blocked=blocked)
+        code, _ = self.run_gate(plan, [platform_report(plan, "cuda")])
+        self.assertEqual(code, 0)
+
+    def test_failed_pipeline_job_fails(self):
+        reports = [platform_report(self.plan, "cuda"), platform_report(self.plan, "ascend")]
+        code, summary = self.run_gate(self.plan, reports, pipeline="failure")
+        self.assertEqual(code, 1)
+        self.assertIn("Pipeline job must be success", summary["errors"])
 
 
-class GateValidationTests(unittest.TestCase):
-    """Test top-level gate validation logic."""
+class RegressionTests(unittest.TestCase):
+    """flagcicd_regression accepts the raw coverage json the workflow writes."""
 
-    def test_gate_structure(self):
-        """Test gate has correct structure."""
-        # Basic structure validation
-        gate_data = {
-            "schema_version": contract.GATE_SCHEMA,
-            "plan_hash": "x" * 64,
-            "source_sha": "a" * 40,
-            "verdict": "pass",
-            "platforms": ["cuda", "ascend"],
-        }
+    @classmethod
+    def setUpClass(cls):
+        spec = importlib.util.spec_from_file_location(
+            "flagcicd_regression", ROOT / ".github/scripts/flagcicd_regression.py"
+        )
+        cls.regression = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(cls.regression)
 
-        self.assertEqual(gate_data["schema_version"], contract.GATE_SCHEMA)
-        self.assertIn(gate_data["verdict"], ["pass", "fail"])
-        self.assertIsInstance(gate_data["platforms"], list)
+    def run_cli(self, current, *extra):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            current_path = Path(tmpdir, "current.json")
+            current_path.write_text(json.dumps({"totals": {"percent_covered": current}}))
+            args = []
+            for flag, value in zip(extra[::2], extra[1::2]):
+                path = Path(tmpdir, flag.strip("-") + ".json")
+                path.write_text(json.dumps(value))
+                args += [flag, str(path)]
+            output = Path(tmpdir, "verdict.json")
+            result = subprocess.run(
+                [
+                    "python3",
+                    str(ROOT / ".github/scripts/flagcicd_regression.py"),
+                    "--current",
+                    str(current_path),
+                    *args,
+                    "--output",
+                    str(output),
+                ],
+                capture_output=True,
+                text=True,
+            )
+            return result.returncode, json.loads(output.read_text())["result"]
+
+    def test_raw_coverage_json_against_raw_baseline(self):
+        code, result = self.run_cli(70.0, "--baseline", {"totals": {"percent_covered": 75.0}})
+        self.assertEqual((code, result["status"]), (1, "regression"))
+        code, result = self.run_cli(74.0, "--baseline", {"totals": {"percent_covered": 75.0}})
+        self.assertEqual((code, result["status"]), (0, "acceptable"))
+
+    def test_zero_variance_history_flags_any_drop(self):
+        code, result = self.run_cli(79.9, "--historical", [80.0] * 8)
+        self.assertEqual((code, result["status"]), (1, "outlier_below"))
+        self.assertIn("zero variance", result["message"])
+        code, result = self.run_cli(80.0, "--historical", [80.0] * 8)
+        self.assertEqual((code, result["status"]), (0, "within_bounds"))
+
+    def test_unknown_schema_is_rejected(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir, "report.json")
+            path.write_text(json.dumps({"schema_version": "other/v1"}))
+            with self.assertRaises(ValueError):
+                self.regression.load_report(path)
 
 
 if __name__ == "__main__":

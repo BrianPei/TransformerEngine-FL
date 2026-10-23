@@ -49,7 +49,7 @@ runs:
         echo "status=$STATUS" >> "$GITHUB_OUTPUT"
 
     - name: Upload gate summary
-      if: always()
+      if: ${{ !cancelled() }}
       uses: actions/upload-artifact@v4
       with:
         name: flagcicd-gate-summary
