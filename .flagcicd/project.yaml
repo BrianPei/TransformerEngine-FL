@@ -31,12 +31,12 @@ stages:
   manual:
     # Requested runs keep the previous unit + integration default; callers
     # may request any level, and changed_files (if given) can only raise it.
-    entry_workflow: .github/workflows/flagcicd-entry.yml, ci-requested.yml, all_tests_<platform>.yml
+    entry_workflow: CLI only (dedicated requested workflow pending)
     selection: requested
     default_level: L2
     default_risk: R1
   release:
-    entry_workflow: .github/workflows/release-acceptance.yml
+    entry_workflow: CLI only (release-acceptance workflow pending)
     selection: all
     default_level: L4
     default_risk: R4
@@ -203,6 +203,12 @@ risk_rules:
         - transformer_engine/**/cuda/**
       minimum_level: L3
       risk: R3
+    - id: mcore-integration
+      paths:
+        - qa/L1_pytorch_mcore_integration/**
+        - tests/plugin/backend/*/run_integration_tests.sh
+      minimum_level: L2
+      risk: R2
     - id: numerical-and-performance
       paths:
         - tests/pytorch/**

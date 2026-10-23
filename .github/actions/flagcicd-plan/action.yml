@@ -84,6 +84,7 @@ runs:
           --stage "$STAGE"
           --source-root "$SOURCE_ROOT"
           --requested-level "$REQUESTED_LEVEL"
+          --output plan.json
           --github-output
         )
 

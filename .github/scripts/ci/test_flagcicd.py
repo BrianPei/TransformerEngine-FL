@@ -234,8 +234,63 @@ class GateSliceTests(unittest.TestCase):
             self.assertTrue(plan_file.exists())
 
 
+class GroupReportEvidenceTests(unittest.TestCase):
+    """Test that a successful command still has test-result evidence."""
+
+    def test_missing_junit_is_not_reported_as_passed(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            status, failure_stage = gate.parse_junit_status(str(Path(tmpdir) / "missing"))
+        self.assertEqual((status, failure_stage), ("report_error", "junit_missing"))
+
+    def test_empty_junit_directory_is_skipped(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            status, failure_stage = gate.parse_junit_status(tmpdir)
+        self.assertEqual((status, failure_stage), ("skipped", "no_tests_collected"))
+
+
 class GatePlatformReportTests(unittest.TestCase):
     """Test gate platform-report validation logic."""
+
+    def test_required_coverage_cannot_be_skipped(self):
+        plan = {
+            "schema_version": contract.PLAN_SCHEMA,
+            "repository": "TransformerEngine-FL",
+            "stage": "pr",
+            "selection": "affected",
+            "lint_only": False,
+            "source_sha": "a" * 40,
+            "base_sha": None,
+            "test_level": "L1",
+            "risk_level": "R1",
+            "risk_rule_version": "v1",
+            "changed_files": {"count": 0, "documentation_only": False},
+            "common_path_triggers": [],
+            "platforms": [
+                {"name": "ascend", "coverage_required": True, "device_types": ["ascend"]}
+            ],
+            "test_groups": [],
+            "excluded": [],
+            "blocked": [],
+            "reasons": [],
+            "coverage_policy": {"method": "absolute"},
+        }
+        plan["plan_hash"] = contract.compute_plan_hash(plan)
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            output = Path(tmpdir) / "platform-report.json"
+            args = argparse.Namespace(
+                platform="ascend",
+                reports_dir=Path(tmpdir),
+                coverage_result="skipped",
+                coverage_required=True,
+                output=output,
+            )
+            with patch.dict(
+                gate.os.environ, {"FLAGCICD_PLAN": contract.canonical_json(plan)}, clear=False
+            ):
+                self.assertEqual(gate.cmd_platform(args), 1)
+            report = json.loads(output.read_text())
+            self.assertTrue(any("coverage" in error.lower() for error in report["errors"]))
 
     def test_platform_report_structure(self):
         """Test platform report has correct structure."""

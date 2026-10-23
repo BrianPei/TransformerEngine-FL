@@ -83,6 +83,7 @@ jobs:
           /usr/bin/git config --system --unset-all credential.helper 2>/dev/null || true
 
       - name: Checkout source code
+        id: checkout
         uses: actions/checkout@v4
         with:
           ref: ${{ inputs.checkout_ref }}
@@ -123,6 +124,7 @@ jobs:
           TE_TEST_MAX_RETRIES: '2'
         run: |
           set -euo pipefail
+          echo "started_at=$(date +%s)" >> "$GITHUB_OUTPUT"
           export TE_PATH="$GITHUB_WORKSPACE"
 
           # Set XML_LOG_DIR for junit output
@@ -206,6 +208,7 @@ jobs:
         with:
           name: coverage-fragment-${{ inputs.platform }}-${{ matrix.device }}-${{ matrix.name }}
           path: .coverage.*
+          include-hidden-files: true
           if-no-files-found: warn
           retention-days: 1
 

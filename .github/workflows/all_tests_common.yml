@@ -55,6 +55,7 @@ jobs:
       preflight_device: ${{ steps.slice.outputs.preflight_device }}
       preflight_name: ${{ steps.slice.outputs.preflight_name }}
       coverage_active: ${{ steps.slice.outputs.coverage_active }}
+      coverage_required: ${{ steps.slice.outputs.coverage_required }}
       stage: ${{ steps.slice.outputs.stage }}
       test_level: ${{ steps.slice.outputs.test_level }}
       plan_hash: ${{ steps.slice.outputs.plan_hash }}
@@ -78,7 +79,9 @@ jobs:
           FLAGCICD_PLAN: ${{ inputs.plan }}
           PLATFORM: ${{ inputs.platform }}
         run: |
+          set -euo pipefail
           CONFIG_FILE=".github/configs/${PLATFORM}.yml"
+          test -f "$CONFIG_FILE"
 
           # Read platform config
           CI_IMAGE=$(yq '.ci_image' "$CONFIG_FILE")
@@ -162,6 +165,7 @@ jobs:
           /usr/bin/git config --global --unset-all credential.helper 2>/dev/null || true
 
       - uses: actions/checkout@v4
+        id: checkout
         with:
           ref: ${{ inputs.checkout_ref }}
 
@@ -378,7 +382,7 @@ jobs:
         shell: bash
         env:
           COVERAGE_PYTHON: ${{ needs.checkout_and_config.outputs.coverage_python }}
-          COVERAGE_REQUIRED: ${{ needs.checkout_and_config.outputs.coverage_active }}
+          COVERAGE_REQUIRED: ${{ needs.checkout_and_config.outputs.coverage_required }}
         run: |
           mkdir -p coverage-raw
           count=0
@@ -392,13 +396,13 @@ jobs:
             echo "No coverage fragments found"
             echo "aggregated=false" >> "$GITHUB_OUTPUT"
 
-            # Warn if coverage was expected but not collected
             if [ "$COVERAGE_REQUIRED" = "true" ]; then
-              echo "WARNING: Coverage was expected but no fragments collected"
+              echo "ERROR: Coverage was required but no fragments were collected" >&2
               echo "This may indicate:"
               echo "  - Tests failed before coverage collection"
               echo "  - matrix.coverage was false for all test groups"
               echo "  - Coverage upload steps failed"
+              exit 1
             fi
             exit 0
           fi
@@ -419,7 +423,7 @@ jobs:
         run: |
           echo "Fetching baseline from main branch..."
           baseline_dir="$RUNNER_TEMP/baseline"
-          artifact_name="flagcicd-report-${{ inputs.platform }}-${{ matrix.device }}-pytorch-unittest"
+          artifact_name="coverage-${{ inputs.platform }}-${{ matrix.device }}-pytorch-unittest"
 
           set +e
           python3 .github/scripts/fetch_flagcicd_baseline.py \
@@ -474,11 +478,16 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          echo "Fetching last 14 nightly coverage reports..."
+          echo "Fetching historical nightly coverage reports..."
           history_dir="$RUNNER_TEMP/coverage-history"
           mkdir -p "$history_dir"
 
           artifact_name="coverage-${{ inputs.platform }}-${{ matrix.device }}-pytorch-unittest"
+          export artifact_name
+          history_window=$(python3 -c "import json; print(json.load(open('.flagcicd/golden_baseline.json'))['rules']['statistical']['window_runs'])")
+          minimum_history=$(python3 -c "import json; print(json.load(open('.flagcicd/golden_baseline.json'))['rules']['statistical']['minimum_history'])")
+          export history_window minimum_history
+          echo "Using history window=${history_window}, minimum=${minimum_history}"
 
           # Fetch last 14 nightly runs
           python3 << 'FETCH_EOF'
@@ -504,7 +513,8 @@ jobs:
               sys.exit(1)
 
           runs = json.loads(result.stdout)
-          successful = [r for r in runs if r.get("status") == "completed" and r.get("conclusion") == "success"][:14]
+          window = int(os.environ.get("history_window", "14"))
+          successful = [r for r in runs if r.get("status") == "completed" and r.get("conclusion") == "success"][:window]
 
           print(f"Found {len(successful)} successful nightly runs")
 
@@ -535,13 +545,13 @@ jobs:
           # Calculate 3-sigma threshold
           coverage_files=$(ls -1 "$history_dir"/coverage-*.json 2>/dev/null | wc -l)
 
-          if [ "$coverage_files" -lt 5 ]; then
-            echo "Not enough history (need 5+, have $coverage_files), skipping 3-sigma check"
+          if [ "$coverage_files" -lt "$minimum_history" ]; then
+            echo "Not enough history (need ${minimum_history}+, have $coverage_files), skipping 3-sigma check"
             exit 0
           fi
 
           # Calculate mean and stddev
-          python3 << 'SIGMA_EOF'
+          python3 - "$history_dir" "coverage-${{ inputs.platform }}-${{ matrix.device }}-pytorch-unittest.json" << 'SIGMA_EOF'
           import json, sys, statistics
           from pathlib import Path
 
@@ -557,7 +567,8 @@ jobs:
               except (OSError, KeyError, json.JSONDecodeError):
                   continue
 
-          if len(historical) < 5:
+          minimum_history = int(__import__("os").environ.get("minimum_history", "8"))
+          if len(historical) < minimum_history:
               print(f"ERROR: Not enough valid historical data: {len(historical)}")
               sys.exit(0)
 
@@ -584,7 +595,7 @@ jobs:
               sys.exit(1)
           else:
               print(f"PASS: Coverage within 3-sigma range")
-          SIGMA_EOF "$history_dir" "coverage-${{ inputs.platform }}-${{ matrix.device }}-pytorch-unittest.json"
+          SIGMA_EOF
 
       - name: Upload coverage report
         if: steps.aggregate.outputs.aggregated == 'true'
@@ -673,11 +684,20 @@ jobs:
         shell: bash
         env:
           FLAGCICD_PLAN: ${{ inputs.plan }}
+          COVERAGE_RESULT: ${{ needs.coverage.result }}
+          COVERAGE_REQUIRED: ${{ needs.checkout_and_config.outputs.coverage_required }}
         run: |
-          python3 .github/scripts/ci/flagcicd_gate.py platform \
+          PLATFORM_ARGS=(
+            platform
             --platform "${{ inputs.platform }}" \
             --reports-dir group-reports \
-            --output platform-report.json
+            --output platform-report.json \
+            --coverage-result "$COVERAGE_RESULT"
+          )
+          if [ "$COVERAGE_REQUIRED" = "true" ]; then
+            PLATFORM_ARGS+=(--coverage-required)
+          fi
+          python3 .github/scripts/ci/flagcicd_gate.py "${PLATFORM_ARGS[@]}"
 
       - name: Upload platform report
         if: always()

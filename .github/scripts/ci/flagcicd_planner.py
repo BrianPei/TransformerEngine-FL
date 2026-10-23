@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""FlagCICD plan generator (simplified initial implementation)."""
+"""FlagCICD plan generator."""
 
 from __future__ import annotations
 
@@ -17,6 +17,7 @@ import generate_matrix as gm
 import flagcicd_contract as contract
 
 LEVEL_ORDER = {"L0": 0, "L1": 1, "L2": 2, "L3": 3, "L4": 4}
+RISK_ORDER = {"R0": 0, "R1": 1, "R2": 2, "R3": 3, "R4": 4}
 
 
 def load_project(path: Path) -> dict[str, Any]:
@@ -92,10 +93,14 @@ def match_risk_rules(changed: list[str], risk_rules: dict) -> tuple[str, str]:
         if matched:
             rule_level = rule.get("minimum_level", "L0")
             rule_risk = rule.get("risk", "R0")
+            if rule_level not in LEVEL_ORDER:
+                raise ValueError(f"Unknown risk-rule level: {rule_level}")
+            if rule_risk not in RISK_ORDER:
+                raise ValueError(f"Unknown risk-rule risk: {rule_risk}")
 
-            if rule_level > max_level:
+            if LEVEL_ORDER[rule_level] > LEVEL_ORDER[max_level]:
                 max_level = rule_level
-            if rule_risk > max_risk:
+            if RISK_ORDER[rule_risk] > RISK_ORDER[max_risk]:
                 max_risk = rule_risk
 
     # If no rules matched, use unknown defaults
@@ -118,21 +123,25 @@ def resolve_level(
 
     # Start with stage default
     test_level = stage_def["default_level"] if requested == "auto" else requested
+    if test_level not in LEVEL_ORDER:
+        raise ValueError(f"Unknown requested test level: {requested}")
     risk_level = stage_def.get("default_risk", "R1")
 
     # Apply risk rules
     if changed and "risk_rules" in project:
         rule_level, rule_risk = match_risk_rules(changed, project["risk_rules"])
-        if rule_level > test_level:
+        if LEVEL_ORDER[rule_level] > LEVEL_ORDER[test_level]:
             test_level = rule_level
-        if rule_risk > risk_level:
+        if RISK_ORDER[rule_risk] > RISK_ORDER[risk_level]:
             risk_level = rule_risk
 
     # Label-based escalation
     for label in labels:
         if label.startswith("level:"):
             requested_level = label.split(":", 1)[1].upper()
-            if requested_level > test_level:
+            if requested_level not in LEVEL_ORDER:
+                raise ValueError(f"Unknown level label: {label}")
+            if LEVEL_ORDER[requested_level] > LEVEL_ORDER[test_level]:
                 test_level = requested_level
 
     return test_level, risk_level
@@ -183,6 +192,7 @@ def build_test_groups(
     selected_platforms: list[str],
     test_level: str,
     changed: list[str],
+    blocked: list[dict[str, Any]] | None = None,
 ) -> list[dict]:
     """Build test_groups list from catalog, filtered by level and paths_watch."""
     catalog = project["test_groups"]
@@ -266,8 +276,23 @@ def build_test_groups(
             # Determine if blocked
             blocked_reason = catalog_blocked or exec_blocked
 
-            # Skip blocked groups (don't add to execution plan)
+            # Keep blocked groups visible in the plan.  They are not executable
+            # matrix entries, but silently dropping them makes a release plan
+            # look complete and prevents the gate from explaining the gap.
             if blocked_reason:
+                if blocked is not None:
+                    for device in device_types:
+                        blocked.append(
+                            {
+                                "platform": platform,
+                                "device": device,
+                                "group": name,
+                                "kind": group_def["kind"],
+                                "level": group_level,
+                                "required": group_def.get("required", False),
+                                "reason": str(blocked_reason),
+                            }
+                        )
                 continue
 
             # Resolve resources
@@ -295,7 +320,10 @@ def build_test_groups(
                             "exclusive": exclusive,
                             "timeout_minutes": timeout,
                         },
-                        "coverage": group_def.get("coverage", False),
+                        "coverage": bool(
+                            group_def.get("coverage", False)
+                            and platform_cfg.get("coverage", {}).get("enabled", False)
+                        ),
                         "exec": exec_entry,
                     }
                 )
@@ -377,6 +405,11 @@ def build_plan(args: argparse.Namespace) -> dict[str, Any]:
     test_level, risk_level = resolve_level(
         stage_def, args.requested_level, project, changed, labels
     )
+    if args.requested_risk != "auto":
+        if args.requested_risk not in RISK_ORDER or args.requested_risk == "R0":
+            raise ValueError(f"Unknown requested risk: {args.requested_risk}")
+        if RISK_ORDER[args.requested_risk] > RISK_ORDER[risk_level]:
+            risk_level = args.requested_risk
 
     # Build platform entries
     platform_entries = []
@@ -389,16 +422,35 @@ def build_plan(args: argparse.Namespace) -> dict[str, Any]:
                 "config_hash": p["config_hash"],
                 "device_types": p["config"].get("device_types", []),
                 "nproc_per_node": p["config"].get("nproc_per_node", 1),
+                "coverage_enabled": bool(
+                    p["config"].get("coverage", {}).get("enabled", False)
+                ),
+                "coverage_required": bool(
+                    p["config"].get("coverage", {}).get("required", False)
+                ),
                 "reasons": ["selected"],
             }
         )
 
     # Build test groups
+    blocked: list[dict[str, Any]] = []
     test_groups = (
-        build_test_groups(project, platforms, selected, test_level, changed)
+        build_test_groups(project, platforms, selected, test_level, changed, blocked)
         if not lint_only
         else []
     )
+
+    if stage_name == "pr":
+        coverage_policy = {"method": "absolute"}
+    elif stage_name == "nightly":
+        coverage_policy = {
+            "method": "statistical",
+            "sigma": 3.0,
+            "window_runs": 14,
+            "minimum_history": 8,
+        }
+    else:
+        coverage_policy = {"method": "none"}
 
     # Build plan
     plan = {
@@ -422,9 +474,9 @@ def build_plan(args: argparse.Namespace) -> dict[str, Any]:
         "platforms": platform_entries,
         "test_groups": test_groups,
         "excluded": [],
-        "blocked": [],
+        "blocked": blocked,
         "reasons": [f"{stage_name} stage with {len(selected)} platforms, level {test_level}"],
-        "coverage_policy": {"method": "absolute" if stage_name == "pr" else "none"},
+        "coverage_policy": coverage_policy,
     }
 
     # Compute plan hash

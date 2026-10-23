@@ -118,6 +118,7 @@ def cmd_slice(args: argparse.Namespace) -> int:
         "coverage_active": json.dumps(
             any(g.get("coverage") for g in plan["test_groups"] if g["platform"] == platform)
         ),
+        "coverage_required": json.dumps(bool(platform_entry.get("coverage_required", False))),
         "stage": plan["stage"],
         "test_level": plan["test_level"],
         "plan_hash": plan["plan_hash"],
@@ -148,14 +149,23 @@ def cmd_group_report(args: argparse.Namespace) -> int:
     device = args.device
     group = args.group
 
-    # Determine status from steps
+    # Determine status from steps.  Checkout and execute are mandatory for
+    # every executable group; optional artifact/identity/setup steps are
+    # present only when configured by the platform.
     status = "passed"
     failure_stage = None
     executed = False
 
+    missing_steps = [name for name in ("checkout", "execute") if name not in steps]
+    if missing_steps:
+        status = "infra_error"
+        failure_stage = "report"
+
     # Check step outcomes in order
     step_names = ["checkout", "artifact", "identity", "setup", "execute"]
     for step_name in step_names:
+        if status == "infra_error" and failure_stage == "report":
+            break
         step = steps.get(step_name, {})
         outcome = step.get("outcome", "")
 
@@ -195,6 +205,11 @@ def cmd_group_report(args: argparse.Namespace) -> int:
                 break
         elif outcome == "success" and step_name == "execute":
             executed = True
+            if args.junit_dir:
+                status, failure_stage = parse_junit_status(args.junit_dir)
+        elif step_name == "execute":
+            status = "skipped"
+            failure_stage = "execute"
 
     # Build report
     report = {
@@ -226,7 +241,7 @@ def cmd_group_report(args: argparse.Namespace) -> int:
 def parse_junit_status(junit_dir: str | None) -> tuple[str, str | None]:
     """Parse junit XML files, return (status, failure_stage)."""
     if not junit_dir or not Path(junit_dir).exists():
-        return "passed", None
+        return "report_error", "junit_missing"
 
     total_tests = 0
     total_failures = 0
@@ -250,7 +265,7 @@ def parse_junit_status(junit_dir: str | None) -> tuple[str, str | None]:
         except (ET.ParseError, OSError, ValueError):
             has_corrupt = True
 
-    if has_corrupt and total_tests == 0:
+    if has_corrupt:
         return "report_error", "junit_parsing"
 
     if total_tests == 0:
@@ -305,7 +320,22 @@ def cmd_platform(args: argparse.Namespace) -> int:
 
     # Validate reports
     errors = []
-    actual_keys = {(r["device"], r["group"]) for r in group_reports}
+    if args.coverage_required and args.coverage_result != "success":
+        errors.append(
+            "Required coverage job did not succeed: "
+            f"{args.coverage_result or 'unknown'}"
+        )
+    actual_keys = set()
+    malformed = []
+    for report in group_reports:
+        device = report.get("device")
+        group = report.get("group")
+        if not isinstance(device, str) or not isinstance(group, str) or not device or not group:
+            malformed.append(report)
+            continue
+        actual_keys.add((device, group))
+    if malformed:
+        errors.append(f"Malformed group reports: {len(malformed)}")
     expected_keys = set(expected)
 
     # If lint_only or no groups expected, this is valid
@@ -320,9 +350,9 @@ def cmd_platform(args: argparse.Namespace) -> int:
         missing = expected_keys - actual_keys
         unexpected = actual_keys - expected_keys
         duplicates = [
-            k
-            for k in actual_keys
-            if sum(1 for r in group_reports if (r["device"], r["group"]) == k) > 1
+            key
+            for key in actual_keys
+            if sum(1 for r in group_reports if (r.get("device"), r.get("group")) == key) > 1
         ]
 
         if missing:
@@ -370,14 +400,21 @@ def cmd_platform(args: argparse.Namespace) -> int:
     required_failed = []
     required_not_executed = []
 
+    required_keys = {
+        (group["device"], group["group"])
+        for group in plan["test_groups"]
+        if group["platform"] == platform and group.get("required")
+    }
     for report in group_reports:
-        if report.get("required"):
+        if (report.get("device"), report.get("group")) in required_keys:
             if report.get("status") != "passed":
-                required_failed.append((report["device"], report["group"], report["status"]))
+                required_failed.append(
+                    (report.get("device"), report.get("group"), report.get("status"))
+                )
                 status = "failed"
             # Check execution (status != skipped means it was attempted)
-            if report.get("status") == "skipped" and not report.get("explicitly_skipped"):
-                required_not_executed.append((report["device"], report["group"]))
+            if report.get("executed") is not True:
+                required_not_executed.append((report.get("device"), report.get("group")))
 
     if required_failed:
         errors.append(f"Required groups failed: {required_failed}")
@@ -432,6 +469,7 @@ def cmd_gate(args: argparse.Namespace) -> int:
 
     # Load platform reports
     platform_reports = {}
+    duplicate_platform_reports = set()
     if args.reports_dir and Path(args.reports_dir).exists():
         for report_file in Path(args.reports_dir).rglob("*.json"):
             try:
@@ -439,6 +477,8 @@ def cmd_gate(args: argparse.Namespace) -> int:
                 if report.get("schema_version") == contract.PLATFORM_REPORT_SCHEMA:
                     pname = report.get("platform")
                     if pname:
+                        if pname in platform_reports:
+                            duplicate_platform_reports.add(pname)
                         platform_reports[pname] = report
             except (OSError, json.JSONDecodeError):
                 pass
@@ -477,6 +517,22 @@ def cmd_gate(args: argparse.Namespace) -> int:
     unexpected_platforms = set(platform_reports.keys()) - {p["name"] for p in plan["platforms"]}
     if unexpected_platforms:
         errors.append(f"Unexpected platform reports: {unexpected_platforms}")
+    if duplicate_platform_reports:
+        errors.append(
+            "Duplicate platform reports: "
+            f"{', '.join(sorted(duplicate_platform_reports))}"
+        )
+
+    # A required blocked group is an explicit contract gap.  Keep it in the
+    # plan for visibility and fail the release/manual gate instead of treating
+    # the absent matrix entry as a successful run.
+    required_blocked = [
+        item
+        for item in plan.get("blocked", [])
+        if item.get("required")
+    ]
+    if required_blocked:
+        errors.append(f"Required groups are blocked: {required_blocked}")
 
     # Build gate summary
     gate_status = "passed" if not errors else "failed"
@@ -539,6 +595,12 @@ def main() -> int:
     platform_parser = subparsers.add_parser("platform", help="Aggregate platform report")
     platform_parser.add_argument("--platform", required=True)
     platform_parser.add_argument("--reports-dir", type=Path, required=True)
+    platform_parser.add_argument("--coverage-result", default="")
+    platform_parser.add_argument(
+        "--coverage-required",
+        action="store_true",
+        help="Fail when the required coverage job did not succeed",
+    )
     platform_parser.add_argument("--output", type=Path, required=True)
 
     # gate

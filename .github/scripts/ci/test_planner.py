@@ -93,6 +93,28 @@ class PlannerTests(unittest.TestCase):
         # Should select all platforms (common path)
         self.assertTrue(len(plan["platforms"]) >= 8)
 
+    def test_risk_order_is_numeric(self):
+        """Higher risk rules must escalate even when labels have two digits in future."""
+        plan = self.run_planner(
+            "branch",
+            changed_files=json.dumps(["transformer_engine/pytorch/csrc/extension.cpp"]),
+        )
+        self.assertEqual(plan["test_level"], "L3")
+        self.assertEqual(plan["risk_level"], "R3")
+
+    def test_mcore_integration_change_escalates_to_l2(self):
+        """The integration launcher must not be silently omitted at PR L1."""
+        plan = self.run_planner(
+            "pr",
+            base_ref="main",
+            changed_files=json.dumps(["qa/L1_pytorch_mcore_integration/test.sh"]),
+        )
+
+        self.assertEqual(plan["test_level"], "L2")
+        self.assertTrue(
+            any(group["group"] == "pytorch_mcore_integration" for group in plan["test_groups"])
+        )
+
     def test_pr_docs_only(self):
         """PR with docs-only changes is lint-only."""
         plan = self.run_planner(
@@ -126,16 +148,18 @@ class PlannerTests(unittest.TestCase):
         self.assertEqual(plan["stage"], "release")
         self.assertEqual(plan["test_level"], "L4")
 
-        # Blocked groups are skipped during planning (no exec entries generated)
-        # So they won't appear in test_groups at all
         group_names = {g["group"] for g in plan["test_groups"]}
 
-        # L4 groups with blocked reasons should not appear in executable plan
-        # (Current simple planner skips catalog-blocked groups during build_test_groups)
-        # If they appear, it means they weren't properly blocked
-
-        # For now, just verify the plan was generated for L4
         self.assertEqual(len(plan["platforms"]), 8)  # All platforms selected
+        self.assertNotIn("model_validation", group_names)
+        self.assertTrue(plan["blocked"])
+        self.assertTrue(any(item["required"] for item in plan["blocked"]))
+
+    def test_nightly_coverage_policy_is_statistical(self):
+        plan = self.run_planner("nightly")
+        self.assertEqual(plan["coverage_policy"]["method"], "statistical")
+        self.assertEqual(plan["coverage_policy"]["window_runs"], 14)
+        self.assertEqual(plan["coverage_policy"]["minimum_history"], 8)
 
     def test_plan_hash_deterministic(self):
         """Plan hash is deterministic for same inputs."""
