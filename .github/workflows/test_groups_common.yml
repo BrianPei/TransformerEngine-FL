@@ -106,7 +106,7 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: ${{ inputs.test_artifact_name }}
-          path: ${{ github.workspace }}/${{ inputs.test_artifact_path }}
+          path: ${{ inputs.test_artifact_path }}
 
       - name: Verify artifact identity
         id: identity

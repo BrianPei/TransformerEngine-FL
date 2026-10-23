@@ -275,8 +275,10 @@ jobs:
 
       - name: Build test artifact
         env:
-          TE_CI_ARTIFACT_DIR: ${{ github.workspace }}/${{ needs.checkout_and_config.outputs.test_artifact_path }}
-        run: bash "$GITHUB_WORKSPACE/${{ needs.checkout_and_config.outputs.test_artifact_build_script }}"
+          TEST_ARTIFACT_PATH: ${{ needs.checkout_and_config.outputs.test_artifact_path }}
+        run: |
+          export TE_CI_ARTIFACT_DIR="$GITHUB_WORKSPACE/$TEST_ARTIFACT_PATH"
+          bash "$GITHUB_WORKSPACE/${{ needs.checkout_and_config.outputs.test_artifact_build_script }}"
 
       - name: Write artifact identity
         shell: bash
@@ -287,7 +289,7 @@ jobs:
             --config-hash "${{ needs.checkout_and_config.outputs.config_hash }}"
             --image-ref "${{ needs.checkout_and_config.outputs.ci_image }}"
             --test-level "${{ needs.checkout_and_config.outputs.test_level }}"
-            --artifact-dir "${{ github.workspace }}/${{ needs.checkout_and_config.outputs.test_artifact_path }}"
+            --artifact-dir "$GITHUB_WORKSPACE/${{ needs.checkout_and_config.outputs.test_artifact_path }}"
             --timestamp "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
           )
           if [ "${{ needs.checkout_and_config.outputs.coverage_active }}" = "true" ]; then
@@ -295,11 +297,20 @@ jobs:
           fi
           python3 .github/scripts/ci/flagcicd_identity.py write "${IDENTITY_ARGS[@]}"
 
+      - name: Verify artifact payload
+        shell: bash
+        run: |
+          artifact_dir="$GITHUB_WORKSPACE/${{ needs.checkout_and_config.outputs.test_artifact_path }}"
+          test -s "$artifact_dir/artifact-identity.json"
+          compgen -G "$artifact_dir/*.whl" >/dev/null
+          find "$artifact_dir" -maxdepth 1 -type f -print
+
       - name: Upload test artifact
         uses: actions/upload-artifact@v4
         with:
           name: ${{ needs.checkout_and_config.outputs.test_artifact_name }}
-          path: ${{ github.workspace }}/${{ needs.checkout_and_config.outputs.test_artifact_path }}/*
+          path: ${{ needs.checkout_and_config.outputs.test_artifact_path }}
+          include-hidden-files: true
           if-no-files-found: error
           retention-days: 1
           overwrite: true
