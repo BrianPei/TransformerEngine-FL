@@ -25,8 +25,8 @@ stages:
   nightly:
     entry_workflow: .github/workflows/daily.yml (schedule, workflow_dispatch)
     selection: all
-    default_level: L3
-    default_risk: R3
+    default_level: L2
+    default_risk: R2
     fixed_level: true
   manual:
     # Requested runs keep the previous unit + integration default; callers

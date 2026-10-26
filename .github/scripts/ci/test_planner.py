@@ -46,14 +46,21 @@ class PlannerTests(unittest.TestCase):
             Path(output_path).unlink(missing_ok=True)
 
     def test_nightly_full_matrix(self):
-        """Nightly selects all platforms at L3."""
+        """Nightly selects all platforms at fixed L2."""
         plan = self.run_planner("nightly")
 
         self.assertEqual(plan["stage"], "nightly")
-        self.assertEqual(plan["test_level"], "L3")
+        self.assertEqual(plan["test_level"], "L2")
+        self.assertEqual(plan["risk_level"], "R2")
         self.assertEqual(plan["selection"], "all")
         self.assertTrue(len(plan["platforms"]) >= 8)  # All known platforms
         self.assertFalse(plan["lint_only"])
+        self.assertEqual(
+            {g["group"] for g in plan["test_groups"]},
+            {"preflight", "pytorch_unittest", "pytorch_mcore_integration"},
+        )
+        self.assertTrue(all(g["level"] in ("L0", "L1", "L2") for g in plan["test_groups"]))
+        self.assertEqual(plan["blocked"], [])
 
         # Should have test groups for all platforms
         platforms_in_groups = {g["platform"] for g in plan["test_groups"]}
@@ -64,6 +71,11 @@ class PlannerTests(unittest.TestCase):
         preflight_count = sum(1 for g in plan["test_groups"] if g["group"] == "preflight")
         total_devices = sum(len(p["device_types"]) for p in plan["platforms"])
         self.assertEqual(preflight_count, total_devices)
+
+    def test_nightly_level_is_fixed_even_with_l3_request(self):
+        plan = self.run_planner("nightly", requested_level="L3")
+        self.assertEqual(plan["test_level"], "L2")
+        self.assertEqual(plan["coverage_policy"]["method"], "statistical")
 
     def test_pr_vendor_only(self):
         """PR with vendor-only changes selects that platform."""

@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# Daily comprehensive testing at L3 across all platforms (FlagCICD stage
+# Daily comprehensive testing at L2 across all platforms (FlagCICD stage
 # "nightly").  Runs every day at 02:17 Asia/Shanghai (18:17 UTC).
 
 name: Daily

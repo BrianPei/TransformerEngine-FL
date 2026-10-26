@@ -15,11 +15,11 @@ only changes skip hardware. `platform:<name>` labels override routing, so a
 narrowed shared-code run requires reviewer judgment. `level:L0` through
 `level:L4` labels can escalate the inferred level. Risk rules also raise it.
 
-PR defaults to L1; branch/CI dispatch defaults to L2; Daily is fixed at L3.
+PR defaults to L1; branch/CI dispatch defaults to L2; Daily is fixed at L2 with default risk R2.
 Each changed file takes the highest level of the risk rules it matches, or
 `unknown_level` when it matches none; the plan takes the maximum over files.
 Levels are cumulative, subject to group path filters and platform support.
-Daily has no diff filters and runs all currently executable configured groups.
+Daily has no diff filters and runs all currently executable configured L0-L2 groups.
 Groups with `watch_platform_paths` also watch the platform `paths_watch` and
 their matrix entry `path`, so a launcher-only PR runs the group it launches.
 Plans record per-platform `reasons`, `common_path_triggers` and an `excluded`
