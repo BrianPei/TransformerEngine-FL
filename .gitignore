@@ -56,6 +56,4 @@ qa/L1_pytorch_mcore_integration/output/
 .coverage.*
 .coverage
 # Claude Code session directory
-.claude/*
-# Keep reusable project skills under version control
-!.claude/skills/
+.claude/
