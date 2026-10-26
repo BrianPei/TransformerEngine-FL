@@ -188,6 +188,36 @@ class PlannerTests(unittest.TestCase):
             self.assertIsInstance(devices, int)
             self.assertGreater(devices, 0)
 
+    def test_platform_device_budgets_are_preserved_in_plan(self):
+        """Platform-specific counts resolve exactly; single-device groups stay at one."""
+        plan = self.run_planner("nightly")
+        expected = {}
+        for platform in plan["platforms"]:
+            config = yaml.safe_load(
+                (ROOT / ".github/configs" / f"{platform['name']}.yml").read_text()
+            )
+            expected[platform["name"]] = config["nproc_per_node"]
+            self.assertEqual(platform["nproc_per_node"], config["nproc_per_node"])
+        for group in plan["test_groups"]:
+            resources = group["resources"]
+            if resources["class"] == "multi_device":
+                count = expected[group["platform"]]
+                self.assertEqual(resources["devices"], count)
+                self.assertEqual(group["lane"], "serial" if count > 1 else "parallel")
+            elif resources["class"] == "single_device":
+                self.assertEqual(resources["devices"], 1)
+
+    def test_invalid_or_missing_device_budget_is_rejected(self):
+        """A missing count must not silently schedule a multi-device job as one card."""
+        for value in (None, 0, -1, True, "4", 1.5):
+            with self.subTest(value=value), tempfile.TemporaryDirectory() as tmp:
+                config = {} if value is None else {"nproc_per_node": value}
+                (Path(tmp) / "example.yml").write_text(yaml.safe_dump(config))
+                with self.assertRaisesRegex(
+                    RuntimeError, "nproc_per_node must be a positive integer"
+                ):
+                    self.run_planner("nightly", configs_dir=tmp)
+
     def test_lane_assignment(self):
         """Lanes are correctly assigned."""
         plan = self.run_planner("nightly")

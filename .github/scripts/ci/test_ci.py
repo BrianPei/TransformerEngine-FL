@@ -196,6 +196,26 @@ class WorkflowGateTests(unittest.TestCase):
             text = (ROOT / f".github/workflows/{name}.yml").read_text()
             self.assertNotIn("always()", text, name)
 
+    def test_platform_workflow_uses_only_static_execution_lanes(self):
+        """Every planned lane remains executable after removing optional acceleration."""
+        jobs = self.common
+        self.assertIn("parallel_groups", jobs)
+        self.assertIn("serial_groups", jobs)
+        self.assertNotIn("wave0_groups", jobs)
+        self.assertNotIn("wave1_groups", jobs)
+        for lane in ("parallel", "serial"):
+            job = jobs[f"{lane}_groups"]
+            self.assertEqual(job["uses"], "./.github/workflows/test_groups_common.yml")
+            self.assertEqual(
+                job["with"]["matrix"],
+                "${{ needs.checkout_and_config.outputs." + lane + "_matrix }}",
+            )
+        self.assertIn("parallel_groups", jobs["serial_groups"]["needs"])
+        self.assertEqual(jobs["serial_groups"]["with"]["max_parallel"], 1)
+        for name in ("coverage", "platform_gate"):
+            self.assertIn("parallel_groups", jobs[name]["needs"])
+            self.assertIn("serial_groups", jobs[name]["needs"])
+
     def test_label_routing_and_event_payload(self):
         rules = matrix._load_watch_rules(ROOT / ".github/configs")
         for labels, expected in (

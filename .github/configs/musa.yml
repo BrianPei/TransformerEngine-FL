@@ -57,7 +57,8 @@ coverage:
     - '*/transformer_engine/plugin/core/_build_config.py'
 
 # MUSA launchers keep platform-specific selection outside shared QA scripts.
-# Devices per node for multi-device groups; read once by the CI planner.
+# Device budget per multi-device test job, not the host's total card count.
+# Keep aligned with the devices exposed to the container and the test launcher.
 nproc_per_node: 8
 
 unit_test_matrix:

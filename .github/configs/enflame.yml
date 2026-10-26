@@ -48,6 +48,8 @@ coverage:
     - '*/setup.py'
     - '*/transformer_engine/plugin/core/_build_config.py'
 
+# Device budget per multi-device test job, not the host's total card count.
+# Keep aligned with the devices exposed to the container and the test launcher.
 nproc_per_node: 2
 
 unit_test_matrix:

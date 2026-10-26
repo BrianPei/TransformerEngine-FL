@@ -40,6 +40,9 @@ def load_platforms(configs_dir: Path) -> dict[str, Any]:
             continue
         config_bytes = path.read_bytes()
         config = yaml.safe_load(config_bytes)
+        nproc = config.get("nproc_per_node")
+        if isinstance(nproc, bool) or not isinstance(nproc, int) or nproc < 1:
+            raise ValueError(f"{path.name}: nproc_per_node must be a positive integer")
         platforms[path.stem] = {
             "config": config,
             "config_hash": hashlib.sha256(config_bytes).hexdigest(),
@@ -233,27 +236,6 @@ def group_matches_paths(watch: list[str], changed: list[str], unowned: bool) -> 
     return any(_path_matches(path, pattern) for path in changed for pattern in watch)
 
 
-def _hybrid_matches(
-    group_name: str,
-    group_def: dict,
-    changed: list[str],
-    hybrid_frames: "dict[str, frozenset[str]] | None",
-) -> bool:
-    """Return True if any changed file appears in the group's evidence frames.
-
-    Only applies to non-required junit groups; required groups and exit_code
-    groups must never be pruned by evidence — they always run.
-    """
-    if not hybrid_frames or group_name not in hybrid_frames:
-        return False
-    if group_def.get("required", False):
-        return False  # required → static only, never trust evidence alone
-    if group_def.get("evidence", "exit_code") != "junit":
-        return False  # communication/mcore groups: exit_code → static only
-    frames = hybrid_frames[group_name]
-    return any(p in frames for p in changed)
-
-
 def _group_evidence(group_def: dict) -> str:
     evidence = group_def.get("evidence")
     if evidence not in EVIDENCE_TYPES:
@@ -272,15 +254,8 @@ def build_test_groups(
     changed: list[str],
     blocked: list[dict[str, Any]] | None = None,
     excluded: list[dict[str, Any]] | None = None,
-    hybrid_per_platform: "dict[str, dict[str, frozenset[str]]] | None" = None,
 ) -> list[dict]:
-    """Build test_groups list from catalog, filtered by level and paths_watch.
-
-    hybrid_per_platform maps platform → {group_name → frozenset(file_paths)}.
-    When provided, non-required junit groups also run when any changed file
-    appears in their evidence frames from the previous run.  Required groups
-    and exit_code groups always use the static diff path unchanged.
-    """
+    """Build test_groups list from catalog, filtered by level and paths_watch."""
     catalog = project["test_groups"]
     level_num = LEVEL_ORDER[test_level]
     code_paths = [path for path in changed if not gm._is_documentation(path)]
@@ -302,7 +277,7 @@ def build_test_groups(
     for platform in selected_platforms:
         platform_cfg = platforms[platform]["config"]
         device_types = platform_cfg.get("device_types", [])
-        nproc = platform_cfg.get("nproc_per_node", 1)
+        nproc = platform_cfg["nproc_per_node"]
 
         # Preflight always included at L0
         for device in device_types:
@@ -396,15 +371,11 @@ def build_test_groups(
             for path in code_paths
         )
 
-        # Per-platform hybrid frames for this platform (group → file set).
-        platform_hybrid = (hybrid_per_platform or {}).get(platform)
-
         for group_def, exec_entry, exec_timeout, watch in candidates:
             name = group_def["name"]
             group_level = group_def.get("level", "L1")
             static_match = group_matches_paths(watch, code_paths, unowned)
-            hybrid_match = _hybrid_matches(name, group_def, code_paths, platform_hybrid)
-            if not static_match and not hybrid_match:
+            if not static_match:
                 if excluded is not None:
                     for device in device_types:
                         excluded.append(
@@ -454,83 +425,6 @@ def build_test_groups(
                 )
 
     return groups
-
-
-def _prune_by_evidence(
-    test_groups: list[dict],
-    evidence_per_platform: "dict[str, dict[str, dict]]",
-    current_image_digest_per_platform: "dict[str, str]",
-    current_context: dict,
-    history_path: "Path | None" = None,
-) -> "tuple[list[dict], list[dict]]":
-    """Filter test_groups by P3 equivalence-context pruning.
-
-    A group is eligible for pruning when ALL of the following hold:
-      - required is False
-      - resources.exclusive is False AND resources.devices <= 1
-      - evidence.status == 'passed' AND evidence.complete == True
-      - image_digest matches the current platform image digest
-      - every context dimension in evidence matches current_context
-      - history reports the group as stable
-
-    Returns (kept_groups, pruned_entries).  pruned_entries use the same ledger
-    shape as excluded/blocked so the gate can account for skipped groups.
-    """
-    try:
-        import flagcicd_evidence as _ev
-    except ImportError:
-        return test_groups, []
-
-    kept: list[dict] = []
-    pruned: list[dict] = []
-
-    for g in test_groups:
-        platform = g["platform"]
-        name = g["group"]
-        res = g.get("resources", {})
-
-        # Safety guards: required, multi-device, exclusive groups must not be pruned.
-        if g.get("required", False):
-            kept.append(g)
-            continue
-        if res.get("exclusive", False) or res.get("devices", 0) > 1:
-            kept.append(g)
-            continue
-
-        ev = (evidence_per_platform.get(platform) or {}).get(name)
-        if ev is None:
-            kept.append(g)
-            continue
-
-        # Evidence must show a passing run.
-        if ev.get("status") != "passed" or not ev.get("complete", False):
-            kept.append(g)
-            continue
-
-        img_digest = current_image_digest_per_platform.get(platform, "")
-        ok, _ = _ev.is_evidence_valid(
-            ev,
-            current_image_digest=img_digest,
-            current_context=current_context,
-            history_path=history_path,
-        )
-        if not ok:
-            kept.append(g)
-            continue
-
-        pruned.append(
-            {
-                "platform": platform,
-                "device": g["device"],
-                "group": name,
-                "kind": g.get("kind", ""),
-                "level": g.get("level", "L1"),
-                "required": False,
-                "reason": "P3 equivalence-context pruning: matching passing evidence",
-            }
-        )
-
-    return kept, pruned
 
 
 def build_plan(args: argparse.Namespace) -> dict[str, Any]:
@@ -623,46 +517,12 @@ def build_plan(args: argparse.Namespace) -> dict[str, Any]:
                 "config": p["config_path"],
                 "config_hash": p["config_hash"],
                 "device_types": p["config"].get("device_types", []),
-                "nproc_per_node": p["config"].get("nproc_per_node", 1),
+                "nproc_per_node": p["config"]["nproc_per_node"],
                 "coverage_enabled": bool(p["config"].get("coverage", {}).get("enabled", False)),
                 "coverage_required": bool(p["config"].get("coverage", {}).get("required", False)),
                 "reasons": platform_reasons[pname],
             }
         )
-
-    # Read FastCI config; all capabilities are gated by enabled:false by default.
-    fastci_cfg = project.get("fastci", {})
-    fastci_enabled = bool(fastci_cfg.get("enabled", False))
-    selection_mode = fastci_cfg.get("selection_mode", "static")
-    evidence_mode = fastci_cfg.get("evidence_mode", "off" if not fastci_enabled else "shadow")
-    pruning_enabled = bool(fastci_cfg.get("pruning_enabled", False))
-    priority_enabled = bool(fastci_cfg.get("priority_enabled", False))
-    fallback_on_error = fastci_cfg.get("fallback_on_error", "static")
-    effective_selection = selection_mode if fastci_enabled else "static"
-
-    # Build hybrid_per_platform when hybrid mode is active.  Import lazily so
-    # the evidence module is only required when FastCI is enabled; stdlib-only
-    # builds never import it.
-    hybrid_per_platform: dict[str, dict[str, frozenset[str]]] | None = None
-    if effective_selection == "hybrid" and hasattr(args, "evidence_dir") and args.evidence_dir:
-        try:
-            import flagcicd_evidence as _ev
-
-            evidence_dir = Path(args.evidence_dir)
-            hybrid_per_platform = {}
-            for platform in selected:
-                evidence_set = _ev.load_evidence_set(evidence_dir, platform)
-                platform_frames: dict[str, frozenset[str]] = {}
-                for group_name, ev in evidence_set.items():
-                    frames = frozenset(f["file"] for f in ev.get("frames", []) if f.get("file"))
-                    if frames:
-                        platform_frames[group_name] = frames
-                if platform_frames:
-                    hybrid_per_platform[platform] = platform_frames
-        except Exception as exc:
-            if fallback_on_error == "fail":
-                raise ValueError(f"hybrid evidence loading failed: {exc}") from exc
-            hybrid_per_platform = None
 
     # Build test groups
     blocked: list[dict[str, Any]] = []
@@ -676,44 +536,10 @@ def build_plan(args: argparse.Namespace) -> dict[str, Any]:
             changed,
             blocked,
             excluded,
-            hybrid_per_platform=hybrid_per_platform,
         )
         if not lint_only
         else []
     )
-
-    # P3 equivalence-context pruning — runs only when enabled in project.yaml.
-    # Requires evidence-dir; silently skips when absent or on any error.
-    pruned: list[dict[str, Any]] = []
-    if pruning_enabled and fastci_enabled and hasattr(args, "evidence_dir") and args.evidence_dir:
-        try:
-            import flagcicd_evidence as _ev
-
-            evidence_dir_p3 = Path(args.evidence_dir)
-            # Collect all evidence by platform for the pruner.
-            ev_by_platform: dict[str, dict[str, dict]] = {}
-            for platform in selected:
-                ev_by_platform[platform] = _ev.load_evidence_set(evidence_dir_p3, platform)
-            # Image digest per platform is not available here (runner-side only);
-            # pass empty string so is_evidence_valid falls back to the digest
-            # check.  In practice pruning only activates when callers pass a
-            # --context-json that includes the image digest as a dimension.
-            img_digest_per_platform: dict[str, str] = {}
-            current_context: dict = {}
-            history_path_p3 = (
-                Path(args.history) if hasattr(args, "history") and args.history else None
-            )
-            test_groups, pruned = _prune_by_evidence(
-                test_groups,
-                ev_by_platform,
-                img_digest_per_platform,
-                current_context,
-                history_path_p3,
-            )
-        except Exception as exc:
-            if fallback_on_error == "fail":
-                raise ValueError(f"P3 pruning failed: {exc}") from exc
-            # fallback: leave test_groups unchanged
 
     if stage_name == "pr":
         coverage_policy = {"method": "absolute"}
@@ -726,49 +552,6 @@ def build_plan(args: argparse.Namespace) -> dict[str, Any]:
         }
     else:
         coverage_policy = {"method": "none"}
-
-    # Read FastCI config
-    # (must be resolved before P3 pruning so pruning_enabled is available); all capabilities are gated by enabled:false by default.
-    fastci_cfg = project.get("fastci", {})
-    fastci_enabled = bool(fastci_cfg.get("enabled", False))
-    selection_mode = fastci_cfg.get("selection_mode", "static")
-    # P7: when fastci is disabled all sub-capabilities are forced off so the
-    # plan is self-consistent and the workflow needs no secondary checks.
-    evidence_mode = fastci_cfg.get("evidence_mode", "off") if fastci_enabled else "off"
-    pruning_enabled = bool(fastci_cfg.get("pruning_enabled", False)) if fastci_enabled else False
-    priority_enabled = bool(fastci_cfg.get("priority_enabled", False)) if fastci_enabled else False
-    fallback_on_error = fastci_cfg.get("fallback_on_error", "static")
-
-    # P5: resolve workload profile overrides.  When fastci is disabled the
-    # reference profile (nightly_spec) is always used — overrides are a FastCI
-    # optimisation and must not silently alter nightly behaviour when disabled.
-    workload_profile_key = (
-        fastci_cfg.get("workload_profile", "nightly_spec") if fastci_enabled else "nightly_spec"
-    )
-    workload_profiles = project.get("workload_profiles", {})
-    workload_profile_def = workload_profiles.get(workload_profile_key, {})
-    workload_overrides = dict(workload_profile_def.get("overrides", {})) if fastci_enabled else {}
-
-    # Derive the effective selection strategy for this run.  When FastCI is
-    # disabled or evidence is unavailable we always fall back to "static".
-    effective_selection = selection_mode if fastci_enabled else "static"
-
-    # Assign priority waves to test groups.  When priority_enabled is False the
-    # wave field is present (so the schema is stable) but the workflow ignores it
-    # and uses the existing lane-based needs graph unchanged.
-    def _wave(group: dict) -> str:
-        lane = group.get("lane", "parallel")
-        if lane == "preflight":
-            return "priority-wave-0"
-        if lane == "serial":
-            return "serial-wave"
-        # Parallel: high-risk or required smoke tests go in wave-0
-        if group.get("required") and group.get("level", "L1") in ("L0", "L1"):
-            return "priority-wave-0"
-        return "priority-wave-1"
-
-    for g in test_groups:
-        g["wave_assignment"] = _wave(g)
 
     # Build plan
     plan = {
@@ -793,32 +576,11 @@ def build_plan(args: argparse.Namespace) -> dict[str, Any]:
         "test_groups": test_groups,
         "excluded": excluded,
         "blocked": blocked,
-        "pruned": pruned,
         "reasons": [
             f"{stage_name} stage with {len(selected)} platforms, level {test_level}",
             *routing,
         ],
         "coverage_policy": coverage_policy,
-        # FastCI metadata — present in every plan so consumers can rely on the
-        # schema unconditionally.  All optimisation fields default to off.
-        "fastci": {
-            "enabled": fastci_enabled,
-            "selection_strategy": effective_selection,
-            "evidence_mode": evidence_mode,
-            "pruning_enabled": pruning_enabled,
-            "priority_enabled": priority_enabled,
-            "fallback_on_error": fallback_on_error,
-            # P5: workload profile key and resolved overrides; consumers read
-            # overrides rather than the key so they stay decoupled from project.yaml.
-            "workload_profile": workload_profile_key,
-            "workload_overrides": workload_overrides,
-        },
-        # Context dimensions snapshot from project config.  Embedded here so
-        # the plan is self-contained and the gate can validate without re-reading
-        # project.yaml.
-        "context_dimensions": project.get("context_dimensions", list(contract.CONTEXT_DIMENSIONS)),
-        # Scheduling config snapshot for wave-aware workflow consumers.
-        "scheduling": project.get("scheduling", {}),
     }
 
     # Compute plan hash
@@ -846,14 +608,6 @@ def main() -> int:
     parser.add_argument("--labels-from-event", action="store_true")
     parser.add_argument("--output", type=Path)
     parser.add_argument("--github-output", action="store_true")
-    parser.add_argument(
-        "--evidence-dir",
-        default="",
-        help="Directory with runtime-evidence-*.json files (hybrid mode only)",
-    )
-    parser.add_argument(
-        "--history", default="", help="Path to history.jsonl for P3 stability checks"
-    )
 
     args = parser.parse_args()
 

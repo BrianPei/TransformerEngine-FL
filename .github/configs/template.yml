@@ -53,8 +53,8 @@ coverage:
     - '*/setup.py'
     - '*/transformer_engine/plugin/core/_build_config.py'
 
-# Devices per node used by multi-device and exclusive test groups. This is the
-# single source for the device count; launchers read it from here if needed.
+# Device budget per multi-device test job, not the host's total card count.
+# Keep aligned with the devices exposed to the container and the test launcher.
 nproc_per_node: 2
 
 # Each matrix key maps to a test group in .flagcicd/project.yaml (name, level,

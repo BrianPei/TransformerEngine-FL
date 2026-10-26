@@ -85,3 +85,24 @@ behavior. Validate docs-only/vendor/shared routing, deliberate test/setup
 failure, absent reports, coverage failure and cancellation on Actions before
 changing required checks. Configure `CI Complete` in branch protection manually.
 Schedules require the workflow on the default branch and may be delayed.
+
+## Scope and device counts
+
+This pipeline uses static routing: changed paths, stage defaults, risk rules and
+labels select platforms and test groups. Runtime-evidence collection, cached
+result pruning, priority waves and reduced workloads are outside this change.
+JUnit/exit-code execution evidence, artifact identity checks and all three report
+levels remain required by the existing plan and gate contracts.
+
+Keep `nproc_per_node` in each `.github/configs/<platform>.yml`: it is a positive
+integer device budget per multi-device test job, not the total number of cards
+installed on the host. The planner rejects missing or invalid counts rather than
+assuming one device. `multi_device` and exclusive resource classes resolve this
+platform value; `single_device` groups still request one device. Counts may differ
+by platform (currently 2, 4 or 8) and do not require duplicated workflows.
+
+The budget is a scheduling declaration, not automatic hardware detection or a
+universal torchrun override. Keep it aligned with container-visible devices and
+platform launchers; launchers can use fewer devices in individual phases. Changing
+physical card allocation also requires checking the runner, device mounts and
+visibility settings. Runtime device isolation remains a runner responsibility.

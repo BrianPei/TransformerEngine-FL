@@ -25,6 +25,8 @@ container_options: >-
   -e PPU_STEP_TIMEOUT=9000
 device_types:
   - 810e
+# Device budget per multi-device test job, not the host's total card count.
+# Keep aligned with the devices exposed to the container and the test launcher.
 nproc_per_node: 2
 setup_script: .github/scripts/setup_ppu.sh
 unit_test_matrix:
