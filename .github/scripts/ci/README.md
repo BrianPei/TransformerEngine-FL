@@ -45,13 +45,22 @@ whatever its result; the platform gate judges both lanes. This only
 orders jobs within a platform invocation; runner deployment must provide
 physical device isolation across PR/Nightly runs.
 
-Optional wheel artifacts carry identity metadata checked before setup. Group
+Optional wheel artifacts carry identity metadata checked before setup: schema,
+platform/source/config identity and the exact wheel names, sizes and SHA256 hashes.
+These checks are mandatory whenever an artifact is used. Group
 reports contain plan/source identity, status, execution and duration. Required
 groups are determined from the plan and must pass with execution evidence.
 Missing, duplicate, mismatched or failed required reports fail the platform gate.
 Each group declares `evidence`: `junit` groups need non-empty JUnit results,
 `exit_code` groups (preflight, script integration) pass on exit code 0.
-Missing or corrupt JUnit cannot be interpreted as passed. Preflight checks
+JUnit checks actual testcase outcomes and validates declared suite counts,
+including nested suites. Missing, corrupt or inconsistent reports cannot pass.
+Pytest execution entries retain steps, arguments, environment, retries and log
+paths through plan slicing; report collection uses the same log directory.
+Optional group failures or missing reports do not block the pipeline; their
+available reports still undergo identity/consistency checks. Required groups
+remain blocking at both the workflow and platform gate.
+Preflight checks
 repository structure/Python syntax; it does not certify device availability.
 The global gate requires successful planning/pipeline results and complete
 platform reports. Required blocked groups fail acceptance.
@@ -63,7 +72,9 @@ the platform `coverage.sources` with `--cov-append`, upload raw hidden fragments
 and `all_tests_common.yml` combines them, applying `coverage.include`/`omit`.
 Platforms with `coverage.required: true` fail if collection/aggregation fails
 or the coverage job is skipped. This requirement is separate from regression
-thresholds, which are advisory.
+thresholds, which are advisory. Optional collection/aggregation failures are
+also non-blocking. These are fixed gate/workflow rules; project.yaml does not
+expose inactive validation toggles or unimplemented image-cache declarations.
 
 PR coverage compares against a main-branch artifact of the same platform/device.
 Nightly uses a 14-run history with at least 8 samples and a lower bound of
