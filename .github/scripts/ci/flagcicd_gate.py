@@ -80,6 +80,7 @@ def cmd_slice(args: argparse.Namespace) -> int:
         # Flatten exec into entry for compatibility with run_ci_test_group.py
         exec_data = group.get("exec") or {}
         entry = {
+            **exec_data,
             "device": group["device"],
             "name": group["group"],
             "kind": group["kind"],
@@ -168,6 +169,13 @@ def cmd_group_report(args: argparse.Namespace) -> int:
         None,
     )
     evidence = planned.get("evidence") if planned else None
+    junit_dir = args.junit_dir
+    exec_data = (planned.get("exec") or {}) if planned else {}
+    if exec_data.get("runner") == "pytest":
+        # Match the runner's log_dir default and {workspace} expansion.
+        workspace = Path(os.environ.get("GITHUB_WORKSPACE", Path.cwd()))
+        log_dir = str(exec_data.get("log_dir", "logs")).replace("{workspace}", str(workspace))
+        junit_dir = str(workspace / log_dir)
 
     # Determine status from steps.  Checkout and execute are mandatory for
     # every executable group; optional artifact/identity/setup steps are
@@ -204,7 +212,7 @@ def cmd_group_report(args: argparse.Namespace) -> int:
                         exit_code = int(Path(args.exit_code_file).read_text().strip())
                         executed = True
                         if exit_code == 0:
-                            status, failure_stage = evidence_status(evidence, args.junit_dir)
+                            status, failure_stage = evidence_status(evidence, junit_dir)
                         else:
                             status = "test_failed"
                             failure_stage = "test_execution"
@@ -227,7 +235,7 @@ def cmd_group_report(args: argparse.Namespace) -> int:
                 break
         elif outcome == "success" and step_name == "execute":
             executed = True
-            status, failure_stage = evidence_status(evidence, args.junit_dir)
+            status, failure_stage = evidence_status(evidence, junit_dir)
         elif step_name == "execute":
             status = "skipped"
             failure_stage = "execute"
@@ -264,40 +272,49 @@ def parse_junit_status(junit_dir: str | None) -> tuple[str, str | None]:
     if not junit_dir or not Path(junit_dir).exists():
         return "report_error", "junit_missing"
 
-    total_tests = 0
-    total_failures = 0
-    total_errors = 0
-    total_skipped = 0
-    has_corrupt = False
+    def counts(node):
+        """Count leaf cases; validate optional summaries without double counting."""
+        if node.tag not in ("testsuite", "testsuites"):
+            raise ValueError("Unsupported JUnit root")
+        cases = list(node.iter("testcase"))
+        result = [len(cases), 0, 0, 0]
+        for case in cases:
+            outcomes = [case.find(tag) is not None for tag in ("failure", "error", "skipped")]
+            if outcomes[2] and any(outcomes[:2]):
+                raise ValueError("Skipped case also failed")
+            for index, present in enumerate(outcomes, 1):
+                result[index] += present
+        for suite in node.iter():
+            if suite.tag not in ("testsuite", "testsuites"):
+                continue
+            subtree = list(suite.iter("testcase"))
+            actual = [len(subtree)] + [
+                sum(case.find(tag) is not None for case in subtree)
+                for tag in ("failure", "error", "skipped")
+            ]
+            for key, value in zip(("tests", "failures", "errors", "skipped"), actual):
+                if key in suite.attrib and int(suite.attrib[key]) != value:
+                    raise ValueError(f"Inconsistent JUnit {key}")
+        return result
 
+    totals = [0, 0, 0, 0]
     for xml_file in Path(junit_dir).rglob("*.xml"):
         try:
-            tree = ET.parse(xml_file)
-            root = tree.getroot()
-
-            # Handle both <testsuites> and <testsuite> roots
-            suites = [root] if root.tag == "testsuite" else root.findall("testsuite")
-
-            for suite in suites:
-                total_tests += int(suite.get("tests", 0))
-                total_failures += int(suite.get("failures", 0))
-                total_errors += int(suite.get("errors", 0))
-                total_skipped += int(suite.get("skipped", 0))
+            root = ET.parse(xml_file).getroot()
+            # Accept namespaced producers as well as pytest's plain XML.
+            for node in root.iter():
+                node.tag = node.tag.rsplit("}", 1)[-1]
+            totals = [a + b for a, b in zip(totals, counts(root))]
         except (ET.ParseError, OSError, ValueError):
-            has_corrupt = True
+            return "report_error", "junit_parsing"
 
-    if has_corrupt:
-        return "report_error", "junit_parsing"
-
+    total_tests, total_failures, total_errors, total_skipped = totals
+    if total_failures or total_errors:
+        return "test_failed", "test_execution"
     if total_tests == 0:
         return "skipped", "no_tests_collected"
-
     if total_tests == total_skipped:
         return "skipped", "all_skipped"
-
-    if total_failures > 0 or total_errors > 0:
-        return "test_failed", "test_execution"
-
     return "passed", None
 
 
@@ -372,7 +389,12 @@ def cmd_platform(args: argparse.Namespace) -> int:
         if len(group_reports) > 0:
             errors.append(f"Unexpected reports when no groups were planned: {actual_keys}")
     else:
-        missing = expected_keys - actual_keys
+        required_keys = {
+            (g["device"], g["group"])
+            for g in plan["test_groups"]
+            if g["platform"] == platform and g.get("required")
+        }
+        missing = required_keys - actual_keys
         unexpected = actual_keys - expected_keys
         duplicates = [
             key

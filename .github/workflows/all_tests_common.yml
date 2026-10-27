@@ -383,6 +383,7 @@ jobs:
 
   coverage:
     name: coverage-${{ matrix.device }}
+    continue-on-error: ${{ needs.checkout_and_config.outputs.coverage_required != 'true' }}
     needs: [checkout_and_config, build_test_artifact, parallel_groups, serial_groups]
     if: |
       !cancelled() &&

@@ -89,8 +89,45 @@ def cmd_verify(args: argparse.Namespace) -> int:
         print(f"ERROR: Failed to load identity: {exc}", file=sys.stderr)
         return 1
 
-    # Verify fields
+    if not isinstance(identity, dict):
+        print("ERROR: Identity must be an object", file=sys.stderr)
+        return 1
+
+    # Verify both the declared identity and the downloaded payload.
     errors = []
+    if identity.get("schema_version") != contract.IDENTITY_SCHEMA:
+        errors.append("Unsupported artifact identity schema")
+    wheels = identity.get("wheels")
+    if not isinstance(wheels, list) or not wheels:
+        errors.append("Identity must contain at least one wheel")
+        wheels = []
+    names = set()
+    artifact_dir = Path(args.artifact_dir)
+    for wheel in wheels:
+        if not isinstance(wheel, dict):
+            errors.append("Invalid wheel entry")
+            continue
+        name = wheel.get("name")
+        if (
+            not isinstance(name, str)
+            or not name.endswith(".whl")
+            or Path(name).name != name
+            or "\\" in name
+            or name in names
+        ):
+            errors.append(f"Invalid or duplicate wheel name: {name!r}")
+            continue
+        names.add(name)
+        try:
+            payload = (artifact_dir / name).read_bytes()
+            if type(wheel.get("size")) is not int or len(payload) != wheel["size"]:
+                errors.append(f"Wheel size mismatch: {name}")
+            if hashlib.sha256(payload).hexdigest() != wheel.get("sha256"):
+                errors.append(f"Wheel SHA256 mismatch: {name}")
+        except OSError as exc:
+            errors.append(f"Cannot read wheel {name}: {exc}")
+    if names != {path.name for path in artifact_dir.glob("*.whl")}:
+        errors.append("Wheel files do not match identity manifest")
     if identity.get("platform") != args.platform:
         errors.append(
             f"Platform mismatch: expected {args.platform}, got {identity.get('platform')}"

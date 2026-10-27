@@ -14,15 +14,19 @@ import importlib.util
 import json
 import os
 import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import Mock, patch
 
+import yaml
+
 # Import modules under test
 import flagcicd_gate as gate
 import flagcicd_identity as identity
 import flagcicd_contract as contract
+import flagcicd_planner as planner
 
 
 ROOT = Path(__file__).resolve().parents[3]
@@ -72,7 +76,7 @@ def make_group(name, lane, platform="cuda", device="a100", evidence="junit", kin
             "timeout_minutes": 90 if lane == "preflight" else 30,
         },
         "coverage": lane == "parallel",
-        "exec": None if lane == "preflight" else {"path": f"run_{name}.sh", "runner": "script"},
+        "exec": (None if lane == "preflight" else {"path": f"run_{name}.sh", "runner": "script"}),
     }
 
 
@@ -153,6 +157,7 @@ class IdentityTests(unittest.TestCase):
         """Test writing identity file with required fields."""
         with tempfile.TemporaryDirectory() as tmpdir:
             artifact_dir = Path(tmpdir)
+            (artifact_dir / "test.whl").write_bytes(b"wheel")
 
             # Use real argparse Namespace with all required fields
             args = argparse.Namespace(
@@ -180,12 +185,14 @@ class IdentityTests(unittest.TestCase):
             self.assertEqual(data["config_hash"], "b" * 64)
             self.assertTrue(data["coverage_instrumentation"])
             self.assertEqual(data["image_ref"], "flagscale/te-cuda:latest")
+            self.assertEqual(identity.cmd_verify(args), 0)
 
     def test_verify_identity_accepts_matching_identity(self):
         """Test verification passes with matching identity."""
         with tempfile.TemporaryDirectory() as tmpdir:
             artifact_dir = Path(tmpdir)
             identity_file = artifact_dir / "artifact-identity.json"
+            (artifact_dir / "test.whl").write_bytes(b"wheel")
             identity_file.write_text(
                 json.dumps(
                     {
@@ -195,7 +202,13 @@ class IdentityTests(unittest.TestCase):
                         "config_hash": "b" * 64,
                         "coverage_active": False,
                         "test_marker": None,
-                        "wheels": [],
+                        "wheels": [
+                            {
+                                "name": "test.whl",
+                                "size": 5,
+                                "sha256": hashlib.sha256(b"wheel").hexdigest(),
+                            }
+                        ],
                         "toolchain": {},
                     }
                 )
@@ -217,6 +230,7 @@ class IdentityTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmpdir:
             artifact_dir = Path(tmpdir)
             identity_file = artifact_dir / "artifact-identity.json"
+            (artifact_dir / "test.whl").write_bytes(b"wheel")
             identity_file.write_text(
                 json.dumps(
                     {
@@ -226,7 +240,13 @@ class IdentityTests(unittest.TestCase):
                         "config_hash": "b" * 64,
                         "coverage_active": False,
                         "test_marker": None,
-                        "wheels": [],
+                        "wheels": [
+                            {
+                                "name": "test.whl",
+                                "size": 5,
+                                "sha256": hashlib.sha256(b"wheel").hexdigest(),
+                            }
+                        ],
                         "toolchain": {},
                     }
                 )
@@ -247,6 +267,7 @@ class IdentityTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmpdir:
             artifact_dir = Path(tmpdir)
             identity_file = artifact_dir / "artifact-identity.json"
+            (artifact_dir / "test.whl").write_bytes(b"wheel")
             identity_file.write_text(
                 json.dumps(
                     {
@@ -256,7 +277,13 @@ class IdentityTests(unittest.TestCase):
                         "config_hash": "b" * 64,
                         "coverage_active": False,
                         "test_marker": None,
-                        "wheels": [],
+                        "wheels": [
+                            {
+                                "name": "test.whl",
+                                "size": 5,
+                                "sha256": hashlib.sha256(b"wheel").hexdigest(),
+                            }
+                        ],
                         "toolchain": {},
                     }
                 )
@@ -271,6 +298,60 @@ class IdentityTests(unittest.TestCase):
 
             result = identity.cmd_verify(args)
             self.assertNotEqual(result, 0)
+
+    def test_payload_integrity(self):
+        for change in (
+            "unchanged",
+            "same_size",
+            "truncated",
+            "missing",
+            "extra",
+            "duplicate",
+            "escape",
+            "empty",
+            "schema",
+        ):
+            with self.subTest(change=change), tempfile.TemporaryDirectory() as tmp:
+                folder = Path(tmp)
+                wheel = folder / "test.whl"
+                wheel.write_bytes(b"original")
+                manifest = {
+                    "schema_version": contract.IDENTITY_SCHEMA,
+                    "platform": "cuda",
+                    "source_sha": "a" * 40,
+                    "config_hash": "b" * 64,
+                    "wheels": [
+                        {
+                            "name": wheel.name,
+                            "size": 8,
+                            "sha256": hashlib.sha256(b"original").hexdigest(),
+                        }
+                    ],
+                }
+                if change == "same_size":
+                    wheel.write_bytes(b"replaced")
+                if change == "truncated":
+                    wheel.write_bytes(b"x")
+                if change == "missing":
+                    wheel.unlink()
+                if change == "extra":
+                    (folder / "old.whl").write_bytes(b"old")
+                if change == "duplicate":
+                    manifest["wheels"] *= 2
+                if change == "escape":
+                    manifest["wheels"][0]["name"] = "../test.whl"
+                if change == "empty":
+                    manifest["wheels"] = []
+                if change == "schema":
+                    manifest["schema_version"] = "unknown"
+                (folder / "artifact-identity.json").write_text(json.dumps(manifest))
+                args = argparse.Namespace(
+                    artifact_dir=folder,
+                    platform="cuda",
+                    source_sha="a" * 40,
+                    config_hash="b" * 64,
+                )
+                self.assertEqual(identity.cmd_verify(args), 0 if change == "unchanged" else 1)
 
 
 class GateSliceTests(unittest.TestCase):
@@ -353,6 +434,86 @@ class GateSliceTests(unittest.TestCase):
         code, _ = self.run_slice(plan, config_text="device_types: [h100]\n")
         self.assertEqual(code, 1)
 
+    def test_pytest_config_survives_planner_slice_and_runner(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            folder = Path(tmp)
+            probe = folder / "pytest_probe.py"
+            probe.write_text(
+                """import os, sys
+from pathlib import Path
+assert "--group-option" in sys.argv and "--step-option" in sys.argv
+assert os.environ["GROUP_ENV"] == "group" and os.environ["STEP_ENV"] == "step"
+xml = next(arg.split("=",1)[1] for arg in sys.argv if arg.startswith("--junitxml="))
+Path(xml).write_text('<testsuite tests="1"><testcase name="probe"/></testsuite>')
+"""
+            )
+            project = planner.load_project(ROOT / ".flagcicd/project.yaml")
+            platforms = planner.load_platforms(ROOT / ".github/configs")
+            platforms["cuda"]["config"]["unit_test_matrix"] = [
+                {
+                    "name": "pytorch_unittest",
+                    "runner": "pytest",
+                    "max_retries": 0,
+                    "pytest_args": ["--group-option"],
+                    "log_dir": str(folder / "logs"),
+                    "env": {"GROUP_ENV": "group"},
+                    "steps": [
+                        {
+                            "name": "probe",
+                            "targets": ["probe_target"],
+                            "args": ["--step-option"],
+                            "env": {"STEP_ENV": "step"},
+                            "junit": "probe.xml",
+                        }
+                    ],
+                    # Execution metadata must not override the catalog's required flag.
+                    "required": False,
+                }
+            ]
+            groups = planner.build_test_groups(project, platforms, ["cuda"], "L1", [])
+            code, outputs = self.run_slice(self.plan_for(groups))
+            self.assertEqual(code, 0)
+            entry = json.loads(outputs["serial_matrix"])["include"][0]
+            self.assertTrue(entry["required"])
+            env = dict(
+                os.environ,
+                TE_TEST_GROUP_JSON=json.dumps(entry),
+                TE_TEST_PYTEST_COMMAND=f"{sys.executable} {probe}",
+            )
+            result = subprocess.run(
+                [sys.executable, str(ROOT / "tests/test_utils/run_ci_test_group.py")],
+                env=env,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.assertEqual(gate.parse_junit_status(str(folder / "logs")), ("passed", None))
+            group = next(g for g in groups if g["group"] == "pytorch_unittest")
+            plan = make_plan(test_groups=[group])
+            args = argparse.Namespace(
+                platform="cuda",
+                device="a100",
+                group="pytorch_unittest",
+                kind="unit",
+                level="L1",
+                required=True,
+                exit_code_file=None,
+                junit_dir=str(folder / "wrong"),
+                duration="0",
+                output=folder / "group-report.json",
+            )
+            steps = {
+                "checkout": {"outcome": "success"},
+                "execute": {"outcome": "success"},
+            }
+            with patch.dict(
+                os.environ,
+                FLAGCICD_PLAN=json.dumps(plan),
+                FLAGCICD_STEPS=json.dumps(steps),
+            ):
+                self.assertEqual(gate.cmd_group_report(args), 0)
+            self.assertEqual(json.loads(args.output.read_text())["status"], "passed")
+
 
 class GroupReportEvidenceTests(unittest.TestCase):
     """A group's declared evidence decides how a zero exit code is judged."""
@@ -388,7 +549,10 @@ class GroupReportEvidenceTests(unittest.TestCase):
                 duration="5",
                 output=output,
             )
-            env = {"FLAGCICD_PLAN": json.dumps(plan), "FLAGCICD_STEPS": json.dumps(steps)}
+            env = {
+                "FLAGCICD_PLAN": json.dumps(plan),
+                "FLAGCICD_STEPS": json.dumps(steps),
+            }
             with patch.dict(gate.os.environ, env):
                 self.assertEqual(gate.cmd_group_report(args), 0)
             return json.loads(output.read_text())
@@ -400,13 +564,15 @@ class GroupReportEvidenceTests(unittest.TestCase):
     def test_junit_group_without_tests_is_skipped(self):
         report = self.report("pytorch_unittest", "junit")
         self.assertEqual(
-            (report["status"], report["failure_stage"]), ("skipped", "no_tests_collected")
+            (report["status"], report["failure_stage"]),
+            ("skipped", "no_tests_collected"),
         )
 
     def test_nonzero_exit_fails_regardless_of_evidence(self):
         report = self.report("pytorch_mcore_integration", "exit_code", "failure", "1")
         self.assertEqual(
-            (report["status"], report["failure_stage"]), ("test_failed", "test_execution")
+            (report["status"], report["failure_stage"]),
+            ("test_failed", "test_execution"),
         )
 
     def test_group_missing_from_plan_is_report_error(self):
@@ -417,6 +583,44 @@ class GroupReportEvidenceTests(unittest.TestCase):
     def test_unknown_evidence_is_report_error(self):
         report = self.report("pytorch_unittest", "stdout")
         self.assertEqual((report["status"], report["failure_stage"]), ("report_error", "evidence"))
+
+    def parse(self, xml):
+        with tempfile.TemporaryDirectory() as tmp:
+            Path(tmp, "report.xml").write_text(xml)
+            return gate.parse_junit_status(tmp)
+
+    def test_malformed_reports_cannot_pass(self):
+        reports = [
+            '<testsuite tests="1" failures="0"><testcase><failure/></testcase></testsuite>',
+            '<testsuite tests="1"/>',
+            '<testsuite tests="-1"/>',
+            '<testsuite tests="oops"/>',
+            '<testsuite tests="2"><testcase/></testsuite>',
+            "<testsuite><testcase><skipped/><error/></testcase></testsuite>",
+            "<unknown><testcase/></unknown>",
+            "<testsuite>",
+        ]
+        for xml in reports:
+            with self.subTest(xml=xml):
+                self.assertEqual(self.parse(xml), ("report_error", "junit_parsing"))
+
+    def test_actual_case_outcomes_without_summary_attributes(self):
+        for tag in ("failure", "error"):
+            with self.subTest(tag=tag):
+                self.assertEqual(
+                    self.parse(f"<testsuite><testcase><{tag}/></testcase></testsuite>"),
+                    ("test_failed", "test_execution"),
+                )
+        self.assertEqual(
+            self.parse("<testsuite><testcase><skipped/></testcase></testsuite>"),
+            ("skipped", "all_skipped"),
+        )
+
+    def test_nested_namespaced_suites_are_counted_once(self):
+        xml = """<testsuites xmlns="urn:junit" tests="2" skipped="1">
+          <testsuite tests="2" skipped="1"><testsuite tests="1"><testcase/></testsuite>
+          <testcase><skipped/></testcase></testsuite></testsuites>"""
+        self.assertEqual(self.parse(xml), ("passed", None))
 
 
 class GatePlatformReportTests(unittest.TestCase):
@@ -437,7 +641,11 @@ class GatePlatformReportTests(unittest.TestCase):
             "changed_files": {"count": 0, "documentation_only": False},
             "common_path_triggers": [],
             "platforms": [
-                {"name": "ascend", "coverage_required": True, "device_types": ["ascend"]}
+                {
+                    "name": "ascend",
+                    "coverage_required": True,
+                    "device_types": ["ascend"],
+                }
             ],
             "test_groups": [],
             "excluded": [],
@@ -457,11 +665,80 @@ class GatePlatformReportTests(unittest.TestCase):
                 output=output,
             )
             with patch.dict(
-                gate.os.environ, {"FLAGCICD_PLAN": contract.canonical_json(plan)}, clear=False
+                gate.os.environ,
+                {"FLAGCICD_PLAN": contract.canonical_json(plan)},
+                clear=False,
             ):
                 self.assertEqual(gate.cmd_platform(args), 1)
             report = json.loads(output.read_text())
             self.assertTrue(any("coverage" in error.lower() for error in report["errors"]))
+
+    def test_optional_failures_and_missing_reports_allow_final_gate(self):
+        for required, include_report in (
+            (False, True),
+            (False, False),
+            (True, True),
+            (True, False),
+        ):
+            with self.subTest(
+                required=required, include_report=include_report
+            ), tempfile.TemporaryDirectory() as tmp:
+                folder = Path(tmp)
+                group = make_group("probe", "parallel")
+                group["required"] = required
+                plan = make_plan(platforms=[{"name": "cuda"}], test_groups=[group])
+                report = {
+                    "schema_version": contract.GROUP_REPORT_SCHEMA,
+                    "platform": "cuda",
+                    "device": "a100",
+                    "group": "probe",
+                    "status": "test_failed",
+                    "executed": True,
+                    "plan_hash": plan["plan_hash"],
+                    "source_sha": plan["source_sha"],
+                }
+                if include_report:
+                    (folder / "group-report.json").write_text(json.dumps(report))
+                args = argparse.Namespace(
+                    platform="cuda",
+                    reports_dir=folder,
+                    coverage_required=False,
+                    coverage_result="failure",
+                    output=folder / "platform-report.json",
+                )
+                with patch.dict(os.environ, FLAGCICD_PLAN=json.dumps(plan)):
+                    code = gate.cmd_platform(args)
+                self.assertEqual(code, int(required))
+                platform_report = json.loads(args.output.read_text())
+                code, _ = GateTests().run_gate(plan, [platform_report])
+                self.assertEqual(code, int(required))
+
+    def test_coverage_collection_failure_only_blocks_when_required(self):
+        for required in (False, True):
+            with self.subTest(required=required), tempfile.TemporaryDirectory() as tmp:
+                folder = Path(tmp)
+                plan = make_plan(platforms=[{"name": "cuda"}])
+                args = argparse.Namespace(
+                    platform="cuda",
+                    reports_dir=folder,
+                    coverage_required=required,
+                    coverage_result="failure",
+                    output=folder / "platform-report.json",
+                )
+                with patch.dict(os.environ, FLAGCICD_PLAN=json.dumps(plan)):
+                    self.assertEqual(gate.cmd_platform(args), int(required))
+
+    def test_workflow_failure_policy_is_on_concrete_jobs(self):
+        tests = yaml.safe_load((ROOT / ".github/workflows/test_groups_common.yml").read_text())
+        coverage = yaml.safe_load((ROOT / ".github/workflows/all_tests_common.yml").read_text())
+        self.assertEqual(
+            tests["jobs"]["test_group"]["continue-on-error"],
+            "${{ matrix.required != true }}",
+        )
+        self.assertEqual(
+            coverage["jobs"]["coverage"]["continue-on-error"],
+            "${{ needs.checkout_and_config.outputs.coverage_required != 'true' }}",
+        )
 
 
 class GateTests(unittest.TestCase):
@@ -481,8 +758,14 @@ class GateTests(unittest.TestCase):
                 reports_dir=reports_dir,
                 output=output,
             )
-            needs = {"plan": {"result": "success"}, "platform-pipeline": {"result": pipeline}}
-            env = {"FLAGCICD_PLAN": json.dumps(plan), "FLAGCICD_NEEDS": json.dumps(needs)}
+            needs = {
+                "plan": {"result": "success"},
+                "platform-pipeline": {"result": pipeline},
+            }
+            env = {
+                "FLAGCICD_PLAN": json.dumps(plan),
+                "FLAGCICD_NEEDS": json.dumps(needs),
+            }
             with patch.dict(gate.os.environ, env):
                 code = gate.cmd_gate(args)
             return code, json.loads(output.read_text())
@@ -491,7 +774,10 @@ class GateTests(unittest.TestCase):
         self.plan = make_plan(platforms=[{"name": "cuda"}, {"name": "ascend"}])
 
     def test_all_reports_pass(self):
-        reports = [platform_report(self.plan, "cuda"), platform_report(self.plan, "ascend")]
+        reports = [
+            platform_report(self.plan, "cuda"),
+            platform_report(self.plan, "ascend"),
+        ]
         code, summary = self.run_gate(self.plan, reports)
         self.assertEqual((code, summary["status"], summary["errors"]), (0, "passed", []))
 
@@ -533,7 +819,10 @@ class GateTests(unittest.TestCase):
         self.assertEqual(code, 0)
 
     def test_failed_pipeline_job_fails(self):
-        reports = [platform_report(self.plan, "cuda"), platform_report(self.plan, "ascend")]
+        reports = [
+            platform_report(self.plan, "cuda"),
+            platform_report(self.plan, "ascend"),
+        ]
         code, summary = self.run_gate(self.plan, reports, pipeline="failure")
         self.assertEqual(code, 1)
         self.assertIn("Pipeline job must be success", summary["errors"])

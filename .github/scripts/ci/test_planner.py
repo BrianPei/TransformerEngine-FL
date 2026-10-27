@@ -315,6 +315,93 @@ class PlannerTests(unittest.TestCase):
         self.assertEqual(timeouts[("cuda", "pytorch_unittest")], 240)
         self.assertEqual(timeouts[("ascend", "pytorch_unittest")], 90)
 
+    def test_action_and_diff_work_from_another_directory(self):
+        action = yaml.safe_load((ROOT / ".github/actions/flagcicd-plan/action.yml").read_text())
+        script = next(s["run"] for s in action["runs"]["steps"] if s.get("id") == "plan")
+        with tempfile.TemporaryDirectory() as tmp:
+            folder = Path(tmp)
+            repo = folder / "repo"
+            repo.mkdir()
+            (repo / ".github").mkdir()
+            (repo / ".github/configs").symlink_to(
+                ROOT / ".github/configs", target_is_directory=True
+            )
+            (repo / ".flagcicd").symlink_to(ROOT / ".flagcicd", target_is_directory=True)
+            env = dict(
+                os.environ,
+                GIT_AUTHOR_NAME="Test",
+                GIT_AUTHOR_EMAIL="test@example.com",
+                GIT_COMMITTER_NAME="Test",
+                GIT_COMMITTER_EMAIL="test@example.com",
+            )
+
+            def git(*args):
+                return subprocess.run(
+                    ["git", "-C", str(repo), *args],
+                    env=env,
+                    check=True,
+                    capture_output=True,
+                    text=True,
+                ).stdout.strip()
+
+            git("init")
+            target = repo / "tests/plugin/backend/cuda/probe.py"
+            target.parent.mkdir(parents=True)
+            target.write_text("before")
+            git("add", ".")
+            git("commit", "-m", "base")
+            git("update-ref", "refs/remotes/origin/main", "HEAD")
+            target.write_text("after")
+            git("commit", "-am", "change")
+            env.update(
+                STAGE="pr",
+                SOURCE_ROOT="repo",
+                BASE_REF="main",
+                CHANGED_FILES="",
+                PLATFORMS="",
+                REQUESTED_LEVEL="auto",
+                LABELS_FROM_EVENT="false",
+                GITHUB_ACTION_PATH=str(ROOT / ".github/actions/flagcicd-plan"),
+                GITHUB_OUTPUT=str(folder / "outputs"),
+                GITHUB_STEP_SUMMARY=str(folder / "summary"),
+            )
+            result = subprocess.run(
+                ["bash", "-e", "-o", "pipefail", "-c", script],
+                cwd=folder,
+                env=env,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            plan = json.loads((repo / "plan.json").read_text())
+            self.assertEqual([p["name"] for p in plan["platforms"]], ["cuda"])
+            outputs = dict(
+                line.split("=", 1) for line in (folder / "outputs").read_text().splitlines()
+            )
+            self.assertEqual(Path(outputs["plan_path"]), repo.resolve() / "plan.json")
+            upload = action["runs"]["steps"][-1]["with"]
+            self.assertEqual(upload["path"], "${{ steps.plan.outputs.plan_path }}")
+            self.assertEqual(upload["if-no-files-found"], "error")
+            # Direct invocation must also read the diff under --source-root.
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(ROOT / ".github/scripts/ci/flagcicd_planner.py"),
+                    "--stage",
+                    "pr",
+                    "--base-ref",
+                    "main",
+                    "--source-root",
+                    str(repo),
+                ],
+                cwd=folder,
+                env=env,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual([p["name"] for p in json.loads(result.stdout)["platforms"]], ["cuda"])
+
 
 if __name__ == "__main__":
     unittest.main()

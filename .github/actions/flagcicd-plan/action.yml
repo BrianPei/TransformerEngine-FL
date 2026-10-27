@@ -78,6 +78,8 @@ runs:
         LABELS_FROM_EVENT: ${{ inputs.labels-from-event }}
       run: |
         SCRIPT_DIR="${GITHUB_ACTION_PATH}/../../scripts/ci"
+        SOURCE_ROOT="$(cd "$SOURCE_ROOT" && pwd -P)"
+        echo "plan_path=$SOURCE_ROOT/plan.json" >> "$GITHUB_OUTPUT"
         cd "$SOURCE_ROOT"
 
         ARGS=(
@@ -99,6 +101,6 @@ runs:
       uses: actions/upload-artifact@v4
       with:
         name: flagcicd-plan-${{ steps.plan.outputs.stage }}
-        path: plan.json
-        if-no-files-found: ignore
+        path: ${{ steps.plan.outputs.plan_path }}
+        if-no-files-found: error
         retention-days: 14

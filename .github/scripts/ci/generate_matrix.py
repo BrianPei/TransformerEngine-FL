@@ -35,13 +35,21 @@ import yaml
 _NON_PLATFORM_STEMS = frozenset(("template", "image_sources", "platforms"))
 
 
-def _changed_files(base_ref: str) -> list[str]:
+def _changed_files(base_ref: str, cwd: pathlib.Path | None = None) -> list[str]:
     # Disabling rename detection includes both old and new paths for moves.
     result = subprocess.run(
-        ["git", "diff", "--no-renames", "--name-only", "-z", f"origin/{base_ref}...HEAD"],
+        [
+            "git",
+            "diff",
+            "--no-renames",
+            "--name-only",
+            "-z",
+            f"origin/{base_ref}...HEAD",
+        ],
         capture_output=True,
         text=True,
         check=True,
+        cwd=cwd,
     )
     return [path for path in result.stdout.split("\0") if path]
 
@@ -51,7 +59,10 @@ def _matches(path: str, watch: str) -> bool:
 
 
 def _is_documentation(path: str) -> bool:
-    return path.startswith("docs/") or pathlib.PurePosixPath(path).suffix in (".md", ".rst")
+    return path.startswith("docs/") or pathlib.PurePosixPath(path).suffix in (
+        ".md",
+        ".rst",
+    )
 
 
 def _load_watch_rules(configs_dir: pathlib.Path) -> dict[str, list[str]]:

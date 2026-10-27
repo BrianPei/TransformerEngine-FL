@@ -247,22 +247,6 @@ coverage:
   # window over earlier nightly reports per platform/device/level.
   regression_contract: .flagcicd/golden_baseline.json
 
-images:
-  layers:
-    - base
-    - vendor
-    - runtime
-    - source
-    - test
-  reuse_key:
-    - base_digest
-    - vendor_sdk
-    - toolchain
-    - lockfile_hash
-    - source_sha
-    - test_level
-    - instrumentation
-
 report:
   group_schema: flagcicd.group-report/v1
   platform_schema: flagcicd.platform-report/v1
@@ -278,10 +262,8 @@ report:
     - cancelled
     - report_error
 
-# Validation scope for automated gate checks.
-validation_scope:
-  require_plan_hash: true
-  require_artifact_identity: true
-  require_group_report_for_required: true
-  allow_missing_optional: true
-  coverage_gate_advisory: true  # coverage failure is advisory, not blocking
+# Fixed gate contract (implemented by planner, identity verifier and workflows):
+# plan/source/config identities and required group evidence are mandatory.
+# Optional groups may fail or omit reports; supplied reports must match the plan.
+# coverage.required in each platform config controls collection failures.
+# PR/nightly coverage regression checks are advisory.

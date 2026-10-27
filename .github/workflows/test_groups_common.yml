@@ -83,6 +83,8 @@ jobs:
       image: ${{ inputs.image }}
       volumes: ${{ fromJson(inputs.container_volumes) }}
       options: --pull ${{ inputs.container_pull_policy }} ${{ inputs.container_options }}
+    # Preserve failed step outcomes/reports; only required jobs block the caller.
+    continue-on-error: ${{ matrix.required != true }}
     timeout-minutes: ${{ matrix.timeout }}
     steps:
       - name: Prepare checkout environment

@@ -470,7 +470,7 @@ def build_plan(args: argparse.Namespace) -> dict[str, Any]:
         changed = json.loads(args.changed_files)
     elif stage_name == "pr" and args.base_ref:
         try:
-            changed = gm._changed_files(args.base_ref)
+            changed = gm._changed_files(args.base_ref, cwd=source_root)
         except subprocess.CalledProcessError:
             pass
 
