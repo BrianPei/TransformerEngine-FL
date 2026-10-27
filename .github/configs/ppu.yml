@@ -30,9 +30,25 @@ device_types:
 nproc_per_node: 2
 setup_script: .github/scripts/setup_ppu.sh
 unit_test_matrix:
-  - name: pytorch_unittest
+  - name: pytorch_debug
     runner: script
     path: tests/plugin/backend/ppu/run_unit_tests.sh
+    args: [debug]
+    timeout_minutes: 240
+  - name: pytorch_unit
+    runner: script
+    path: tests/plugin/backend/ppu/run_unit_tests.sh
+    args: [unittest]
+    timeout_minutes: 240
+  - name: pytorch_distributed
+    runner: script
+    path: tests/plugin/backend/ppu/run_unit_tests.sh
+    args: [distributed]
+    timeout_minutes: 240
+  - name: pytorch_onnx
+    runner: script
+    path: tests/plugin/backend/ppu/run_unit_tests.sh
+    args: [onnx]
     timeout_minutes: 240
 integration_test_matrix:
   - name: pytorch_mcore_integration

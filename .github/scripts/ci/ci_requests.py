@@ -1,4 +1,4 @@
-"""Resolve authorized CI requests to platforms, a fixed ref and a test level."""
+"""Resolve public CI requests and maintainer approvals to executable requests."""
 
 import json
 import os
@@ -24,21 +24,37 @@ def resolve(event, api, available):
     if event.get("action") != "created" or not event.get("issue", {}).get("pull_request"):
         raise ValueError("Expected a newly created PR comment")
     comment = event["comment"]
-    match = re.fullmatch(r"/(?:ci run|test) ([^\r\n]+)", comment["body"].strip())
-    if not match:
-        raise ValueError("Expected /ci run <platforms|all> or /test <platforms|all>")
-    number, requested, login = event["issue"]["number"], match[1], comment["user"]["login"]
-    permission = api(f"collaborators/{quote(login, safe='')}/permission")["permission"]
-    if permission not in {"write", "maintain", "admin"}:
-        raise PermissionError("Requesting CI requires repository write permission")
+    number = event["issue"]["number"]
     if number <= 0:
         raise ValueError("Expected a positive PR number")
-    platforms = select_platforms(requested, available)
+    body = comment["body"].strip()
+    approval = re.fullmatch(r"/ci approve ([1-9][0-9]*)", body)
+    request = re.fullmatch(r"/(?:ci run|test) ([^\r\n]+)", body)
+    if not approval and not request:
+        raise ValueError(
+            "Expected /ci run <platforms|all>, /test <platforms|all> or /ci approve <comment-id>"
+        )
+
+    login = comment["user"]["login"]
+    permission = api(f"collaborators/{quote(login, safe='')}/permission")["permission"]
+    approved = permission in {"write", "maintain", "admin"}
+    if approval:
+        if not approved:
+            raise PermissionError("Approving CI requires repository write permission")
+        original = api(f"issues/comments/{approval[1]}")
+        issue_url = event["issue"].get("url")
+        if not issue_url or original.get("issue_url") != issue_url:
+            raise ValueError("Approval must reference a request on this PR")
+        request = re.fullmatch(r"/(?:ci run|test) ([^\r\n]+)", original["body"].strip())
+        if not request:
+            raise ValueError("Referenced comment is not a CI request")
+
+    platforms = select_platforms(request[1], available)
     pr = api(f"pulls/{number}")
     sha = pr["head"]["sha"]
     if pr["state"] != "open" or not re.fullmatch(r"[0-9a-f]{40}", sha):
         raise ValueError("Expected an open PR with a valid head SHA")
-    return platforms, sha
+    return platforms, sha, approved
 
 
 def resolve_dispatch(inputs, available, default_ref):
@@ -71,10 +87,25 @@ def main():
         platforms, ref, level = resolve_dispatch(
             event.get("inputs") or {}, available, os.environ["GITHUB_SHA"]
         )
+        approved = True
     else:
-        (platforms, ref), level = resolve(event, api, available), "auto"
+        (platforms, ref, approved), level = resolve(event, api, available), "auto"
+    if not approved:
+        message = (
+            "### CI request awaiting maintainer approval\n\nRequested platforms:"
+            f" {', '.join(platforms)}\n\nPR head at request time: `{ref}`\n\nA maintainer can"
+            f" approve on this PR with `/ci approve {event['comment']['id']}`.\n\nApproval runs the"
+            " PR head at approval time. No PR code or device tests run while pending.\n"
+        )
+        print(message)
+        if summary := os.environ.get("GITHUB_STEP_SUMMARY"):
+            with open(summary, "a") as output:
+                output.write(message)
     with open(os.environ["GITHUB_OUTPUT"], "a") as output:
-        output.write(f"platforms={json.dumps(platforms)}\ncheckout_ref={ref}\ntest_level={level}\n")
+        output.write(
+            f"platforms={json.dumps(platforms)}\ncheckout_ref={ref}\ntest_level={level}\n"
+            f"approved={json.dumps(approved)}\n"
+        )
 
 
 if __name__ == "__main__":

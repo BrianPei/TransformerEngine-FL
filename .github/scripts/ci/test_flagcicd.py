@@ -9,6 +9,7 @@ Run: python -m unittest .github/scripts/ci/test_flagcicd.py
 from __future__ import annotations
 
 import argparse
+import copy
 import hashlib
 import importlib.util
 import json
@@ -33,8 +34,26 @@ ROOT = Path(__file__).resolve().parents[3]
 SHA = "a" * 40
 
 
-def make_plan(platforms=(), test_groups=(), blocked=(), stage="pr"):
-    """Return a hash-valid plan with the fields the gate subcommands read."""
+def make_plan(platforms=(), test_groups=(), blocked=(), stage="pr", execution_groups=None):
+    """Return a hash-valid plan containing logical groups and runtime jobs.
+
+    Most isolated gate fixtures supply runtime jobs and use one logical group per
+    job. Planner integration fixtures provide both lists explicitly.
+    """
+    if execution_groups is None:
+        execution_groups = copy.deepcopy(list(test_groups))
+        logical_groups = []
+        for execution in execution_groups:
+            names = execution.setdefault("test_groups", [execution["group"]])
+            for name in names:
+                logical = copy.deepcopy(execution)
+                logical["group"] = name
+                logical["execution_group"] = execution["group"]
+                logical.pop("test_groups", None)
+                logical_groups.append(logical)
+    else:
+        logical_groups = copy.deepcopy(list(test_groups))
+        execution_groups = copy.deepcopy(list(execution_groups))
     plan = {
         "schema_version": contract.PLAN_SCHEMA,
         "repository": "TransformerEngine-FL",
@@ -44,12 +63,12 @@ def make_plan(platforms=(), test_groups=(), blocked=(), stage="pr"):
         "source_sha": SHA,
         "base_sha": None,
         "test_level": "L2",
-        "risk_level": "R1",
-        "risk_rule_version": "v2",
+        "test_level_rule_version": "v2",
         "changed_files": {"count": 0, "documentation_only": False},
         "common_path_triggers": [],
         "platforms": list(platforms),
-        "test_groups": list(test_groups),
+        "test_groups": logical_groups,
+        "execution_groups": execution_groups,
         "excluded": [],
         "blocked": list(blocked),
         "reasons": [],
@@ -64,6 +83,7 @@ def make_group(name, lane, platform="cuda", device="a100", evidence="junit", kin
         "platform": platform,
         "device": device,
         "group": name,
+        "test_groups": [name],
         "kind": kind,
         "level": "L0" if lane == "preflight" else "L1",
         "required": True,
@@ -90,6 +110,53 @@ def platform_report(plan, platform, **overrides):
         "platform": platform,
         "status": "passed",
         "errors": [],
+        "test_groups": [
+            logical_report(plan, group)
+            for group in plan["test_groups"]
+            if group["platform"] == platform
+        ],
+    }
+    report.update(overrides)
+    return report
+
+
+def logical_report(plan, group, **overrides):
+    report = {
+        "schema_version": contract.GROUP_REPORT_SCHEMA,
+        "repository": plan["repository"],
+        "stage": plan["stage"],
+        "plan_hash": plan["plan_hash"],
+        "source_sha": plan["source_sha"],
+        "platform": group["platform"],
+        "device": group["device"],
+        "group": group["group"],
+        "execution_group": group["execution_group"],
+        "status": "passed",
+        "executed": True,
+        "required": group["required"],
+    }
+    report.update(overrides)
+    return report
+
+
+def execution_report(plan, execution, **overrides):
+    report = {
+        "schema_version": contract.GROUP_REPORT_SCHEMA,
+        "repository": plan["repository"],
+        "stage": plan["stage"],
+        "plan_hash": plan["plan_hash"],
+        "source_sha": plan["source_sha"],
+        "platform": execution["platform"],
+        "device": execution["device"],
+        "group": execution["group"],
+        "status": "passed",
+        "executed": True,
+        "test_group_reports": [
+            logical_report(plan, group)
+            for group in plan["test_groups"]
+            if (group["platform"], group["device"], group["execution_group"])
+            == (execution["platform"], execution["device"], execution["group"])
+        ],
     }
     report.update(overrides)
     return report
@@ -113,10 +180,9 @@ class ContractSchemaTests(unittest.TestCase):
         self.assertIn("build_failed", contract.STATUSES)
         self.assertIn("infra_error", contract.STATUSES)
 
-    def test_level_and_risk_constants(self):
-        """Verify level and risk constants."""
+    def test_level_constants(self):
+        """Verify test level constants."""
         self.assertEqual(contract.LEVELS, ("L0", "L1", "L2", "L3", "L4"))
-        self.assertEqual(contract.RISKS, ("R1", "R2", "R3", "R4"))
 
     def test_canonical_json_deterministic(self):
         """Verify canonical JSON is deterministic."""
@@ -148,6 +214,65 @@ class ContractSchemaTests(unittest.TestCase):
         plan["stage"] = "nightly"
         hash3 = contract.compute_plan_hash(plan)
         self.assertNotEqual(hash1, hash3)
+
+    def test_plan_contract_requires_consistent_logical_execution_membership(self):
+        runtime = make_group("pytorch_unit", "serial")
+        runtime["test_groups"] = ["core", "optimizer"]
+        valid = make_plan(test_groups=[runtime])
+        self.assertEqual(contract.validate_plan(valid), [])
+        for change in (
+            "missing_jobs",
+            "missing_logical",
+            "duplicate_logical",
+            "duplicate_membership",
+            "wrong_execution",
+        ):
+            with self.subTest(change=change):
+                plan = copy.deepcopy(valid)
+                if change == "missing_jobs":
+                    plan.pop("execution_groups")
+                elif change == "missing_logical":
+                    plan["test_groups"].pop()
+                elif change == "duplicate_logical":
+                    plan["test_groups"].append(copy.deepcopy(plan["test_groups"][0]))
+                elif change == "duplicate_membership":
+                    plan["execution_groups"][0]["test_groups"].append("core")
+                else:
+                    plan["test_groups"][0]["execution_group"] = "pytorch_debug"
+                plan["plan_hash"] = contract.compute_plan_hash(plan)
+                self.assertTrue(contract.validate_plan(plan))
+
+    def test_coverage_report_contract_requires_no_risk_fields(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            output = Path(tmp, "report.json")
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(ROOT / ".github/scripts/flagcicd_report.py"),
+                    "--platform",
+                    "cuda",
+                    "--test-level",
+                    "L2",
+                    "--output",
+                    str(output),
+                ],
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            report = json.loads(output.read_text())
+            self.assertFalse(any("risk" in key for key in report))
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(ROOT / ".github/scripts/flagcicd_report.py"),
+                    "--validate",
+                    str(output),
+                ],
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
 
 
 class IdentityTests(unittest.TestCase):
@@ -365,7 +490,7 @@ class GateSliceTests(unittest.TestCase):
             output = Path(tmpdir, "github-output")
             output.write_text("")
             args = argparse.Namespace(platform="cuda", configs_dir=str(configs), github_output=True)
-            head = Mock(stdout=SHA + "\n")
+            head = Mock(stdout=plan["source_sha"] + "\n")
             env = {"FLAGCICD_PLAN": json.dumps(plan), "GITHUB_OUTPUT": str(output)}
             with patch.object(gate.subprocess, "run", return_value=head), patch.dict(
                 gate.os.environ, env
@@ -376,22 +501,35 @@ class GateSliceTests(unittest.TestCase):
             )
         return code, values
 
-    def plan_for(self, groups, config_text="device_types: [a100]\n"):
+    def plan_for(
+        self,
+        groups,
+        config_text="device_types: [a100]\n",
+        coverage_groups=None,
+        execution_groups=None,
+    ):
         entry = {
             "name": "cuda",
             "config_hash": hashlib.sha256(config_text.encode()).hexdigest(),
             "coverage_required": True,
         }
-        other = make_group("pytorch_unittest", "parallel", platform="ascend", device="910b")
+        if coverage_groups is not None:
+            entry["coverage_groups"] = list(coverage_groups)
+        other = make_group("pytorch_unit", "parallel", platform="ascend", device="910b")
+        if execution_groups is not None:
+            return make_plan(
+                platforms=[entry], test_groups=groups, execution_groups=execution_groups
+            )
         return make_plan(platforms=[entry], test_groups=[*groups, other])
 
     def test_lanes_are_partitioned_per_platform(self):
         plan = self.plan_for(
             [
                 make_group("preflight", "preflight"),
-                make_group("pytorch_unittest", "parallel"),
+                make_group("pytorch_unit", "parallel"),
                 make_group("pytorch_mcore_integration", "serial", evidence="exit_code"),
-            ]
+            ],
+            coverage_groups=["pytorch_unit"],
         )
         code, out = self.run_slice(plan)
         self.assertEqual(code, 0)
@@ -403,7 +541,7 @@ class GateSliceTests(unittest.TestCase):
             names,
             {
                 "preflight": ["preflight"],
-                "parallel": ["pytorch_unittest"],
+                "parallel": ["pytorch_unit"],
                 "serial": ["pytorch_mcore_integration"],
             },
         )
@@ -412,6 +550,7 @@ class GateSliceTests(unittest.TestCase):
             ("true", "true", "true"),
         )
         self.assertEqual((out["coverage_active"], out["coverage_required"]), ("true", "true"))
+        self.assertEqual(out["coverage_comparable"], "true")
         preflight = json.loads(out["preflight_matrix"])["include"][0]
         self.assertEqual((preflight["device"], preflight["timeout"]), ("a100", 90))
         serial = json.loads(out["serial_matrix"])["include"][0]
@@ -424,6 +563,111 @@ class GateSliceTests(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertEqual((out["has_parallel"], out["has_serial"]), ("false", "false"))
         self.assertEqual(json.loads(out["parallel_matrix"]), {"include": []})
+        self.assertEqual((out["coverage_active"], out["coverage_required"]), ("false", "false"))
+
+    def test_group_selection_survives_matrix_slicing(self):
+        group = make_group("pytorch_unit", "serial")
+        selection = {
+            "test_targets": ["tests/pytorch/test_fused_adam.py"],
+            "group_test_targets": {"optimizer": ["tests/pytorch/test_fused_adam.py"]},
+        }
+        group["test_groups"] = ["optimizer"]
+        group["exec"].update(selection)
+        code, out = self.run_slice(self.plan_for([group], coverage_groups=["pytorch_unit"]))
+        self.assertEqual(code, 0)
+        entry = json.loads(out["serial_matrix"])["include"][0]
+        self.assertEqual({key: entry[key] for key in selection}, selection)
+        self.assertEqual(entry["test_groups"], ["optimizer"])
+
+    def test_shared_execution_is_sliced_once_for_multiple_logical_groups(self):
+        execution = make_group("pytorch_unit", "serial")
+        execution["test_groups"] = ["core", "optimizer"]
+        plan = self.plan_for([execution])
+        self.assertEqual(
+            [group["group"] for group in plan["test_groups"][:2]],
+            ["core", "optimizer"],
+        )
+        code, out = self.run_slice(plan)
+        self.assertEqual(code, 0)
+        entries = json.loads(out["serial_matrix"])["include"]
+        self.assertEqual(len(entries), 1)
+        self.assertEqual(entries[0]["name"], "pytorch_unit")
+        self.assertEqual(entries[0]["test_groups"], ["core", "optimizer"])
+
+    def test_group_subset_is_not_comparable_even_when_all_suites_are_selected(self):
+        suites = [
+            "pytorch_debug",
+            "pytorch_unit",
+            "pytorch_distributed",
+            "pytorch_onnx",
+        ]
+        plan = self.plan_for(
+            [make_group(name, "serial") for name in suites], coverage_groups=suites
+        )
+        plan["platforms"][0]["coverage_full_scope"] = False
+        plan["plan_hash"] = contract.compute_plan_hash(plan)
+        code, out = self.run_slice(plan)
+        self.assertEqual(code, 0)
+        self.assertEqual(out["coverage_comparable"], "false")
+
+    def test_coverage_comparison_requires_complete_declared_scope(self):
+        suites = [
+            "pytorch_debug",
+            "pytorch_unit",
+            "pytorch_distributed",
+            "pytorch_onnx",
+        ]
+        for selected, expected_scope, expected in (
+            (suites, suites, "true"),
+            (["pytorch_onnx"], suites, "false"),
+            (suites, None, "false"),
+            (suites, [], "false"),
+            ([], suites, "false"),
+            (suites + ["additional_coverage"], suites, "false"),
+        ):
+            with self.subTest(selected=selected, expected_scope=expected_scope):
+                groups = [make_group(name, "parallel") for name in selected]
+                code, out = self.run_slice(self.plan_for(groups, coverage_groups=expected_scope))
+                self.assertEqual(code, 0)
+                self.assertEqual(out["coverage_comparable"], expected)
+
+    def test_planned_coverage_scope_survives_nightly_and_partial_pr_slicing(self):
+        config_text = (ROOT / ".github/configs/cuda.yml").read_text()
+        for stage, changed, expected in (
+            ("nightly", [], "true"),
+            ("pr", ["tests/pytorch/test_onnx_export.py"], "false"),
+        ):
+            with self.subTest(stage=stage):
+                args = argparse.Namespace(
+                    source_root=ROOT,
+                    project=".flagcicd/project.yaml",
+                    configs_dir=".github/configs",
+                    stage=stage,
+                    source_sha="",
+                    base_ref="",
+                    changed_files=json.dumps(changed),
+                    platforms="",
+                    requested_level="auto",
+                    labels_from_event=False,
+                )
+                plan = planner.build_plan(args)
+                code, out = self.run_slice(plan, config_text=config_text)
+                self.assertEqual(code, 0)
+                self.assertEqual(out["coverage_active"], "true")
+                self.assertEqual(out["coverage_comparable"], expected)
+
+    def test_partial_coverage_is_excluded_from_baseline_comparisons(self):
+        workflow = yaml.safe_load((ROOT / ".github/workflows/all_tests_common.yml").read_text())
+        outputs = workflow["jobs"]["checkout_and_config"]["outputs"]
+        self.assertEqual(
+            outputs["coverage_comparable"],
+            "${{ steps.slice.outputs.coverage_comparable }}",
+        )
+        steps = {step["name"]: step for step in workflow["jobs"]["coverage"]["steps"]}
+        for name in ("Check PR coverage regression", "Check daily 3-sigma regression"):
+            self.assertIn("outputs.coverage_comparable == 'true'", steps[name]["if"])
+        artifact_name = steps["Upload coverage report"]["with"]["name"]
+        self.assertIn("outputs.coverage_comparable != 'true' && '-partial'", artifact_name)
 
     def test_unknown_lane_fails(self):
         code, _ = self.run_slice(self.plan_for([make_group("probe", "fast")]))
@@ -444,36 +688,50 @@ from pathlib import Path
 assert "--group-option" in sys.argv and "--step-option" in sys.argv
 assert os.environ["GROUP_ENV"] == "group" and os.environ["STEP_ENV"] == "step"
 xml = next(arg.split("=",1)[1] for arg in sys.argv if arg.startswith("--junitxml="))
-Path(xml).write_text('<testsuite tests="1"><testcase name="probe"/></testsuite>')
+Path(xml).write_text('<testsuite tests="1"><testcase name="probe"><properties><property name="flagcicd_test_nodeid" value="probe_target::probe"/></properties></testcase></testsuite>')
 """
             )
             project = planner.load_project(ROOT / ".flagcicd/project.yaml")
+            project["test_groups"] = [
+                group for group in project["test_groups"] if group["name"] in ("preflight", "core")
+            ]
+            next(group for group in project["test_groups"] if group["name"] == "core")[
+                "test_targets"
+            ] = ["probe_target"]
             platforms = planner.load_platforms(ROOT / ".github/configs")
+            pytest_entry = {
+                "name": "pytorch_unit",
+                "runner": "pytest",
+                "max_retries": 0,
+                "pytest_args": ["--group-option"],
+                "log_dir": str(folder / "logs"),
+                "env": {"GROUP_ENV": "group"},
+                "steps": [
+                    {
+                        "name": "probe",
+                        "targets": ["probe_target"],
+                        "args": ["--step-option"],
+                        "env": {"STEP_ENV": "step"},
+                        "junit": "probe.xml",
+                    }
+                ],
+                # Execution metadata must not override the catalog's required flag.
+                "required": False,
+            }
+            entries = platforms["cuda"]["config"]["unit_test_matrix"]
             platforms["cuda"]["config"]["unit_test_matrix"] = [
-                {
-                    "name": "pytorch_unittest",
-                    "runner": "pytest",
-                    "max_retries": 0,
-                    "pytest_args": ["--group-option"],
-                    "log_dir": str(folder / "logs"),
-                    "env": {"GROUP_ENV": "group"},
-                    "steps": [
-                        {
-                            "name": "probe",
-                            "targets": ["probe_target"],
-                            "args": ["--step-option"],
-                            "env": {"STEP_ENV": "step"},
-                            "junit": "probe.xml",
-                        }
-                    ],
-                    # Execution metadata must not override the catalog's required flag.
-                    "required": False,
-                }
+                pytest_entry if entry["name"] == "pytorch_unit" else entry for entry in entries
             ]
             groups = planner.build_test_groups(project, platforms, ["cuda"], "L1", [])
-            code, outputs = self.run_slice(self.plan_for(groups))
+            executions = planner.build_execution_groups(project, platforms, groups, full_scope=True)
+            plan = self.plan_for(groups, execution_groups=executions)
+            code, outputs = self.run_slice(plan)
             self.assertEqual(code, 0)
-            entry = json.loads(outputs["serial_matrix"])["include"][0]
+            entry = next(
+                entry
+                for entry in json.loads(outputs["serial_matrix"])["include"]
+                if entry["name"] == "pytorch_unit"
+            )
             self.assertTrue(entry["required"])
             env = dict(
                 os.environ,
@@ -488,12 +746,11 @@ Path(xml).write_text('<testsuite tests="1"><testcase name="probe"/></testsuite>'
             )
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
             self.assertEqual(gate.parse_junit_status(str(folder / "logs")), ("passed", None))
-            group = next(g for g in groups if g["group"] == "pytorch_unittest")
-            plan = make_plan(test_groups=[group])
+
             args = argparse.Namespace(
                 platform="cuda",
                 device="a100",
-                group="pytorch_unittest",
+                group="pytorch_unit",
                 kind="unit",
                 level="L1",
                 required=True,
@@ -514,6 +771,125 @@ Path(xml).write_text('<testsuite tests="1"><testcase name="probe"/></testsuite>'
                 self.assertEqual(gate.cmd_group_report(args), 0)
             self.assertEqual(json.loads(args.output.read_text())["status"], "passed")
 
+    @unittest.skipUnless(importlib.util.find_spec("pytest"), "pytest is required")
+    def test_plan_slice_script_and_real_junit_agree(self):
+        """Run the entire test group selection handoff using tiny CPU-only tests."""
+        with tempfile.TemporaryDirectory() as tmp:
+            folder = Path(tmp)
+            tests = folder / "tests/pytorch"
+            tests.mkdir(parents=True)
+            (tests / "test_deferred_init.py").write_text("def test_core(): assert True\n")
+            optimizer = tests / "test_fused_optimizer.py"
+            optimizer.write_text("def test_optimizer(): assert True\n")
+            (tests / "test_unrelated.py").write_text("raise RuntimeError('must not import')\n")
+            script = folder / "suite.sh"
+            script.write_text(
+                '"$PYTHON_BIN" -m pytest -q tests/pytorch --junitxml="$XML_LOG_DIR/suite.xml"\n'
+            )
+            project = planner.load_project(ROOT / ".flagcicd/project.yaml")
+            platforms = planner.load_platforms(ROOT / ".github/configs")
+            platforms["cuda"]["config"]["unit_test_matrix"] = [
+                {
+                    "name": "pytorch_unit",
+                    "runner": "script",
+                    "path": "suite.sh",
+                    "env": {"PYTHON_BIN": sys.executable},
+                    "max_retries": 0,
+                }
+            ]
+            changed = ["tests/pytorch/test_fused_optimizer.py"]
+            selection = planner.select_test_groups(project, changed, "L1", "pr")
+            groups = planner.build_test_groups(
+                project,
+                platforms,
+                ["cuda"],
+                "L1",
+                changed,
+                selection=selection,
+            )
+            executions = planner.build_execution_groups(
+                project, platforms, groups, full_scope=False
+            )
+            plan = self.plan_for(groups, execution_groups=executions)
+            code, outputs = self.run_slice(plan)
+            self.assertEqual(code, 0)
+            entry = json.loads(outputs["serial_matrix"])["include"][0]
+            log_dir = folder / "logs"
+            log_dir.mkdir()
+            env = dict(
+                os.environ,
+                TE_TEST_GROUP_JSON=json.dumps(entry),
+                GITHUB_WORKSPACE=str(folder),
+                XML_LOG_DIR=str(log_dir),
+                PYTEST_DISABLE_PLUGIN_AUTOLOAD="1",
+                PYTEST_PLUGINS="",
+            )
+            for failure in (False, True):
+                if failure:
+                    optimizer.write_text("def test_optimizer(): assert False\n")
+                result = subprocess.run(
+                    [
+                        sys.executable,
+                        str(ROOT / "tests/test_utils/run_ci_test_group.py"),
+                    ],
+                    env=env,
+                    cwd=folder,
+                    capture_output=True,
+                    text=True,
+                )
+                self.assertEqual(result.returncode, int(failure), result.stdout + result.stderr)
+                args = argparse.Namespace(
+                    platform="cuda",
+                    device="a100",
+                    group="pytorch_unit",
+                    kind="unit",
+                    level="L1",
+                    required=True,
+                    exit_code_file=None,
+                    junit_dir=str(log_dir),
+                    duration="0",
+                    output=folder / "group-report.json",
+                )
+                steps = {
+                    "checkout": {"outcome": "success"},
+                    "execute": {"outcome": "success"},
+                }
+                with patch.dict(
+                    os.environ,
+                    FLAGCICD_PLAN=json.dumps(plan),
+                    FLAGCICD_STEPS=json.dumps(steps),
+                ):
+                    self.assertEqual(gate.cmd_group_report(args), 0)
+                report = json.loads(args.output.read_text())
+                self.assertEqual(report["status"], "test_failed" if failure else "passed")
+                if not failure:
+                    self.assertEqual(
+                        report["test_group_evidence"], {"core": True, "optimizer": True}
+                    )
+                self.assertEqual(
+                    {child["group"] for child in report["test_group_reports"]},
+                    {"core", "optimizer"},
+                )
+                for execution in plan["execution_groups"]:
+                    if execution["group"] != "pytorch_unit":
+                        other = folder / execution["group"] / "group-report.json"
+                        other.parent.mkdir(exist_ok=True)
+                        other.write_text(json.dumps(execution_report(plan, execution)))
+                platform_args = argparse.Namespace(
+                    platform="cuda",
+                    reports_dir=folder,
+                    coverage_required=False,
+                    coverage_result="success",
+                    output=folder / "platform-report.json",
+                )
+                with patch.dict(os.environ, FLAGCICD_PLAN=json.dumps(plan)):
+                    self.assertEqual(gate.cmd_platform(platform_args), int(failure))
+                checked_platform = json.loads(platform_args.output.read_text())
+                self.assertEqual(
+                    {child["group"] for child in checked_platform["test_groups"]},
+                    {group["group"] for group in plan["test_groups"]},
+                )
+
 
 class GroupReportEvidenceTests(unittest.TestCase):
     """A group's declared evidence decides how a zero exit code is judged."""
@@ -528,14 +904,29 @@ class GroupReportEvidenceTests(unittest.TestCase):
             status, failure_stage = gate.parse_junit_status(tmpdir)
         self.assertEqual((status, failure_stage), ("skipped", "no_tests_collected"))
 
-    def report(self, group, evidence, outcome="success", exit_code="0", plan_group=None):
+    def report(
+        self,
+        group,
+        evidence,
+        outcome="success",
+        exit_code="0",
+        plan_group=None,
+        xml=None,
+        extra_steps=None,
+    ):
         plan = make_plan(test_groups=[plan_group or make_group(group, "serial", evidence=evidence)])
-        steps = {"checkout": {"outcome": "success"}, "execute": {"outcome": outcome}}
+        steps = {
+            "checkout": {"outcome": "success"},
+            "execute": {"outcome": outcome},
+            **(extra_steps or {}),
+        }
         with tempfile.TemporaryDirectory() as tmpdir:
             exit_file = Path(tmpdir, "exit_code")
             exit_file.write_text(exit_code)
             junit = Path(tmpdir, "junit")
             junit.mkdir()
+            if xml is not None:
+                (junit / "report.xml").write_text(xml)
             output = Path(tmpdir, "group-report.json")
             args = argparse.Namespace(
                 platform="cuda",
@@ -562,7 +953,7 @@ class GroupReportEvidenceTests(unittest.TestCase):
         self.assertEqual((report["status"], report["executed"]), ("passed", True))
 
     def test_junit_group_without_tests_is_skipped(self):
-        report = self.report("pytorch_unittest", "junit")
+        report = self.report("pytorch_unit", "junit")
         self.assertEqual(
             (report["status"], report["failure_stage"]),
             ("skipped", "no_tests_collected"),
@@ -576,13 +967,189 @@ class GroupReportEvidenceTests(unittest.TestCase):
         )
 
     def test_group_missing_from_plan_is_report_error(self):
-        other = make_group("pytorch_unittest", "parallel")
+        other = make_group("pytorch_unit", "parallel")
         report = self.report("unplanned", "exit_code", plan_group=other)
         self.assertEqual((report["status"], report["failure_stage"]), ("report_error", "plan"))
 
     def test_unknown_evidence_is_report_error(self):
-        report = self.report("pytorch_unittest", "stdout")
+        report = self.report("pytorch_unit", "stdout")
         self.assertEqual((report["status"], report["failure_stage"]), ("report_error", "evidence"))
+
+    def selected_groups(self):
+        group = make_group("pytorch_unit", "serial")
+        group["test_groups"] = ["core", "optimizer"]
+        group["exec"].update(
+            {
+                "test_targets": [
+                    "tests/pytorch/test_recipe.py",
+                    "tests/pytorch/test_fused_adam.py",
+                ],
+                "group_test_targets": {
+                    "core": ["tests/pytorch/test_recipe.py"],
+                    "optimizer": ["tests/pytorch/test_fused_adam.py"],
+                },
+            }
+        )
+        return group
+
+    @staticmethod
+    def selected_case(path, outcome="", node="probe"):
+        return (
+            '<testcase name="probe"><properties><property name="flagcicd_test_path"'
+            f' value="{path}"/><property name="flagcicd_test_nodeid"'
+            f' value="{path}::{node}"/></properties>{outcome}</testcase>'
+        )
+
+    def test_selected_groups_require_real_passing_test_evidence(self):
+        group = self.selected_groups()
+        cases = self.selected_case("tests/pytorch/test_recipe.py")
+        cases += self.selected_case("tests/pytorch/test_fused_adam.py")
+        report = self.report(
+            "pytorch_unit",
+            "junit",
+            plan_group=group,
+            xml=f"<testsuite>{cases}</testsuite>",
+        )
+        self.assertEqual((report["status"], report["executed"]), ("passed", True))
+        self.assertEqual(report["test_group_evidence"], {"core": True, "optimizer": True})
+        children = {child["group"]: child for child in report["test_group_reports"]}
+        self.assertEqual(set(children), {"core", "optimizer"})
+        for child in children.values():
+            self.assertEqual(child["status"], "passed")
+            self.assertTrue(child["executed"])
+            self.assertEqual(child["execution_group"], "pytorch_unit")
+
+    def test_unrelated_or_skipped_test_cannot_claim_group_evidence(self):
+        group = self.selected_groups()
+        for extra in (
+            self.selected_case("tests/pytorch/test_sanity.py"),
+            self.selected_case("tests/pytorch/test_fused_adam.py", "<skipped/>"),
+            '<testcase name="test_fused_adam" classname="tests.pytorch.test_fused_adam"/>',
+        ):
+            with self.subTest(extra=extra):
+                cases = self.selected_case("tests/pytorch/test_recipe.py") + extra
+                report = self.report(
+                    "pytorch_unit",
+                    "junit",
+                    plan_group=group,
+                    xml=f"<testsuite>{cases}</testsuite>",
+                )
+                self.assertEqual(report["status"], "report_error")
+                self.assertEqual(report["failure_stage"], "test_group_evidence")
+                self.assertEqual(
+                    {child["group"]: child["status"] for child in report["test_group_reports"]},
+                    {"core": "passed", "optimizer": "report_error"},
+                )
+
+    def test_mixed_file_linear_case_cannot_certify_normalization_or_attention(self):
+        catalog = {
+            g["name"]: g
+            for g in yaml.safe_load((ROOT / ".flagcicd/project.yaml").read_text())["test_groups"]
+        }
+        targets = {
+            name: catalog[name]["test_targets"] for name in ("normalization", "gemm", "attention")
+        }
+        probes = (
+            ("tests/pytorch/test_sanity.py", "test_sanity_linear[small]", "gemm"),
+            (
+                "tests/pytorch/test_sanity.py",
+                "test_sanity_normalization_amp[RMSNorm]",
+                "normalization",
+            ),
+            ("tests/pytorch/test_numerics.py", "test_dpa_accuracy[small]", "attention"),
+            ("tests/pytorch/test_fusible_ops.py", "TestBasicOps::test_identity", None),
+            (
+                "tests/plugin/backend/npu/test_backend_npu.py",
+                "TestNPUGroupedGEMMAccuracy::test_grouped_gemm_basic",
+                "gemm",
+            ),
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            for path, node, expected in probes:
+                with self.subTest(path=path, node=node):
+                    Path(tmp, "report.xml").write_text(
+                        "<testsuite>" + self.selected_case(path, node=node) + "</testsuite>"
+                    )
+                    self.assertEqual(
+                        gate.test_group_evidence(tmp, targets),
+                        {name: name == expected for name in targets},
+                    )
+            Path(tmp, "report.xml").write_text(
+                '<testsuite><testcase name="test_sanity_linear"><properties><property'
+                ' name="flagcicd_test_path"'
+                ' value="tests/pytorch/test_sanity.py"/></properties></testcase></testsuite>'
+            )
+            self.assertFalse(any(gate.test_group_evidence(tmp, targets).values()))
+
+    def test_shared_execution_failure_is_attributed_to_its_own_group(self):
+        group = self.selected_groups()
+        cases = self.selected_case("tests/pytorch/test_recipe.py")
+        cases += self.selected_case("tests/pytorch/test_fused_adam.py", "<failure>broken</failure>")
+        report = self.report(
+            "pytorch_unit",
+            "junit",
+            outcome="failure",
+            exit_code="1",
+            plan_group=group,
+            xml=f"<testsuite>{cases}</testsuite>",
+        )
+        children = {child["group"]: child for child in report["test_group_reports"]}
+        self.assertEqual(report["status"], "test_failed")
+        self.assertEqual(children["core"]["status"], "passed")
+        self.assertEqual(children["optimizer"]["status"], "test_failed")
+        self.assertEqual(children["core"]["tests"]["passed"], 1)
+        self.assertEqual(children["optimizer"]["tests"]["failures"], 1)
+        # One successful parameter cannot hide another failed parameter of that group.
+        cases += self.selected_case("tests/pytorch/test_fused_adam.py", node="probe[second]")
+        report = self.report(
+            "pytorch_unit",
+            "junit",
+            outcome="failure",
+            exit_code="1",
+            plan_group=group,
+            xml=f"<testsuite>{cases}</testsuite>",
+        )
+        self.assertEqual(report["test_group_evidence"], {"core": True, "optimizer": False})
+
+    def test_common_setup_failure_and_cancellation_are_not_exonerated_by_junit(self):
+        group = self.selected_groups()
+        cases = self.selected_case("tests/pytorch/test_recipe.py") + self.selected_case(
+            "tests/pytorch/test_fused_adam.py"
+        )
+        for kwargs, expected in (
+            ({"extra_steps": {"setup": {"outcome": "failure"}}}, "infra_error"),
+            ({"outcome": "cancelled"}, "cancelled"),
+            ({"outcome": "failure", "exit_code": "1"}, "test_failed"),
+        ):
+            with self.subTest(expected=expected):
+                report = self.report(
+                    "pytorch_unit",
+                    "junit",
+                    plan_group=group,
+                    xml=f"<testsuite>{cases}</testsuite>",
+                    **kwargs,
+                )
+                self.assertEqual(report["status"], expected)
+                self.assertTrue(
+                    all(child["status"] == expected for child in report["test_group_reports"])
+                )
+
+    def test_unattributed_failed_case_keeps_shared_job_failed(self):
+        group = self.selected_groups()
+        cases = self.selected_case("tests/pytorch/test_recipe.py") + self.selected_case(
+            "tests/pytorch/test_fused_adam.py"
+        )
+        cases += self.selected_case("tests/pytorch/test_unknown.py", "<failure/>")
+        report = self.report(
+            "pytorch_unit",
+            "junit",
+            outcome="failure",
+            exit_code="1",
+            plan_group=group,
+            xml=f"<testsuite>{cases}</testsuite>",
+        )
+        self.assertEqual(report["status"], "test_failed")
+        self.assertTrue(all(child["status"] == "passed" for child in report["test_group_reports"]))
 
     def parse(self, xml):
         with tempfile.TemporaryDirectory() as tmp:
@@ -626,6 +1193,65 @@ class GroupReportEvidenceTests(unittest.TestCase):
 class GatePlatformReportTests(unittest.TestCase):
     """Test gate platform-report validation logic."""
 
+    def run_platform(self, plan, reports):
+        with tempfile.TemporaryDirectory() as tmp:
+            folder = Path(tmp)
+            for index, report in enumerate(reports):
+                target = folder / str(index) / "group-report.json"
+                target.parent.mkdir()
+                target.write_text(json.dumps(report))
+            args = argparse.Namespace(
+                platform="cuda",
+                reports_dir=folder,
+                coverage_required=False,
+                coverage_result="success",
+                output=folder / "platform-report.json",
+            )
+            with patch.dict(os.environ, FLAGCICD_PLAN=json.dumps(plan)):
+                code = gate.cmd_platform(args)
+            return code, json.loads(args.output.read_text())
+
+    def test_logical_reports_must_cover_the_plan_and_match_execution(self):
+        runtime = make_group("pytorch_unit", "serial")
+        runtime["test_groups"] = ["core", "optimizer"]
+        plan = make_plan(platforms=[{"name": "cuda"}], test_groups=[runtime])
+        valid = execution_report(plan, plan["execution_groups"][0])
+        code, report = self.run_platform(plan, [valid])
+        self.assertEqual((code, report["status"]), (0, "passed"))
+        self.assertEqual({child["group"] for child in report["test_groups"]}, {"core", "optimizer"})
+        for change in (
+            "missing",
+            "duplicate",
+            "source",
+            "hash",
+            "device",
+            "execution",
+            "unexpected",
+            "unexecuted",
+        ):
+            with self.subTest(change=change):
+                damaged = copy.deepcopy(valid)
+                children = damaged["test_group_reports"]
+                if change == "missing":
+                    children.pop()
+                elif change == "duplicate":
+                    children.append(copy.deepcopy(children[0]))
+                elif change == "unexpected":
+                    children[-1]["group"] = "attention"
+                elif change == "unexecuted":
+                    children[-1]["executed"] = False
+                else:
+                    field, value = {
+                        "source": ("source_sha", "b" * 40),
+                        "hash": ("plan_hash", "0" * 64),
+                        "device": ("device", "h100"),
+                        "execution": ("execution_group", "pytorch_debug"),
+                    }[change]
+                    children[-1][field] = value
+                code, report = self.run_platform(plan, [damaged])
+                self.assertEqual(code, 1)
+                self.assertTrue(report["errors"])
+
     def test_required_coverage_cannot_be_skipped(self):
         plan = {
             "schema_version": contract.PLAN_SCHEMA,
@@ -636,8 +1262,7 @@ class GatePlatformReportTests(unittest.TestCase):
             "source_sha": "a" * 40,
             "base_sha": None,
             "test_level": "L1",
-            "risk_level": "R1",
-            "risk_rule_version": "v1",
+            "test_level_rule_version": "v1",
             "changed_files": {"count": 0, "documentation_only": False},
             "common_path_triggers": [],
             "platforms": [
@@ -648,6 +1273,7 @@ class GatePlatformReportTests(unittest.TestCase):
                 }
             ],
             "test_groups": [],
+            "execution_groups": [],
             "excluded": [],
             "blocked": [],
             "reasons": [],
@@ -696,6 +1322,9 @@ class GatePlatformReportTests(unittest.TestCase):
                     "executed": True,
                     "plan_hash": plan["plan_hash"],
                     "source_sha": plan["source_sha"],
+                    "test_group_reports": [
+                        logical_report(plan, plan["test_groups"][0], status="test_failed")
+                    ],
                 }
                 if include_report:
                     (folder / "group-report.json").write_text(json.dumps(report))
@@ -817,6 +1446,39 @@ class GateTests(unittest.TestCase):
         plan = make_plan(platforms=[{"name": "cuda"}], blocked=blocked)
         code, _ = self.run_gate(plan, [platform_report(plan, "cuda")])
         self.assertEqual(code, 0)
+
+    def test_final_gate_rechecks_logical_test_group_reports(self):
+        runtime = make_group("pytorch_unit", "serial")
+        runtime["test_groups"] = ["core", "optimizer"]
+        plan = make_plan(platforms=[{"name": "cuda"}], test_groups=[runtime])
+        valid = platform_report(plan, "cuda")
+        self.assertEqual(self.run_gate(plan, [valid])[0], 0)
+        for change in (
+            "missing",
+            "duplicate",
+            "identity",
+            "execution",
+            "unexpected",
+            "skipped",
+        ):
+            with self.subTest(change=change):
+                report = copy.deepcopy(valid)
+                children = report["test_groups"]
+                if change == "missing":
+                    children.pop()
+                elif change == "duplicate":
+                    children.append(copy.deepcopy(children[0]))
+                elif change == "identity":
+                    children[-1]["source_sha"] = "b" * 40
+                elif change == "execution":
+                    children[-1]["execution_group"] = "pytorch_debug"
+                elif change == "unexpected":
+                    children[-1]["group"] = "attention"
+                else:
+                    children[-1]["status"] = "skipped"
+                code, summary = self.run_gate(plan, [report])
+                self.assertEqual(code, 1)
+                self.assertTrue(summary["errors"])
 
     def test_failed_pipeline_job_fails(self):
         reports = [

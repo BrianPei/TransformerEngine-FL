@@ -57,6 +57,7 @@ jobs:
       preflight_selected: ${{ steps.slice.outputs.preflight_selected }}
       coverage_active: ${{ steps.slice.outputs.coverage_active }}
       coverage_required: ${{ steps.slice.outputs.coverage_required }}
+      coverage_comparable: ${{ steps.slice.outputs.coverage_comparable }}
       stage: ${{ steps.slice.outputs.stage }}
       test_level: ${{ steps.slice.outputs.test_level }}
       plan_hash: ${{ steps.slice.outputs.plan_hash }}
@@ -462,9 +463,20 @@ jobs:
           "${coverage_command[@]}"
           echo "aggregated=true" >> "$GITHUB_OUTPUT"
 
+      - name: Skip coverage comparison for partial test scope
+        if: |
+          steps.aggregate.outputs.aggregated == 'true' &&
+          needs.checkout_and_config.outputs.coverage_comparable != 'true'
+        shell: bash
+        run: |
+          message="Coverage comparison skipped: this plan does not include the platform's complete coverage-producing test group set."
+          echo "$message"
+          echo "$message Coverage is saved as a -partial artifact and excluded from baseline/history comparisons." >> "$GITHUB_STEP_SUMMARY"
+
       - name: Check PR coverage regression
         if: |
           steps.aggregate.outputs.aggregated == 'true' &&
+          needs.checkout_and_config.outputs.coverage_comparable == 'true' &&
           needs.checkout_and_config.outputs.stage == 'pr'
         continue-on-error: true
         shell: bash
@@ -521,6 +533,7 @@ jobs:
       - name: Check daily 3-sigma regression
         if: |
           steps.aggregate.outputs.aggregated == 'true' &&
+          needs.checkout_and_config.outputs.coverage_comparable == 'true' &&
           needs.checkout_and_config.outputs.stage == 'nightly'
         continue-on-error: true
         shell: bash
@@ -616,7 +629,8 @@ jobs:
         if: steps.aggregate.outputs.aggregated == 'true'
         uses: actions/upload-artifact@v4
         with:
-          name: coverage-${{ inputs.platform }}-${{ matrix.device }}-pytorch-unittest
+          # Keep partial aggregates out of complete-scope baselines and history.
+          name: coverage-${{ inputs.platform }}-${{ matrix.device }}-pytorch-unittest${{ needs.checkout_and_config.outputs.coverage_comparable != 'true' && '-partial' || '' }}
           path: coverage-${{ inputs.platform }}-${{ matrix.device }}-pytorch-unittest.json
           retention-days: 90
 

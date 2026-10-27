@@ -65,9 +65,25 @@ nproc_per_node: 2
 # Platform-owned launchers live under tests/plugin/backend/<platform>/.
 # A pytest group may instead declare pytest_args, env, log_dir, and steps.
 unit_test_matrix:
-  - name: pytorch_unittest
+  - name: pytorch_debug
     runner: script
     path: tests/plugin/backend/example/run_unit_tests.sh
+    args: [debug]
+    timeout_minutes: 90
+  - name: pytorch_unit
+    runner: script
+    path: tests/plugin/backend/example/run_unit_tests.sh
+    args: [unittest]
+    timeout_minutes: 90
+  - name: pytorch_distributed
+    runner: script
+    path: tests/plugin/backend/example/run_unit_tests.sh
+    args: [distributed]
+    timeout_minutes: 90
+  - name: pytorch_onnx
+    runner: script
+    path: tests/plugin/backend/example/run_unit_tests.sh
+    args: [onnx]
     timeout_minutes: 90
 
 # Integration groups use the same common workflow. Put test-specific
@@ -83,3 +99,7 @@ compat_test_matrix:
     runner: script
     path: tests/plugin/backend/example/run_fa_versions_tests.sh
     blocked: example accelerator has no Flash Attention build
+
+# Optional test group -> reason map for targets not wired into this platform QA.
+# A selected unsupported module is reported explicitly, never silently passed.
+unsupported_test_groups: {}

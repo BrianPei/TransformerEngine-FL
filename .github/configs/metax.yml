@@ -68,9 +68,22 @@ coverage:
 nproc_per_node: 4
 
 unit_test_matrix:
-  - name: pytorch_unittest
+  - name: pytorch_debug
     runner: script
     path: tests/plugin/backend/metax/run_unit_tests.sh
+    args: [debug]
+  - name: pytorch_unit
+    runner: script
+    path: tests/plugin/backend/metax/run_unit_tests.sh
+    args: [unittest]
+  - name: pytorch_distributed
+    runner: script
+    path: tests/plugin/backend/metax/run_unit_tests.sh
+    args: [distributed]
+  - name: pytorch_onnx
+    runner: script
+    path: tests/plugin/backend/metax/run_unit_tests.sh
+    args: [onnx]
 
 integration_test_matrix:
   - name: pytorch_mcore_integration

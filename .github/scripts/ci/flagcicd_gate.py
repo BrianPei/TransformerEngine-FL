@@ -73,7 +73,7 @@ def cmd_slice(args: argparse.Namespace) -> int:
     parallel = []
     serial = []
 
-    for group in plan["test_groups"]:
+    for group in plan["execution_groups"]:
         if group["platform"] != platform:
             continue
 
@@ -91,6 +91,7 @@ def cmd_slice(args: argparse.Namespace) -> int:
             "exclusive": group["resources"]["exclusive"],
             "timeout": group["resources"]["timeout_minutes"],
             "coverage": group.get("coverage", False),
+            "test_groups": group["test_groups"],
             # Matrix entries historically omitted runner for shell launchers;
             # preserve that configuration format by defaulting to script.
             "runner": exec_data.get("runner", "script"),
@@ -108,6 +109,20 @@ def cmd_slice(args: argparse.Namespace) -> int:
             return 1
         lanes[group["lane"]].append(entry)
 
+    # Partial test selection still produces useful coverage, but cannot be
+    # compared with or published as a complete platform coverage baseline.
+    expected_coverage_groups = set(platform_entry.get("coverage_groups", []))
+    selected_coverage_groups = {
+        group["group"]
+        for group in plan["execution_groups"]
+        if group["platform"] == platform and group.get("coverage")
+    }
+    coverage_comparable = (
+        platform_entry.get("coverage_full_scope", True)
+        and bool(expected_coverage_groups)
+        and (expected_coverage_groups == selected_coverage_groups)
+    )
+
     # Write outputs
     output = {
         "preflight_matrix": json.dumps({"include": preflight}),
@@ -117,9 +132,15 @@ def cmd_slice(args: argparse.Namespace) -> int:
         "has_serial": json.dumps(len(serial) > 0),
         "preflight_selected": json.dumps(len(preflight) > 0),
         "coverage_active": json.dumps(
-            any(g.get("coverage") for g in plan["test_groups"] if g["platform"] == platform)
+            any(g.get("coverage") for g in plan["execution_groups"] if g["platform"] == platform)
         ),
-        "coverage_required": json.dumps(bool(platform_entry.get("coverage_required", False))),
+        "coverage_required": json.dumps(
+            bool(platform_entry.get("coverage_required", False))
+            and any(
+                g.get("coverage") for g in plan["execution_groups"] if g["platform"] == platform
+            )
+        ),
+        "coverage_comparable": json.dumps(coverage_comparable),
         "stage": plan["stage"],
         "test_level": plan["test_level"],
         "plan_hash": plan["plan_hash"],
@@ -163,7 +184,7 @@ def cmd_group_report(args: argparse.Namespace) -> int:
     planned = next(
         (
             g
-            for g in plan["test_groups"]
+            for g in plan["execution_groups"]
             if (g["platform"], g["device"], g["group"]) == (platform, device, group)
         ),
         None,
@@ -240,8 +261,22 @@ def cmd_group_report(args: argparse.Namespace) -> int:
             status = "skipped"
             failure_stage = "execute"
 
-    # Build report
-    report = {
+    # Build a child report for every logical test group assigned to this job.
+    # The command is shared, while required/evidence/level stay owned by the plan.
+    targets = exec_data.get("group_test_targets", {})
+    junit_status = (
+        parse_junit_status(junit_dir)[0] if executed and evidence == "junit" and targets else None
+    )
+    can_attribute = (
+        bool(targets)
+        and executed
+        and status in ("passed", "test_failed")
+        and junit_status in ("passed", "test_failed")
+        and (status == "passed" or junit_status == "test_failed")
+    )
+    group_results = test_group_results(junit_dir, targets) if can_attribute else {}
+    group_evidence = {name: result["status"] == "passed" for name, result in group_results.items()}
+    identity = {
         "schema_version": contract.GROUP_REPORT_SCHEMA,
         "repository": plan["repository"],
         "stage": plan["stage"],
@@ -251,20 +286,124 @@ def cmd_group_report(args: argparse.Namespace) -> int:
         "run_attempt": int(os.environ.get("GITHUB_RUN_ATTEMPT", "1")),
         "platform": platform,
         "device": device,
-        "group": group,
-        "kind": args.kind,
-        "level": args.level,
-        "status": status,
-        "failure_stage": failure_stage,
-        "required": args.required,
-        "executed": executed,
         "duration_seconds": int(float(args.duration)) if args.duration else 0,
         "created_at": utc_now(),
+    }
+    child_reports = []
+    for logical in plan["test_groups"]:
+        if (logical["platform"], logical["device"], logical["execution_group"]) != (
+            platform,
+            device,
+            group,
+        ):
+            continue
+        child_status, child_stage, child_executed = status, failure_stage, executed
+        counts = None
+        if logical["group"] in group_results:
+            result = group_results[logical["group"]]
+            child_status, child_stage = result["status"], result["failure_stage"]
+            child_executed = result["executed"]
+            counts = result["tests"]
+        child_reports.append(
+            {
+                **identity,
+                "group": logical["group"],
+                "execution_group": group,
+                "kind": logical["kind"],
+                "level": logical["level"],
+                "required": logical["required"],
+                "evidence": logical["evidence"],
+                "status": child_status,
+                "failure_stage": child_stage,
+                "executed": child_executed,
+                "tests": counts,
+            }
+        )
+    if status == "passed" and any(child["status"] != "passed" for child in child_reports):
+        status, failure_stage = "report_error", "test_group_evidence"
+    report = {
+        **identity,
+        "group": group,
+        "kind": planned["kind"] if planned else args.kind,
+        "level": planned["level"] if planned else args.level,
+        "required": planned["required"] if planned else args.required,
+        "status": status,
+        "failure_stage": failure_stage,
+        "executed": executed,
+        "test_group_evidence": group_evidence,
+        "test_group_reports": child_reports,
     }
 
     # Write report
     args.output.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n")
     return 0
+
+
+def test_group_results(junit_dir: str | None, targets: dict) -> dict[str, dict]:
+    """Attribute actual testcase outcomes to selected groups using canonical node IDs."""
+    totals = {
+        name: {"total": 0, "passed": 0, "failures": 0, "errors": 0, "skipped": 0}
+        for name in targets
+    }
+    try:
+        for xml_file in Path(junit_dir).rglob("*.xml") if junit_dir else []:
+            root = ET.parse(xml_file).getroot()
+            for node in root.iter():
+                node.tag = node.tag.rsplit("}", 1)[-1]
+            for case in root.iter("testcase"):
+                nodeids = [
+                    prop.get("value", "")
+                    for prop in case.findall("properties/property")
+                    if prop.get("name") == "flagcicd_test_nodeid"
+                ]
+                if len(nodeids) != 1 or "::" not in nodeids[0]:
+                    continue  # A file path or inferred JUnit classname cannot prove a node ran.
+                nodeid = nodeids[0]
+                path, _, node = nodeid.partition("::")
+                contract.split_test_target(path)
+                if not node:
+                    continue
+                outcome = next(
+                    (
+                        key
+                        for key, tag in (
+                            ("errors", "error"),
+                            ("failures", "failure"),
+                            ("skipped", "skipped"),
+                        )
+                        if case.find(tag) is not None
+                    ),
+                    "passed",
+                )
+                for name, patterns in targets.items():
+                    if any(contract.test_target_matches(nodeid, pattern) for pattern in patterns):
+                        totals[name]["total"] += 1
+                        totals[name][outcome] += 1
+    except (OSError, ET.ParseError, ValueError):
+        totals = {name: {key: 0 for key in counts} for name, counts in totals.items()}
+    results = {}
+    for name, counts in totals.items():
+        if counts["failures"] or counts["errors"]:
+            status, stage = "test_failed", "test_execution"
+        elif counts["passed"]:
+            status, stage = "passed", None
+        else:
+            status, stage = "report_error", "test_group_evidence"
+        results[name] = {
+            "status": status,
+            "failure_stage": stage,
+            "executed": bool(counts["passed"] or counts["failures"] or counts["errors"]),
+            "tests": counts,
+        }
+    return results
+
+
+def test_group_evidence(junit_dir: str | None, targets: dict) -> dict[str, bool]:
+    """A group needs matching passing nodes and no matching failed/error nodes."""
+    return {
+        name: result["status"] == "passed"
+        for name, result in test_group_results(junit_dir, targets).items()
+    }
 
 
 def parse_junit_status(junit_dir: str | None) -> tuple[str, str | None]:
@@ -318,6 +457,59 @@ def parse_junit_status(junit_dir: str | None) -> tuple[str, str | None]:
     return "passed", None
 
 
+def validate_test_group_reports(
+    plan: dict,
+    platform: str,
+    reports: list,
+    execution_group: str | None = None,
+    device: str | None = None,
+) -> list[str]:
+    """Check logical group completeness, identity and evidence against the plan."""
+    expected = {
+        (group["device"], group["group"]): group
+        for group in plan["test_groups"]
+        if group["platform"] == platform
+        and (execution_group is None or group["execution_group"] == execution_group)
+        and (device is None or group["device"] == device)
+    }
+    if not isinstance(reports, list):
+        return [f"{platform}: malformed logical test-group reports"]
+    errors, actual = [], set()
+    for report in reports:
+        if not isinstance(report, dict):
+            errors.append(f"{platform}: malformed logical test-group report")
+            continue
+        key = (report.get("device"), report.get("group"))
+        if not all(isinstance(value, str) for value in key):
+            errors.append(f"{platform}: malformed logical group key")
+            continue
+        if key in actual:
+            errors.append(f"{platform}: duplicate logical test-group report {key}")
+        actual.add(key)
+        logical = expected.get(key)
+        if logical is None:
+            errors.append(f"{platform}: unexpected logical test-group report {key}")
+            continue
+        for field in ("repository", "stage", "source_sha", "plan_hash"):
+            if report.get(field) != plan[field]:
+                errors.append(f"{platform}/{key}: {field} mismatch")
+        if (
+            report.get("schema_version") != contract.GROUP_REPORT_SCHEMA
+            or report.get("platform") != platform
+        ):
+            errors.append(f"{platform}/{key}: logical report schema/platform mismatch")
+        if report.get("execution_group") != logical["execution_group"]:
+            errors.append(f"{platform}/{key}: execution_group mismatch")
+        if logical.get("required") and (
+            report.get("status") != "passed" or report.get("executed") is not True
+        ):
+            errors.append(f"{platform}/{key}: required logical group did not pass and execute")
+    missing = {key for key, group in expected.items() if group.get("required")} - actual
+    if missing:
+        errors.append(f"{platform}: missing required logical test-group reports: {sorted(missing)}")
+    return errors
+
+
 def cmd_platform(args: argparse.Namespace) -> int:
     """Aggregate group reports into platform report."""
     # Load plan
@@ -357,7 +549,9 @@ def cmd_platform(args: argparse.Namespace) -> int:
     )
 
     # Expected reports: groups from plan for this platform
-    expected = [(g["device"], g["group"]) for g in plan["test_groups"] if g["platform"] == platform]
+    expected = [
+        (g["device"], g["group"]) for g in plan["execution_groups"] if g["platform"] == platform
+    ]
     print(
         f"INFO: Expected {len(expected)} groups for platform {platform}",
         file=sys.stderr,
@@ -391,7 +585,7 @@ def cmd_platform(args: argparse.Namespace) -> int:
     else:
         required_keys = {
             (g["device"], g["group"])
-            for g in plan["test_groups"]
+            for g in plan["execution_groups"]
             if g["platform"] == platform and g.get("required")
         }
         missing = required_keys - actual_keys
@@ -456,7 +650,7 @@ def cmd_platform(args: argparse.Namespace) -> int:
 
     required_keys = {
         (group["device"], group["group"])
-        for group in plan["test_groups"]
+        for group in plan["execution_groups"]
         if group["platform"] == platform and group.get("required")
     }
     for report in group_reports:
@@ -475,11 +669,24 @@ def cmd_platform(args: argparse.Namespace) -> int:
     if required_not_executed:
         errors.append(f"Required groups not executed: {required_not_executed}")
 
+    logical_reports = []
+    for report in group_reports:
+        children = report.get("test_group_reports", [])
+        errors.extend(
+            validate_test_group_reports(
+                plan, platform, children, report.get("group"), report.get("device")
+            )
+        )
+        if isinstance(children, list):
+            logical_reports.extend(children)
+    errors.extend(validate_test_group_reports(plan, platform, logical_reports))
+
     # Fail if any errors
     if errors:
         status = "failed"
 
     # Build platform report
+    platform_entry = next((entry for entry in plan["platforms"] if entry["name"] == platform), {})
     platform_report = {
         "schema_version": contract.PLATFORM_REPORT_SCHEMA,
         "repository": plan["repository"],
@@ -490,6 +697,9 @@ def cmd_platform(args: argparse.Namespace) -> int:
         "platform": platform,
         "status": status,
         "groups": group_reports,
+        "test_groups": logical_reports,
+        "selected_test_groups": platform_entry.get("selected_test_groups", []),
+        "unsupported_test_groups": platform_entry.get("unsupported_test_groups", []),
         "errors": errors,
         "created_at": utc_now(),
     }
@@ -562,6 +772,8 @@ def cmd_gate(args: argparse.Namespace) -> int:
         # Validate status
         if report.get("status") != "passed":
             errors.append(f"Platform {platform}: status={report.get('status')}")
+
+        errors.extend(validate_test_group_reports(plan, platform, report.get("test_groups", [])))
 
         # Check for platform-level errors
         if report.get("errors"):

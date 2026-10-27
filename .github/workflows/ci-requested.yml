@@ -15,8 +15,10 @@
 # Requested CI runs (FlagCICD stage "manual") on selected platforms.
 #
 #   - A PR comment "/ci run <platforms|all>" or "/test <platforms|all>" from a
-#     user with write access runs the PR head SHA.  GitHub only runs
-#     issue_comment workflows from the default branch.
+#     user with write access runs the PR head SHA. Other users submit a pending
+#     request; a maintainer approves it with "/ci approve <request-comment-id>".
+#     Approval resolves the current PR head. GitHub only runs issue_comment
+#     workflows from the default branch.
 #   - workflow_dispatch runs one or more platforms at a chosen level and ref.
 #
 # Pipeline: resolve -> plan -> platform-pipeline (matrix) -> complete
@@ -49,6 +51,7 @@ permissions:
   contents: read
   actions: read
   pull-requests: read
+  issues: read
 
 jobs:
   resolve:
@@ -57,13 +60,15 @@ jobs:
       github.event_name == 'workflow_dispatch' ||
       (github.event.issue.pull_request &&
        (startsWith(github.event.comment.body, '/ci run ') ||
-        startsWith(github.event.comment.body, '/test ')))
+        startsWith(github.event.comment.body, '/test ') ||
+        startsWith(github.event.comment.body, '/ci approve ')))
     runs-on: ubuntu-latest
     timeout-minutes: 5
     outputs:
       platforms: ${{ steps.request.outputs.platforms }}
       checkout_ref: ${{ steps.request.outputs.checkout_ref }}
       test_level: ${{ steps.request.outputs.test_level }}
+      approved: ${{ steps.request.outputs.approved }}
     steps:
       # Execute only the event's base-repository controller, never PR code here.
       - uses: actions/checkout@v4
@@ -78,6 +83,7 @@ jobs:
   plan:
     name: Generate execution plan
     needs: resolve
+    if: needs.resolve.outputs.approved == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     outputs:
@@ -117,7 +123,7 @@ jobs:
   complete:
     name: CI Requested Complete
     needs: [resolve, plan, platform-pipeline]
-    if: ${{ !cancelled() && needs.resolve.result != 'skipped' }}
+    if: ${{ !cancelled() && needs.resolve.result != 'skipped' && needs.resolve.outputs.approved != 'false' }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:

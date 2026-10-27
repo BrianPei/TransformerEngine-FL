@@ -71,9 +71,25 @@ coverage:
 nproc_per_node: 4
 
 unit_test_matrix:
-  - name: pytorch_unittest
+  - name: pytorch_debug
     runner: script
     path: tests/plugin/backend/cuda/run_unit_tests.sh
+    args: [debug]
+    timeout_minutes: 240
+  - name: pytorch_unit
+    runner: script
+    path: tests/plugin/backend/cuda/run_unit_tests.sh
+    args: [unittest]
+    timeout_minutes: 240
+  - name: pytorch_distributed
+    runner: script
+    path: tests/plugin/backend/cuda/run_unit_tests.sh
+    args: [distributed]
+    timeout_minutes: 240
+  - name: pytorch_onnx
+    runner: script
+    path: tests/plugin/backend/cuda/run_unit_tests.sh
+    args: [onnx]
     timeout_minutes: 240
 
 integration_test_matrix:

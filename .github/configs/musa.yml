@@ -62,9 +62,25 @@ coverage:
 nproc_per_node: 8
 
 unit_test_matrix:
-  - name: pytorch_unittest
+  - name: pytorch_debug
     runner: script
     path: tests/plugin/backend/musa/run_unit_tests.sh
+    args: [debug]
+    timeout_minutes: 120
+  - name: pytorch_unit
+    runner: script
+    path: tests/plugin/backend/musa/run_unit_tests.sh
+    args: [unittest]
+    timeout_minutes: 120
+  - name: pytorch_distributed
+    runner: script
+    path: tests/plugin/backend/musa/run_unit_tests.sh
+    args: [distributed]
+    timeout_minutes: 120
+  - name: pytorch_onnx
+    runner: script
+    path: tests/plugin/backend/musa/run_unit_tests.sh
+    args: [onnx]
     timeout_minutes: 120
 
 integration_test_matrix:
@@ -78,3 +94,10 @@ paths_watch:
   - .github/scripts/setup_musa.sh
   - tests/plugin/backend/musa/
   - transformer_engine/plugin/core/backends/vendor/musa/
+
+# Missing test-group coverage is explicit; these entries do not claim hardware incapability.
+unsupported_test_groups:
+  plugin_core: MUSA unit QA does not run plugin policy/manager targets.
+  reference_backend: MUSA unit QA does not run tests/plugin/backend/reference targets.
+  vendor_backend: MUSA unit QA has no vendor or FlagOS backend target.
+  normalization: MUSA QA excludes normalization sanity/numerics and fusible normalization cases.

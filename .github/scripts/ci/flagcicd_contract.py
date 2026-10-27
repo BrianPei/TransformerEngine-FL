@@ -4,7 +4,9 @@
 from __future__ import annotations
 
 import hashlib
+import fnmatch
 import json
+from pathlib import PurePosixPath
 from typing import Any
 
 # Schema version constants
@@ -28,8 +30,43 @@ STATUSES = frozenset(
 )
 
 LEVELS = ("L0", "L1", "L2", "L3", "L4")
-RISKS = ("R1", "R2", "R3", "R4")
 LANES = ("preflight", "parallel", "serial")
+
+
+def split_test_target(target: str) -> tuple[str, str]:
+    """Validate a repository path/glob with an optional pytest node selector."""
+    if not isinstance(target, str) or not target.strip() or "\\" in target:
+        raise ValueError(f"Invalid test target: {target!r}")
+    path, separator, node = target.partition("::")
+    parts = PurePosixPath(path).parts
+    if not parts or PurePosixPath(path).is_absolute() or ".." in parts:
+        raise ValueError(f"Invalid repository-relative test target: {target!r}")
+    if separator and (not node or path.endswith("/") or any(not part for part in node.split("::"))):
+        raise ValueError(f"Invalid pytest node selector: {target!r}")
+    return path, node
+
+
+def test_target_matches(nodeid: str, target: str) -> bool:
+    """Match a canonical pytest node; bare functions/classes include their parameters."""
+    target_path, target_node = split_test_target(target)
+    path, separator, node = nodeid.partition("::")
+    path_matches = (
+        path.startswith(target_path)
+        if target_path.endswith("/")
+        else fnmatch.fnmatchcase(path, target_path)
+    )
+    if not path_matches or not target_node:
+        return path_matches
+    if not separator:
+        return False
+    if "[" in target_node:
+        return node == target_node  # Parameter IDs are literal, not glob character classes.
+    base_node = node.split("[", 1)[0]
+    parts = base_node.split("::")
+    return any(
+        fnmatch.fnmatchcase("::".join(parts[:length]), target_node)
+        for length in range(1, len(parts) + 1)
+    )
 
 
 def canonical_json(obj: Any) -> str:
@@ -53,10 +90,56 @@ def validate_plan(plan: dict[str, Any]) -> list[str]:
         errors.append("platforms must be a list")
     if not isinstance(plan.get("test_groups"), list):
         errors.append("test_groups must be a list")
+    if not isinstance(plan.get("execution_groups"), list):
+        errors.append("execution_groups must be a list")
+    if isinstance(plan.get("test_groups"), list) and isinstance(plan.get("execution_groups"), list):
+        try:
+            executions = {}
+            for job in plan["execution_groups"]:
+                key = (job["platform"], job["device"], job["group"])
+                if key in executions:
+                    errors.append(f"Duplicate execution group: {key}")
+                names = job["test_groups"]
+                if (
+                    not isinstance(names, list)
+                    or not names
+                    or any(not isinstance(name, str) or not name for name in names)
+                    or len(names) != len(set(names))
+                ):
+                    errors.append(f"Invalid execution test_groups: {key}")
+                executions[key] = set(names)
+            actual = {}
+            logical_keys = set()
+            for group in plan["test_groups"]:
+                key = (group["platform"], group["device"], group["group"])
+                if key in logical_keys:
+                    errors.append(f"Duplicate logical test group: {key}")
+                logical_keys.add(key)
+                execution = (group["platform"], group["device"], group["execution_group"])
+                actual.setdefault(execution, set()).add(group["group"])
+                job = next(
+                    (
+                        job
+                        for job in plan["execution_groups"]
+                        if (job["platform"], job["device"], job["group"]) == execution
+                    ),
+                    None,
+                )
+                if job and group.get("evidence") != job.get("evidence"):
+                    errors.append(f"Test-group evidence does not match execution: {key}")
+                if (
+                    job
+                    and group.get("test_targets")
+                    and (job.get("exec") or {}).get("group_test_targets", {}).get(group["group"])
+                    != group["test_targets"]
+                ):
+                    errors.append(f"Test targets do not match execution: {key}")
+            if executions != actual:
+                errors.append("Logical test groups do not match execution groups")
+        except (KeyError, TypeError):
+            errors.append("Malformed test-group execution mapping")
     if plan.get("test_level") not in LEVELS:
         errors.append(f"test_level must be one of {LEVELS}")
-    if plan.get("risk_level") not in RISKS:
-        errors.append(f"risk_level must be one of {RISKS}")
     expected_hash = compute_plan_hash(plan)
     if plan.get("plan_hash") != expected_hash:
         errors.append(f"plan_hash mismatch: expected {expected_hash[:12]}...")

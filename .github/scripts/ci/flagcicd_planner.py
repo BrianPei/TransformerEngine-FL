@@ -18,7 +18,6 @@ import generate_matrix as gm
 import flagcicd_contract as contract
 
 LEVEL_ORDER = {"L0": 0, "L1": 1, "L2": 2, "L3": 3, "L4": 4}
-RISK_ORDER = {"R0": 0, "R1": 1, "R2": 2, "R3": 3, "R4": 4}
 EVIDENCE_TYPES = ("junit", "exit_code")
 # The plan travels through job outputs and environment variables; keep path
 # lists bounded so a large PR cannot exceed the single-variable size limit.
@@ -29,6 +28,7 @@ def load_project(path: Path) -> dict[str, Any]:
     project = yaml.safe_load(path.read_text())
     if project.get("schema_version") != "flagcicd.project/v1":
         raise ValueError("project.yaml must be flagcicd.project/v1")
+    validate_test_groups(project)
     return project
 
 
@@ -120,25 +120,19 @@ def select_platforms(
 
 def _checked_order(value: str, order: dict[str, int], kind: str) -> str:
     if value not in order:
-        raise ValueError(f"Unknown risk-rule {kind}: {value}")
+        raise ValueError(f"Unknown test-level rule {kind}: {value}")
     return value
 
 
-def match_risk_rules(changed: list[str], risk_rules: dict) -> tuple[str, str]:
-    """Match changed files against risk rules.
+def match_level_rules(changed: list[str], level_rules: dict) -> str:
+    """Return the highest minimum test level required by changed code paths.
 
-    Each non-documentation file takes the highest level/risk among the rules it
-    matches, or the unknown level/risk when it matches none. A low-risk match on
-    one file must not hide an unknown file in the same change.
-
-    Returns: (minimum_level, risk_level)
+    Each file uses the highest matching rule, or unknown_level when unmatched.
+    A lower-level match on one file cannot hide another unmatched file.
     """
-    rules = risk_rules.get("rules", [])
-    unknown_level = _checked_order(risk_rules.get("unknown_level", "L2"), LEVEL_ORDER, "level")
-    unknown_risk = _checked_order(risk_rules.get("unknown_risk", "R2"), RISK_ORDER, "risk")
-
+    rules = level_rules.get("rules", [])
+    unknown_level = _checked_order(level_rules.get("unknown_level", "L2"), LEVEL_ORDER, "level")
     max_level = "L0"
-    max_risk = "R0"
     for path in changed:
         if gm._is_documentation(path):
             continue
@@ -147,20 +141,16 @@ def match_risk_rules(changed: list[str], risk_rules: dict) -> tuple[str, str]:
             for rule in rules
             if any(fnmatch.fnmatchcase(path, pattern) for pattern in rule.get("paths", []))
         ]
-        if matched:
-            levels = [
+        level = max(
+            (
                 _checked_order(rule.get("minimum_level", "L0"), LEVEL_ORDER, "level")
                 for rule in matched
-            ]
-            risks = [_checked_order(rule.get("risk", "R0"), RISK_ORDER, "risk") for rule in matched]
-            level = max(levels, key=LEVEL_ORDER.__getitem__)
-            risk = max(risks, key=RISK_ORDER.__getitem__)
-        else:
-            level, risk = unknown_level, unknown_risk
+            ),
+            key=LEVEL_ORDER.__getitem__,
+            default=unknown_level,
+        )
         max_level = max(max_level, level, key=LEVEL_ORDER.__getitem__)
-        max_risk = max(max_risk, risk, key=RISK_ORDER.__getitem__)
-
-    return max_level, max_risk
+    return max_level
 
 
 def resolve_level(
@@ -169,27 +159,21 @@ def resolve_level(
     project: dict,
     changed: list[str],
     labels: list[str],
-) -> tuple[str, str]:
-    """Resolve test level and risk level.
-
-    Returns: (test_level, risk_level)
-    """
+) -> str:
+    """Resolve the test level from stage defaults, path rules and labels."""
     if stage_def.get("fixed_level"):
-        return stage_def["default_level"], stage_def.get("default_risk", "R1")
+        return stage_def["default_level"]
 
     # Start with stage default
     test_level = stage_def["default_level"] if requested == "auto" else requested
     if test_level not in LEVEL_ORDER:
         raise ValueError(f"Unknown requested test level: {requested}")
-    risk_level = stage_def.get("default_risk", "R1")
 
-    # Apply risk rules
-    if changed and "risk_rules" in project:
-        rule_level, rule_risk = match_risk_rules(changed, project["risk_rules"])
+    # Apply path-based test level rules.
+    if changed and "test_level_rules" in project:
+        rule_level = match_level_rules(changed, project["test_level_rules"])
         if LEVEL_ORDER[rule_level] > LEVEL_ORDER[test_level]:
             test_level = rule_level
-        if RISK_ORDER[rule_risk] > RISK_ORDER[risk_level]:
-            risk_level = rule_risk
 
     # Label-based escalation
     for label in labels:
@@ -200,7 +184,7 @@ def resolve_level(
             if LEVEL_ORDER[requested_level] > LEVEL_ORDER[test_level]:
                 test_level = requested_level
 
-    return test_level, risk_level
+    return test_level
 
 
 def _path_matches(path: str, pattern: str) -> bool:
@@ -208,32 +192,149 @@ def _path_matches(path: str, pattern: str) -> bool:
     return path.startswith(pattern) if pattern.endswith("/") else fnmatch.fnmatchcase(path, pattern)
 
 
-def group_watch_paths(
-    group_def: dict, platform: str, platform_cfg: dict, exec_entry: dict | None
-) -> list[str]:
-    """Return the paths a group watches on one platform.
+def validate_test_groups(project: dict) -> None:
+    """Validate the single functional test-group catalog and dependency graph."""
+    if "functional_groups" in project:
+        raise ValueError("test_groups is the only test-group catalog")
+    groups = project.get("test_groups", [])
+    catalog = {group["name"]: group for group in groups}
+    if not groups or len(catalog) != len(groups):
+        raise ValueError("Missing or duplicate test group names")
+    visiting, visited = set(), set()
 
-    An empty list means the group has no path filter and always runs.
-    """
-    watch = [p.replace("{platform}", platform) for p in group_def.get("paths_watch", [])]
-    if group_def.get("watch_platform_paths"):
-        # Launchers and vendor code owned by the platform must select the group
-        # that executes them, otherwise a launcher-only PR runs preflight only.
-        watch.extend(platform_cfg.get("paths_watch", []))
-        if exec_entry and exec_entry.get("path"):
-            watch.append(str(exec_entry["path"]))
-    return watch
+    def visit(name):
+        if name not in catalog:
+            raise ValueError(f"Unknown test-group dependency: {name}")
+        if name in visiting:
+            raise ValueError(f"Test-group dependency cycle at {name}")
+        if name in visited:
+            return
+        visiting.add(name)
+        group = catalog[name]
+        if group.get("level") not in LEVEL_ORDER or group.get("status") != "active":
+            raise ValueError(f"Invalid test-group level/status: {name}")
+        if group.get("resources", {}).get("class") not in project["resource_classes"]:
+            raise ValueError(f"Unknown resource class for test group {name}")
+        if not group.get("blocked"):
+            _group_evidence(group)
+            execution = group.get("execution", {})
+            if name != "preflight" and not all(
+                isinstance(execution.get(key), str) and execution[key]
+                for key in ("matrix", "entry")
+            ):
+                raise ValueError(f"Test group {name} requires a platform execution mapping")
+            if execution.get("entry") == "pytorch_unit" and not group.get("test_targets"):
+                raise ValueError(f"Test group {name} requires test_targets")
+        targets = group.get("test_targets", [])
+        if not isinstance(targets, list):
+            raise ValueError(f"Invalid test_targets for {name}")
+        for target in targets:
+            try:
+                contract.split_test_target(target)
+            except ValueError:
+                raise ValueError(f"Invalid test target for {name}: {target!r}")
+        for dependency in group.get("depends_on", []):
+            visit(dependency)
+            if LEVEL_ORDER[catalog[dependency]["level"]] > LEVEL_ORDER[group["level"]]:
+                raise ValueError(f"Higher-level test-group dependency: {name} -> {dependency}")
+        visiting.remove(name)
+        visited.add(name)
+
+    for name in catalog:
+        visit(name)
+    for definition in project.get("levels", {}).values():
+        for name in definition.get("required_groups", []):
+            if name not in catalog:
+                raise ValueError(f"Unknown required test group: {name}")
 
 
-def group_matches_paths(watch: list[str], changed: list[str], unowned: bool) -> bool:
-    """Check if a test group should run for the changed files.
+def select_test_groups(project: dict, changed: list[str], test_level: str, stage: str) -> dict:
+    """Match test groups, add required baselines and recursively include dependencies."""
+    catalog = {group["name"]: group for group in project["test_groups"]}
+    eligible = {
+        name
+        for name, group in catalog.items()
+        if LEVEL_ORDER[group["level"]] <= LEVEL_ORDER[test_level]
+    }
+    code = [path for path in changed if not gm._is_documentation(path)]
+    routing = project.get("routing", {})
+    broad = routing.get("shared_paths", []) + routing.get("impact_paths", [])
+    direct, unmapped, reasons = set(), [], []
+    for path in code:
+        matches = {
+            name
+            for name, group in catalog.items()
+            if any(_path_matches(path, pattern) for pattern in group.get("paths", []))
+        }
+        direct.update(matches)
+        if not matches and not any(_path_matches(path, pattern) for pattern in broad):
+            unmapped.append(path)
+    shared = [path for path in code if any(_path_matches(path, pattern) for pattern in broad)]
+    full = stage != "pr" or not code or bool(shared or unmapped)
+    if stage != "pr" or not code:
+        reasons.append(f"{stage}: complete in-level test scope")
+    reasons.extend(_capped(shared, "shared/impact path: "))
+    reasons.extend(_capped(unmapped, "unmapped path: "))
+    required = {
+        name
+        for level, definition in project.get("levels", {}).items()
+        if LEVEL_ORDER[level] <= LEVEL_ORDER[test_level]
+        for name in definition.get("required_groups", [])
+    }
+    selected, visited = set(eligible if full else direct) | required, set()
 
-    Returns: True if the group has no filter, no diff is known, some changed
-    path is unowned by every in-level group, or a changed path matches.
-    """
-    if not watch or not changed or unowned:
-        return True
-    return any(_path_matches(path, pattern) for path in changed for pattern in watch)
+    def add_dependencies(name):
+        if name not in eligible:
+            raise ValueError(f"Test group {name} requires level {catalog[name]['level']}")
+        if name in visited:
+            return
+        visited.add(name)
+        for dependency in catalog[name].get("depends_on", []):
+            selected.add(dependency)
+            add_dependencies(dependency)
+
+    for name in sorted(selected):
+        add_dependencies(name)
+    return {
+        "groups": sorted(selected),
+        "direct_groups": sorted(direct),
+        "required_groups": sorted(required),
+        "full_scope": full,
+        "unmapped_paths": unmapped[:MAX_LISTED_PATHS],
+        "reasons": reasons or ["affected test groups and dependencies"],
+    }
+
+
+def platform_test_groups(project: dict, config: dict, selection: dict) -> tuple[list, list]:
+    """Record unavailable platform test groups and propagate dependency gaps."""
+    unsupported = config.get("unsupported_test_groups", {})
+    catalog = {group["name"]: group for group in project["test_groups"]}
+    if not isinstance(unsupported, dict) or set(unsupported) - catalog.keys():
+        raise ValueError("Invalid unsupported_test_groups in platform config")
+    if any(not isinstance(reason, str) or not reason.strip() for reason in unsupported.values()):
+        raise ValueError("Every unsupported test group requires a reason")
+    unavailable = dict(unsupported)
+    while True:
+        previous = len(unavailable)
+        for name in selection["groups"]:
+            missing = set(catalog[name].get("depends_on", [])) & unavailable.keys()
+            if missing and name not in unavailable:
+                unavailable[name] = (
+                    f"unavailable test-group dependencies: {', '.join(sorted(missing))}"
+                )
+        if len(unavailable) == previous:
+            break
+    missing_required = set(selection["required_groups"]) & unavailable.keys()
+    if missing_required:
+        raise ValueError(f"Platform cannot run required test baseline: {sorted(missing_required)}")
+    return (
+        [name for name in selection["groups"] if name not in unavailable],
+        [
+            {"group": name, "reason": unavailable[name]}
+            for name in selection["groups"]
+            if name in unavailable
+        ],
+    )
 
 
 def _group_evidence(group_def: dict) -> str:
@@ -246,6 +347,23 @@ def _group_evidence(group_def: dict) -> str:
     return evidence
 
 
+def _execution_entry(group_def: dict, platform: str, config: dict) -> dict | None:
+    """Resolve the platform adapter named by the logical test group."""
+    if group_def["name"] == "preflight":
+        return {}
+    mapping = group_def.get("execution", {})
+    entries = [
+        entry
+        for entry in config.get(mapping.get("matrix", ""), [])
+        if entry.get("name") == mapping.get("entry")
+    ]
+    if len(entries) > 1:
+        raise ValueError(
+            f"{platform} has duplicate {mapping.get('entry')} in {mapping.get('matrix')}"
+        )
+    return dict(entries[0]) if entries else None
+
+
 def build_test_groups(
     project: dict,
     platforms: dict,
@@ -254,177 +372,166 @@ def build_test_groups(
     changed: list[str],
     blocked: list[dict[str, Any]] | None = None,
     excluded: list[dict[str, Any]] | None = None,
+    selection: dict | None = None,
 ) -> list[dict]:
-    """Build test_groups list from catalog, filtered by level and paths_watch."""
-    catalog = project["test_groups"]
-    level_num = LEVEL_ORDER[test_level]
-    code_paths = [path for path in changed if not gm._is_documentation(path)]
-    preflight_def = next((g for g in catalog if g["name"] == "preflight"), {"name": "preflight"})
-    preflight_evidence = _group_evidence(preflight_def)
+    """Resolve selected logical groups, retaining platform exclusions and blockers."""
+    selection = selection or select_test_groups(
+        project, changed, test_level, "pr" if changed else "branch"
+    )
     groups = []
-
-    def ledger_entry(platform: str, device: str, group_def: dict, reason: str) -> dict:
-        return {
-            "platform": platform,
-            "device": device,
-            "group": group_def["name"],
-            "kind": group_def["kind"],
-            "level": group_def.get("level", "L1"),
-            "required": group_def.get("required", False),
-            "reason": reason,
-        }
-
     for platform in selected_platforms:
-        platform_cfg = platforms[platform]["config"]
-        device_types = platform_cfg.get("device_types", [])
-        nproc = platform_cfg["nproc_per_node"]
-
-        # Preflight always included at L0
-        for device in device_types:
-            groups.append(
-                {
+        config = platforms[platform]["config"]
+        supported, unavailable = platform_test_groups(project, config, selection)
+        unavailable = {entry["group"]: entry["reason"] for entry in unavailable}
+        for definition in project["test_groups"]:
+            name = definition["name"]
+            if LEVEL_ORDER[definition["level"]] > LEVEL_ORDER[test_level]:
+                continue
+            reason = unavailable.get(name)
+            if name not in selection["groups"]:
+                reason = "test group not selected"
+            adapter = None
+            blocker = definition.get("blocked")
+            if not reason and not blocker:
+                adapter = _execution_entry(definition, platform, config)
+                if adapter is None:
+                    mapping = definition["execution"]
+                    if definition.get("required"):
+                        raise ValueError(
+                            f"{platform} missing required group {name}: {mapping['entry']} in"
+                            f" {mapping['matrix']}"
+                        )
+                    reason = f"no {mapping['matrix']} entry {mapping['entry']}"
+                else:
+                    blocker = adapter.get("blocked")
+            for device in config.get("device_types", []):
+                ledger = {
                     "platform": platform,
                     "device": device,
-                    "group": "preflight",
-                    "kind": "preflight",
-                    "level": "L0",
-                    "required": True,
-                    "lane": "preflight",
-                    "evidence": preflight_evidence,
-                    "resources": {
-                        "class": "shared_cpu",
-                        "devices": 0,
-                        "exclusive": False,
-                        "timeout_minutes": 90,
-                    },
-                    "coverage": False,
-                    "exec": None,
+                    "group": name,
+                    "kind": definition["kind"],
+                    "level": definition["level"],
+                    "required": definition.get("required", False),
                 }
-            )
-
-        # Resolve in-level executable candidates first: path ownership is
-        # decided across all of them before any group is filtered out.
-        candidates = []
-        for group_def in catalog:
-            group_level = group_def.get("level", "L1")
-            if LEVEL_ORDER[group_level] > level_num:
-                continue  # Out of scope
-
-            name = group_def["name"]
-            if name == "preflight":
-                continue  # Already added
-
-            # Keep blocked groups visible in the plan.  They are not executable
-            # matrix entries, but silently dropping them makes a release plan
-            # look complete and prevents the gate from explaining the gap.
-            blocked_reason = group_def.get("blocked")
-            exec_entry = None
-            exec_timeout = None
-            matrix_key = group_def.get("matrix")
-            if matrix_key and not blocked_reason:
-                matrix_entries = platform_cfg.get(matrix_key, [])
-                matched = [e for e in matrix_entries if e.get("name") == name]
-
-                if not matched:
-                    if group_def.get("required"):
-                        raise ValueError(
-                            f"{platform} missing required group {name} in {matrix_key}"
-                        )
+                if reason:
                     if excluded is not None:
-                        for device in device_types:
-                            excluded.append(
-                                ledger_entry(
-                                    platform,
-                                    device,
-                                    group_def,
-                                    f"no {matrix_key} entry",
-                                )
-                            )
+                        excluded.append({**ledger, "reason": reason})
                     continue
-
-                if len(matched) > 1:
-                    raise ValueError(f"{platform} has duplicate {name} in {matrix_key}")
-
-                exec_entry = dict(matched[0])
-                blocked_reason = exec_entry.pop("blocked", None)
-                exec_timeout = exec_entry.pop("timeout_minutes", None)
-                exec_entry.pop("name", None)
-
-            if blocked_reason:
-                if blocked is not None:
-                    for device in device_types:
-                        blocked.append(
-                            ledger_entry(platform, device, group_def, str(blocked_reason))
-                        )
-                continue
-
-            watch = group_watch_paths(group_def, platform, platform_cfg, exec_entry)
-            candidates.append((group_def, exec_entry, exec_timeout, watch))
-
-        # A changed path no in-level group watches cannot be attributed to a
-        # narrower test scope, so every in-level group runs.
-        unowned = any(
-            all(
-                watch and not any(_path_matches(path, pattern) for pattern in watch)
-                for _, _, _, watch in candidates
-            )
-            for path in code_paths
-        )
-
-        for group_def, exec_entry, exec_timeout, watch in candidates:
-            name = group_def["name"]
-            group_level = group_def.get("level", "L1")
-            static_match = group_matches_paths(watch, code_paths, unowned)
-            if not static_match:
-                if excluded is not None:
-                    for device in device_types:
-                        excluded.append(
-                            ledger_entry(
-                                platform,
-                                device,
-                                group_def,
-                                "no changed path matches paths_watch",
-                            )
-                        )
-                continue
-
-            # Resolve resources
-            res_class = group_def["resources"]["class"]
-            class_def = project["resource_classes"][res_class]
-            devices = nproc if class_def["devices"] == "nproc_per_node" else class_def["devices"]
-            exclusive = class_def["exclusive"]
-            timeout = exec_timeout or group_def["resources"].get("timeout_minutes", 90)
-            if isinstance(timeout, bool) or not isinstance(timeout, int) or timeout <= 0:
-                raise ValueError(f"{platform} {name} timeout_minutes must be a positive integer")
-
-            lane = "serial" if exclusive or devices > 1 else "parallel"
-
-            for device in device_types:
+                if blocker:
+                    if blocked is not None:
+                        blocked.append({**ledger, "reason": str(blocker)})
+                    continue
+                class_name = definition["resources"]["class"]
+                class_def = project["resource_classes"][class_name]
+                devices = (
+                    config["nproc_per_node"]
+                    if class_def["devices"] == "nproc_per_node"
+                    else class_def["devices"]
+                )
+                timeout = adapter.get(
+                    "timeout_minutes", definition["resources"].get("timeout_minutes", 90)
+                )
+                if isinstance(timeout, bool) or not isinstance(timeout, int) or timeout <= 0:
+                    raise ValueError(
+                        f"{platform} {name} timeout_minutes must be a positive integer"
+                    )
                 groups.append(
                     {
-                        "platform": platform,
-                        "device": device,
-                        "group": name,
-                        "kind": group_def["kind"],
-                        "level": group_level,
-                        "required": group_def.get("required", False),
-                        "lane": lane,
-                        "evidence": _group_evidence(group_def),
+                        **ledger,
+                        "execution_group": definition.get("execution", {}).get("entry", name),
+                        "lane": (
+                            "preflight"
+                            if name == "preflight"
+                            else ("serial" if class_def["exclusive"] or devices > 1 else "parallel")
+                        ),
+                        "evidence": _group_evidence(definition),
                         "resources": {
-                            "class": res_class,
+                            "class": class_name,
                             "devices": devices,
-                            "exclusive": exclusive,
+                            "exclusive": class_def["exclusive"],
                             "timeout_minutes": timeout,
                         },
                         "coverage": bool(
-                            group_def.get("coverage", False)
-                            and platform_cfg.get("coverage", {}).get("enabled", False)
+                            definition.get("coverage") and config.get("coverage", {}).get("enabled")
                         ),
-                        "exec": exec_entry,
+                        "test_targets": definition.get("test_targets", []),
                     }
                 )
-
     return groups
+
+
+def build_execution_groups(
+    project: dict, platforms: dict, logical_groups: list[dict], full_scope: bool
+) -> list[dict]:
+    """Coalesce selected groups sharing one platform adapter into one job."""
+    definitions = {group["name"]: group for group in project["test_groups"]}
+    executions = {}
+    mappings = {}
+    for logical in logical_groups:
+        key = (logical["platform"], logical["device"], logical["execution_group"])
+        definition = definitions[logical["group"]]
+        adapter = _execution_entry(
+            definition, logical["platform"], platforms[logical["platform"]]["config"]
+        )
+        for field in ("name", "timeout_minutes", "blocked"):
+            adapter.pop(field, None)
+        if key not in executions:
+            mappings[key] = definition.get("execution")
+            executions[key] = {
+                **{
+                    field: logical[field]
+                    for field in (
+                        "platform",
+                        "device",
+                        "kind",
+                        "level",
+                        "required",
+                        "lane",
+                        "evidence",
+                        "coverage",
+                    )
+                },
+                "group": logical["execution_group"],
+                "resources": dict(logical["resources"]),
+                "test_groups": [],
+                "exec": adapter if logical["group"] != "preflight" else None,
+            }
+        execution = executions[key]
+        if mappings[key] != definition.get("execution") or (execution["exec"] or {}) != adapter:
+            raise ValueError(f"Incompatible execution mapping for {key}")
+        if any(
+            execution[field] != logical[field]
+            for field in ("kind", "evidence", "lane", "required", "coverage")
+        ) or any(
+            execution["resources"][field] != logical["resources"][field]
+            for field in ("class", "devices", "exclusive")
+        ):
+            raise ValueError(f"Incompatible test groups share execution {key}")
+        execution["test_groups"].append(logical["group"])
+        execution["required"] |= logical["required"]
+        execution["coverage"] |= logical["coverage"]
+        execution["level"] = max(execution["level"], logical["level"], key=LEVEL_ORDER.__getitem__)
+        execution["resources"]["timeout_minutes"] = max(
+            execution["resources"]["timeout_minutes"], logical["resources"]["timeout_minutes"]
+        )
+    for execution in executions.values():
+        targets = {
+            name: definitions[name]["test_targets"]
+            for name in execution["test_groups"]
+            if definitions[name].get("test_targets")
+        }
+        if targets:
+            if len(targets) != len(execution["test_groups"]):
+                raise ValueError(
+                    f"Filtered and unfiltered test groups share execution {execution['group']}"
+                )
+            execution["exec"]["group_test_targets"] = targets
+            execution["exec"]["test_targets"] = (
+                ["tests/"]
+                if full_scope
+                else sorted({target for entries in targets.values() for target in entries})
+            )
+    return list(executions.values())
 
 
 def build_plan(args: argparse.Namespace) -> dict[str, Any]:
@@ -497,20 +604,33 @@ def build_plan(args: argparse.Namespace) -> dict[str, Any]:
         stage_name, platforms, changed, labels, requested_platforms
     )
 
-    # Resolve level and risk
-    test_level, risk_level = resolve_level(
-        stage_def, args.requested_level, project, changed, labels
+    # Resolve test level
+    test_level = resolve_level(stage_def, args.requested_level, project, changed, labels)
+    group_selection = select_test_groups(project, changed, test_level, stage_name)
+    if lint_only:
+        group_selection.update(
+            groups=[],
+            direct_groups=[],
+            required_groups=[],
+            full_scope=False,
+            reasons=["documentation-only: no hardware tests"],
+        )
+    blocked: list[dict[str, Any]] = []
+    excluded: list[dict[str, Any]] = []
+    test_groups = (
+        build_test_groups(
+            project, platforms, selected, test_level, changed, blocked, excluded, group_selection
+        )
+        if not lint_only
+        else []
     )
-    if args.requested_risk != "auto":
-        if args.requested_risk not in RISK_ORDER or args.requested_risk == "R0":
-            raise ValueError(f"Unknown requested risk: {args.requested_risk}")
-        if RISK_ORDER[args.requested_risk] > RISK_ORDER[risk_level]:
-            risk_level = args.requested_risk
-
-    # Build platform entries
+    execution_groups = build_execution_groups(
+        project, platforms, test_groups, group_selection["full_scope"]
+    )
     platform_entries = []
     for pname in selected:
         p = platforms[pname]
+        _, unsupported = platform_test_groups(project, p["config"], group_selection)
         platform_entries.append(
             {
                 "name": pname,
@@ -520,26 +640,31 @@ def build_plan(args: argparse.Namespace) -> dict[str, Any]:
                 "nproc_per_node": p["config"]["nproc_per_node"],
                 "coverage_enabled": bool(p["config"].get("coverage", {}).get("enabled", False)),
                 "coverage_required": bool(p["config"].get("coverage", {}).get("required", False)),
+                "coverage_full_scope": group_selection["full_scope"],
+                "selected_test_groups": sorted(
+                    group["group"]
+                    for group in test_groups
+                    if group["platform"] == pname
+                    and group["device"] == p["config"].get("device_types", [None])[0]
+                ),
+                "unsupported_test_groups": unsupported,
+                "coverage_groups": sorted(
+                    {
+                        group["execution"]["entry"]
+                        for group in project["test_groups"]
+                        if group.get("coverage")
+                        and not group.get("blocked")
+                        and p["config"].get("coverage", {}).get("enabled", False)
+                        and any(
+                            entry.get("name") == group["execution"]["entry"]
+                            and not entry.get("blocked")
+                            for entry in p["config"].get(group["execution"]["matrix"], [])
+                        )
+                    }
+                ),
                 "reasons": platform_reasons[pname],
             }
         )
-
-    # Build test groups
-    blocked: list[dict[str, Any]] = []
-    excluded: list[dict[str, Any]] = []
-    test_groups = (
-        build_test_groups(
-            project,
-            platforms,
-            selected,
-            test_level,
-            changed,
-            blocked,
-            excluded,
-        )
-        if not lint_only
-        else []
-    )
 
     if stage_name == "pr":
         coverage_policy = {"method": "absolute"}
@@ -563,8 +688,7 @@ def build_plan(args: argparse.Namespace) -> dict[str, Any]:
         "source_sha": source_sha,
         "base_sha": base_sha,
         "test_level": test_level,
-        "risk_level": risk_level,
-        "risk_rule_version": project.get("risk_rules", {}).get("version", "v1"),
+        "test_level_rule_version": project.get("test_level_rules", {}).get("version", "v1"),
         "changed_files": {
             "count": len(changed),
             "documentation_only": (
@@ -573,7 +697,9 @@ def build_plan(args: argparse.Namespace) -> dict[str, Any]:
         },
         "common_path_triggers": common_triggers,
         "platforms": platform_entries,
+        "group_selection": group_selection,
         "test_groups": test_groups,
+        "execution_groups": execution_groups,
         "excluded": excluded,
         "blocked": blocked,
         "reasons": [
@@ -604,7 +730,6 @@ def main() -> int:
     parser.add_argument("--changed-files", default="")
     parser.add_argument("--platforms", default="")
     parser.add_argument("--requested-level", default="auto")
-    parser.add_argument("--requested-risk", default="auto")
     parser.add_argument("--labels-from-event", action="store_true")
     parser.add_argument("--output", type=Path)
     parser.add_argument("--github-output", action="store_true")
@@ -630,7 +755,6 @@ def main() -> int:
                     f.write(f"platforms={json.dumps([p['name'] for p in plan['platforms']])}\n")
                     f.write(f"source_sha={plan['source_sha']}\n")
                     f.write(f"test_level={plan['test_level']}\n")
-                    f.write(f"risk_level={plan['risk_level']}\n")
                     f.write(f"stage={plan['stage']}\n")
                     f.write(f"lint_only={json.dumps(plan['lint_only'])}\n")
         else:
@@ -645,9 +769,22 @@ def main() -> int:
                     "- Platforms:"
                     f" {', '.join(p['name'] for p in plan['platforms']) or 'none (lint only)'}\n"
                 )
-                f.write(f"- Test groups: {len(plan['test_groups'])}\n")
+                f.write(
+                    f"- Test groups: {len(plan['test_groups'])}; execution jobs:"
+                    f" {len(plan['execution_groups'])}\n"
+                )
                 f.write(f"- Excluded: {len(plan['excluded'])}, blocked: {len(plan['blocked'])}\n")
                 f.write(f"- Plan hash: `{plan['plan_hash'][:12]}...`\n\n")
+                f.write(
+                    "- Selected test groups:"
+                    f" {', '.join(plan['group_selection']['groups']) or 'none'}\n"
+                )
+                for platform in plan["platforms"]:
+                    for gap in platform["unsupported_test_groups"]:
+                        message = f"{platform['name']}/{gap['group']}: {gap['reason']}"
+                        f.write(
+                            f"- Coverage gap: {message.replace('<', '&lt;').replace('>', '&gt;')}\n"
+                        )
                 for reason in plan["reasons"]:
                     # Keep repository paths from injecting markup into the summary.
                     f.write(f"- {reason.replace('<', '&lt;').replace('>', '&gt;')}\n")
