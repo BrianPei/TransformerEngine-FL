@@ -22,12 +22,8 @@ Only explicitly recognized documentation changes can produce an empty matrix.
 
 from __future__ import annotations
 
-import argparse
-import json
-import os
 import pathlib
 import subprocess
-import sys
 
 import yaml
 
@@ -127,49 +123,3 @@ def select_platforms(
         selected.update(affected)
         reasons.append(f"{path}: {', '.join(sorted(affected))}")
     return sorted(selected), reasons
-
-
-def main() -> None:
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--event-name", required=True)
-    parser.add_argument("--base-ref", default="main")
-    parser.add_argument("--configs-dir", default=".github/configs")
-    parser.add_argument("--changed-files", default=None, help="Newline-separated paths for testing")
-    args = parser.parse_args()
-    try:
-        rules = _load_watch_rules(pathlib.Path(args.configs_dir))
-        changed = []
-        labels = []
-        if args.event_name == "pull_request":
-            if event_path := os.environ.get("GITHUB_EVENT_PATH"):
-                event = json.loads(pathlib.Path(event_path).read_text())
-                labels = [label["name"] for label in event["pull_request"]["labels"]]
-            if args.changed_files is not None:
-                changed = args.changed_files.splitlines()
-            else:
-                try:
-                    changed = _changed_files(args.base_ref)
-                except subprocess.CalledProcessError as exc:
-                    print(
-                        f"::warning::Cannot read diff; running all platforms: {exc}",
-                        file=sys.stderr,
-                    )
-        platforms, reasons = select_platforms(rules, changed, args.event_name, labels)
-    except (OSError, ValueError, yaml.YAMLError) as exc:
-        print(f"::error::{exc}", file=sys.stderr)
-        raise SystemExit(1) from exc
-
-    print(f"platforms={json.dumps(platforms)}")
-    for reason in reasons:
-        print(reason, file=sys.stderr)
-    if summary_path := os.environ.get("GITHUB_STEP_SUMMARY"):
-        with open(summary_path, "a") as summary:
-            summary.write("### Platform selection\n\n")
-            summary.write(f"Selected: {', '.join(platforms) or 'none (documentation only)'}\n\n")
-            for reason in reasons:
-                # Keep repository paths from injecting markup into the summary.
-                summary.write(f"- {reason.replace('<', '&lt;').replace('>', '&gt;')}\n")
-
-
-if __name__ == "__main__":
-    main()

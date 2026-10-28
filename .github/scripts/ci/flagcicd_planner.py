@@ -631,6 +631,13 @@ def build_plan(args: argparse.Namespace) -> dict[str, Any]:
     for pname in selected:
         p = platforms[pname]
         _, unsupported = platform_test_groups(project, p["config"], group_selection)
+        # Coverage completeness is measured against the platform's supported
+        # catalog, independent of a PR's partial group selection.
+        coverage_supported, _ = platform_test_groups(
+            project,
+            p["config"],
+            {"groups": [group["name"] for group in project["test_groups"]], "required_groups": []},
+        )
         platform_entries.append(
             {
                 "name": pname,
@@ -653,6 +660,7 @@ def build_plan(args: argparse.Namespace) -> dict[str, Any]:
                         group["execution"]["entry"]
                         for group in project["test_groups"]
                         if group.get("coverage")
+                        and group["name"] in coverage_supported
                         and not group.get("blocked")
                         and p["config"].get("coverage", {}).get("enabled", False)
                         and any(

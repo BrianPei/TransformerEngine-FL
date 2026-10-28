@@ -188,6 +188,19 @@ class WorkflowGateTests(unittest.TestCase):
             )
         )
 
+    def test_all_entries_call_the_platform_workflow_directly(self):
+        for name, job in (
+            ("ci", "platform-pipeline"),
+            ("ci-requested", "platform-pipeline"),
+            ("release-acceptance", "platform-pipeline"),
+            ("daily", "platforms"),
+        ):
+            with self.subTest(workflow=name):
+                workflow = yaml.safe_load((ROOT / f".github/workflows/{name}.yml").read_text())
+                self.assertEqual(
+                    workflow["jobs"][job]["uses"], "./.github/workflows/all_tests_common.yml"
+                )
+
     def test_no_always_conditions_in_flagcicd_workflows(self):
         # always() cannot be cancelled; flagcicd jobs and steps use !cancelled().
         for name in (
@@ -221,7 +234,7 @@ class WorkflowGateTests(unittest.TestCase):
             self.assertIn("parallel_groups", jobs[name]["needs"])
             self.assertIn("serial_groups", jobs[name]["needs"])
 
-    def test_label_routing_and_event_payload(self):
+    def test_label_routing(self):
         rules = matrix._load_watch_rules(ROOT / ".github/configs")
         for labels, expected in (
             (["bug"], sorted(rules)),
@@ -244,26 +257,6 @@ class WorkflowGateTests(unittest.TestCase):
                 matrix.select_platforms(rules, [], event, ["platform:cuda"])[0],
                 sorted(rules),
             )
-        with tempfile.TemporaryDirectory() as directory:
-            event = Path(directory, "event.json")
-            event.write_text(json.dumps({"pull_request": {"labels": [{"name": "platform:musa"}]}}))
-            result = subprocess.run(
-                [
-                    "python3",
-                    str(ROOT / ".github/scripts/ci/generate_matrix.py"),
-                    "--event-name",
-                    "pull_request",
-                    "--configs-dir",
-                    str(ROOT / ".github/configs"),
-                    "--changed-files",
-                    "shared.py",
-                ],
-                env=dict(os.environ, GITHUB_EVENT_PATH=str(event)),
-                capture_output=True,
-                text=True,
-                check=True,
-            )
-            self.assertEqual(json.loads(result.stdout.removeprefix("platforms=")), ["musa"])
 
     def test_comment_authorization_and_selection(self):
         for command in (

@@ -3,8 +3,8 @@
 The active entries are `ci.yml` (PR, push to main, manual dispatch),
 `daily.yml` (stage `nightly`, 02:17 Asia/Shanghai, or manual dispatch),
 `ci-requested.yml` (stage `manual`) and `release-acceptance.yml` (stage
-`release`). Each generates a plan and uses the shared platform and group
-workflows. `CI Complete`, `Daily Complete`, `CI Requested Complete` and
+`release`). Each generates a plan and directly calls `all_tests_common.yml` for its
+platform matrix; test jobs use `test_groups_common.yml`. `CI Complete`, `Daily Complete`, `CI Requested Complete` and
 `Release Acceptance Complete` gate the results.
 
 ## Selection and levels

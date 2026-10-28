@@ -398,14 +398,6 @@ def test_group_results(junit_dir: str | None, targets: dict) -> dict[str, dict]:
     return results
 
 
-def test_group_evidence(junit_dir: str | None, targets: dict) -> dict[str, bool]:
-    """A group needs matching passing nodes and no matching failed/error nodes."""
-    return {
-        name: result["status"] == "passed"
-        for name, result in test_group_results(junit_dir, targets).items()
-    }
-
-
 def parse_junit_status(junit_dir: str | None) -> tuple[str, str | None]:
     """Parse junit XML files, return (status, failure_stage)."""
     if not junit_dir or not Path(junit_dir).exists():
@@ -461,16 +453,12 @@ def validate_test_group_reports(
     plan: dict,
     platform: str,
     reports: list,
-    execution_group: str | None = None,
-    device: str | None = None,
 ) -> list[str]:
     """Check logical group completeness, identity and evidence against the plan."""
     expected = {
         (group["device"], group["group"]): group
         for group in plan["test_groups"]
         if group["platform"] == platform
-        and (execution_group is None or group["execution_group"] == execution_group)
-        and (device is None or group["device"] == device)
     }
     if not isinstance(reports, list):
         return [f"{platform}: malformed logical test-group reports"]
@@ -672,13 +660,21 @@ def cmd_platform(args: argparse.Namespace) -> int:
     logical_reports = []
     for report in group_reports:
         children = report.get("test_group_reports", [])
-        errors.extend(
-            validate_test_group_reports(
-                plan, platform, children, report.get("group"), report.get("device")
-            )
-        )
-        if isinstance(children, list):
-            logical_reports.extend(children)
+        if not isinstance(children, list):
+            errors.append(f"{platform}/{report.get('group')}: malformed logical test-group reports")
+            continue
+        # Validate container ownership here; validate identity, evidence and
+        # completeness once below, including duplicates across containers.
+        for child in children:
+            if isinstance(child, dict) and (
+                child.get("execution_group") != report.get("group")
+                or child.get("device") != report.get("device")
+            ):
+                errors.append(
+                    f"{platform}/{child.get('group')}: logical report belongs to a different"
+                    " execution group/device"
+                )
+        logical_reports.extend(children)
     errors.extend(validate_test_group_reports(plan, platform, logical_reports))
 
     # Fail if any errors

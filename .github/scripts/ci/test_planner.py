@@ -26,6 +26,9 @@ UNIT_SUITES = {
 
 
 class PlannerTests(unittest.TestCase):
+    def supported_suites(self, platform):
+        return set(UNIT_SUITES) - ({"pytorch_debug"} if platform == "hygon" else set())
+
     def run_planner(self, stage: str, **kwargs) -> dict:
         """Run planner and return parsed plan."""
         with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
@@ -230,16 +233,25 @@ class PlannerTests(unittest.TestCase):
         )
         self.assertTrue(all(g["level"] in ("L0", "L1", "L2") for g in plan["execution_groups"]))
         self.assertEqual(plan["blocked"], [])
-        # Splitting reports must preserve every platform's original suite coverage.
+        # Splitting reports must preserve each platform's supported suite coverage.
         for platform in plan["platforms"]:
-            self.assertEqual(set(platform["coverage_groups"]), set(UNIT_SUITES))
+            self.assertEqual(
+                set(platform["coverage_groups"]), self.supported_suites(platform["name"])
+            )
             for device in platform["device_types"]:
                 actual = {
                     g["group"]
                     for g in plan["execution_groups"]
                     if g["platform"] == platform["name"] and g["device"] == device
                 }
-                self.assertEqual(actual, {"preflight", *UNIT_SUITES, "pytorch_mcore_integration"})
+                self.assertEqual(
+                    actual,
+                    {
+                        "preflight",
+                        *self.supported_suites(platform["name"]),
+                        "pytorch_mcore_integration",
+                    },
+                )
         for group in plan["execution_groups"]:
             if group["group"] in UNIT_SUITES:
                 self.assertTrue(group["required"])
@@ -328,13 +340,19 @@ class PlannerTests(unittest.TestCase):
                 self.assertEqual(len(plan["platforms"]), 8)
                 for platform in plan["platforms"]:
                     # The full baseline scope must survive partial PR selection.
-                    self.assertEqual(set(platform["coverage_groups"]), set(UNIT_SUITES))
+                    self.assertEqual(
+                        set(platform["coverage_groups"]), self.supported_suites(platform["name"])
+                    )
                     actual = {
                         g["group"]
                         for g in plan["execution_groups"]
                         if g["platform"] == platform["name"]
                     }
-                    self.assertEqual(actual, {"preflight", "pytorch_unit", expected})
+                    self.assertEqual(
+                        actual,
+                        {"preflight", "pytorch_unit"}
+                        | ({expected} & self.supported_suites(platform["name"])),
+                    )
 
     def test_mixed_suite_test_changes_select_the_union(self):
         plan = self.run_planner(
@@ -361,7 +379,14 @@ class PlannerTests(unittest.TestCase):
             actual = {
                 g["group"] for g in plan["execution_groups"] if g["platform"] == platform["name"]
             }
-            self.assertEqual(actual, {"preflight", *UNIT_SUITES, "pytorch_mcore_integration"})
+            self.assertEqual(
+                actual,
+                {
+                    "preflight",
+                    *self.supported_suites(platform["name"]),
+                    "pytorch_mcore_integration",
+                },
+            )
 
     def test_unit_launcher_change_selects_all_four_suites_on_its_platform(self):
         plan = self.run_planner(
@@ -424,7 +449,8 @@ class PlannerTests(unittest.TestCase):
         for platform in plan["platforms"]:
             self.assertEqual(
                 {g["group"] for g in plan["execution_groups"] if g["platform"] == platform["name"]},
-                {"preflight", "pytorch_unit", "pytorch_debug"},
+                {"preflight", "pytorch_unit"}
+                | ({"pytorch_debug"} & self.supported_suites(platform["name"])),
             )
 
     def test_shared_impact_and_unknown_paths_fan_out(self):
@@ -463,6 +489,47 @@ class PlannerTests(unittest.TestCase):
             "optimizer",
             {entry["group"] for entry in hygon["unsupported_test_groups"]},
         )
+
+    def test_coverage_gaps_are_explicit_in_full_and_partial_plans(self):
+        gaps = {
+            "cuda": {"quantization"},
+            "kunlun": {"quantization"},
+            "metax": {"quantization", "attention"},
+            "musa": {"quantization"},
+            "ppu": {"quantization"},
+            "hygon": {"debug"},
+        }
+        for stage, options in (
+            ("nightly", {}),
+            ("pr", {"changed_files": json.dumps(["tests/pytorch/test_recipe.py"])}),
+            ("pr", {"changed_files": json.dumps(["tests/pytorch/debug/test_config.py"])}),
+        ):
+            plan = self.run_planner(stage, **options)
+            for platform in plan["platforms"]:
+                name = platform["name"]
+                with self.subTest(stage=stage, options=options, platform=name):
+                    selected = set(platform["selected_test_groups"])
+                    unavailable = {
+                        group["group"]: group["reason"]
+                        for group in platform["unsupported_test_groups"]
+                    }
+                    for gap in gaps.get(name, set()) & set(plan["group_selection"]["groups"]):
+                        self.assertNotIn(gap, selected)
+                        self.assertTrue(unavailable[gap])
+                        self.assertTrue(
+                            any(
+                                group["platform"] == name and group["group"] == gap
+                                for group in plan["excluded"]
+                            )
+                        )
+                    if name == "hygon":
+                        self.assertNotIn("pytorch_debug", platform["coverage_groups"])
+                        self.assertFalse(
+                            any(
+                                group["platform"] == name and group["group"] == "pytorch_debug"
+                                for group in plan["execution_groups"]
+                            )
+                        )
 
     def test_bad_module_dependencies_are_rejected(self):
         project = yaml.safe_load((ROOT / ".flagcicd/project.yaml").read_text())
@@ -630,6 +697,8 @@ class PlannerTests(unittest.TestCase):
                         continue
                     launchers.setdefault(entry["path"], set()).add(entry["name"])
             for path, suites in launchers.items():
+                if config.stem == "hygon":
+                    suites = suites - {"pytorch_debug"}
                 plan = self.run_planner("pr", changed_files=json.dumps([path]))
                 selected = {g["group"] for g in plan["execution_groups"]}
                 self.assertTrue(suites <= selected, path)

@@ -699,6 +699,8 @@ Path(xml).write_text('<testsuite tests="1"><testcase name="probe"><properties><p
                 "test_targets"
             ] = ["probe_target"]
             platforms = planner.load_platforms(ROOT / ".github/configs")
+            # The probe uses a synthetic catalog containing only preflight/core.
+            platforms["cuda"]["config"]["unsupported_test_groups"] = {}
             pytest_entry = {
                 "name": "pytorch_unit",
                 "runner": "pytest",
@@ -1071,7 +1073,10 @@ class GroupReportEvidenceTests(unittest.TestCase):
                         "<testsuite>" + self.selected_case(path, node=node) + "</testsuite>"
                     )
                     self.assertEqual(
-                        gate.test_group_evidence(tmp, targets),
+                        {
+                            name: result["status"] == "passed"
+                            for name, result in gate.test_group_results(tmp, targets).items()
+                        },
                         {name: name == expected for name in targets},
                     )
             Path(tmp, "report.xml").write_text(
@@ -1079,7 +1084,12 @@ class GroupReportEvidenceTests(unittest.TestCase):
                 ' name="flagcicd_test_path"'
                 ' value="tests/pytorch/test_sanity.py"/></properties></testcase></testsuite>'
             )
-            self.assertFalse(any(gate.test_group_evidence(tmp, targets).values()))
+            self.assertTrue(
+                all(
+                    result["status"] == "report_error"
+                    for result in gate.test_group_results(tmp, targets).values()
+                )
+            )
 
     def test_shared_execution_failure_is_attributed_to_its_own_group(self):
         group = self.selected_groups()
@@ -1298,6 +1308,49 @@ class GatePlatformReportTests(unittest.TestCase):
                 self.assertEqual(gate.cmd_platform(args), 1)
             report = json.loads(output.read_text())
             self.assertTrue(any("coverage" in error.lower() for error in report["errors"]))
+
+    def test_failed_logical_group_is_reported_once(self):
+        plan = make_plan(platforms=[{"name": "cuda"}], test_groups=[make_group("probe", "serial")])
+        damaged = execution_report(plan, plan["execution_groups"][0])
+        damaged["test_group_reports"][0]["status"] = "test_failed"
+        code, report = self.run_platform(plan, [damaged])
+        self.assertEqual(code, 1)
+        errors = [error for error in report["errors"] if "required logical group" in error]
+        self.assertEqual(len(errors), 1)
+
+    def test_logical_reports_cannot_move_between_execution_containers(self):
+        plan = make_plan(
+            platforms=[{"name": "cuda"}],
+            test_groups=[make_group("first", "serial"), make_group("second", "serial")],
+        )
+        reports = [execution_report(plan, group) for group in plan["execution_groups"]]
+        reports[0]["test_group_reports"], reports[1]["test_group_reports"] = (
+            reports[1]["test_group_reports"],
+            reports[0]["test_group_reports"],
+        )
+        code, report = self.run_platform(plan, reports)
+        self.assertEqual(code, 1)
+        self.assertTrue(
+            any("different execution group/device" in error for error in report["errors"])
+        )
+
+    def test_malformed_and_cross_container_duplicate_children_are_rejected(self):
+        plan = make_plan(
+            platforms=[{"name": "cuda"}],
+            test_groups=[make_group("first", "serial"), make_group("second", "serial")],
+        )
+        for damage in ("malformed", "duplicate"):
+            with self.subTest(damage=damage):
+                reports = [execution_report(plan, group) for group in plan["execution_groups"]]
+                if damage == "malformed":
+                    reports[0]["test_group_reports"] = {}
+                else:
+                    reports[1]["test_group_reports"].append(
+                        copy.deepcopy(reports[0]["test_group_reports"][0])
+                    )
+                code, report = self.run_platform(plan, reports)
+                self.assertEqual(code, 1)
+                self.assertTrue(any(damage in error for error in report["errors"]))
 
     def test_optional_failures_and_missing_reports_allow_final_gate(self):
         for required, include_report in (
