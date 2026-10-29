@@ -24,7 +24,13 @@ run_pytest() {
     local target=$2
     shift 2
     echo "[RUN][$suite] $target"
-    if ! "$PYTHON_BIN" -m pytest -v -s --tb=short "$TE_PATH/$target" "$@" \
+    local python_command=("$PYTHON_BIN")
+    if [ "$target" = "tests/plugin/plugin" ]; then
+        # Policy/dispatch contract tests create mock vendors and need the default
+        # policy, rather than the device QA's Iluvatar-only vendor restriction.
+        python_command=(env -u TE_FL_ALLOW_VENDORS -u TE_FL_PREFER -u TE_FL_STRICT "$PYTHON_BIN")
+    fi
+    if ! "${python_command[@]}" -m pytest -v -s --tb=short "$TE_PATH/$target" "$@" \
         --junitxml="$XML_LOG_DIR/$name.xml"; then
         FAILED=1
         FAILED_TESTS+=("$suite:$name")
