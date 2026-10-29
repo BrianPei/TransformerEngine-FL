@@ -54,7 +54,12 @@ run_suite() {
         unittest)
             for target in "${ILUVATAR_UNIT_TEST_TARGETS[@]}"; do
                 index=$((index + 1))
-                run_pytest "unit_$index" "$target"
+                case "$target" in
+                    tests/pytorch/test_cpu_offloading_v1.py)
+                        NVTE_CPU_OFFLOAD_V1=1 run_pytest "unit_$index" "$target"
+                        ;;
+                    *) run_pytest "unit_$index" "$target" ;;
+                esac
             done
             ;;
         distributed)
