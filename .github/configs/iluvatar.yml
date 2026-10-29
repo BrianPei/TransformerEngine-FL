@@ -1,0 +1,70 @@
+# Iluvatar BI-V150 / CoreX QA configuration, following the Hygon adapter layout.
+# Provision the prepared QA image and runner before enabling this on main.
+hardware_name: iluvatar
+display_name: 'Iluvatar BI-V150 (CoreX 4.5.0)'
+checkout_submodules: 'false'
+# Proposed CI image; not published yet. The base image alone has no Python.
+ci_image: harbor.baai.ac.cn/flagos-dev/transformerengine-fl:iluvatar-corex4.5.0-ci
+container_pull_policy: never
+runner_labels:
+  - iluvatar-cicd-te
+container_volumes: []
+container_options: >-
+  --device=/dev/iluvatar0
+  --device=/dev/iluvatar1
+  --device=/dev/iluvatar2
+  --device=/dev/iluvatar3
+  --device=/dev/iluvatar4
+  --device=/dev/iluvatar5
+  --device=/dev/iluvatar6
+  --device=/dev/iluvatar7
+  --shm-size=16g
+  --user root
+setup_script: .github/scripts/setup_iluvatar.sh
+device_types:
+  - bi-v150
+# Eight devices are exposed to match the existing multi-device QA launchers.
+nproc_per_node: 8
+coverage:
+  enabled: true
+  required: false
+  python: python3
+  sources: [transformer_engine]
+  include:
+    - transformer_engine/pytorch/*
+    - transformer_engine/debug/*
+    - transformer_engine/plugin/*
+  omit:
+    - '*/setup.py'
+    - '*/transformer_engine/plugin/core/_build_config.py'
+unit_test_matrix:
+  - name: pytorch_debug
+    runner: script
+    path: tests/plugin/backend/iluvatar/run_unit_tests.sh
+    args: [debug]
+    timeout_minutes: 240
+  - name: pytorch_unit
+    runner: script
+    path: tests/plugin/backend/iluvatar/run_unit_tests.sh
+    args: [unittest]
+    timeout_minutes: 240
+  - name: pytorch_distributed
+    runner: script
+    path: tests/plugin/backend/iluvatar/run_unit_tests.sh
+    args: [distributed]
+    timeout_minutes: 240
+  - name: pytorch_onnx
+    runner: script
+    path: tests/plugin/backend/iluvatar/run_unit_tests.sh
+    args: [onnx]
+    timeout_minutes: 240
+integration_test_matrix:
+  - name: pytorch_mcore_integration
+    path: tests/plugin/backend/iluvatar/run_integration_tests.sh
+paths_watch:
+  - .github/configs/iluvatar.yml
+  - .github/scripts/setup_iluvatar.sh
+  - tests/plugin/backend/iluvatar/
+  - transformer_engine/plugin/core/backends/vendor/iluvatar/
+# No blanket exclusions: real capability skips and failures remain visible in JUnit.
+unsupported_test_groups: {}

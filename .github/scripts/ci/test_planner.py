@@ -337,7 +337,9 @@ class PlannerTests(unittest.TestCase):
             with self.subTest(path=path):
                 plan = self.run_planner("pr", changed_files=json.dumps([path]))
                 self.assertEqual(plan["test_level"], level)
-                self.assertEqual(len(plan["platforms"]), 8)
+                self.assertEqual(
+                    len(plan["platforms"]), len(planner.load_platforms(ROOT / ".github/configs"))
+                )
                 for platform in plan["platforms"]:
                     # The full baseline scope must survive partial PR selection.
                     self.assertEqual(
@@ -361,7 +363,9 @@ class PlannerTests(unittest.TestCase):
                 ["tests/pytorch/test_recipe.py", "tests/pytorch/test_onnx_export.py"]
             ),
         )
-        self.assertEqual(len(plan["platforms"]), 8)
+        self.assertEqual(
+            len(plan["platforms"]), len(planner.load_platforms(ROOT / ".github/configs"))
+        )
         for platform in plan["platforms"]:
             actual = {
                 g["group"] for g in plan["execution_groups"] if g["platform"] == platform["name"]
@@ -374,7 +378,9 @@ class PlannerTests(unittest.TestCase):
             changed_files=json.dumps(["transformer_engine/pytorch/new_shared_component.py"]),
         )
         self.assertEqual(plan["test_level"], "L2")
-        self.assertEqual(len(plan["platforms"]), 8)
+        self.assertEqual(
+            len(plan["platforms"]), len(planner.load_platforms(ROOT / ".github/configs"))
+        )
         for platform in plan["platforms"]:
             actual = {
                 g["group"] for g in plan["execution_groups"] if g["platform"] == platform["name"]
@@ -602,7 +608,9 @@ class PlannerTests(unittest.TestCase):
 
         group_names = {g["group"] for g in plan["execution_groups"]}
 
-        self.assertEqual(len(plan["platforms"]), 8)  # All platforms selected
+        self.assertEqual(
+            len(plan["platforms"]), len(planner.load_platforms(ROOT / ".github/configs"))
+        )  # All platforms selected
         self.assertNotIn("model_validation", group_names)
         self.assertTrue(plan["blocked"])
         self.assertTrue(any(item["required"] for item in plan["blocked"]))
