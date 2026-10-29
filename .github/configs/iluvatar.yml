@@ -10,6 +10,7 @@ runner_labels:
   - iluvatar-cicd-te
 container_volumes: []
 container_options: >-
+  --device=/dev/itrctl
   --device=/dev/iluvatar0
   --device=/dev/iluvatar1
   --device=/dev/iluvatar2
