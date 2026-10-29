@@ -17,9 +17,9 @@ export TE_FL_SKIP_CUDA=1
 export NVTE_SKIP_SUBMODULE_CHECKS_DURING_BUILD=1
 export NVTE_FRAMEWORK=pytorch
 export NVTE_WITH_NCCL_EP=0
-export TE_FL_PREFER=vendor
-export TE_FL_ALLOW_VENDORS=Iluvatar
-# OpManager.call uses 0 to propagate vendor exceptions without runtime fallback.
+export TE_FL_PREFER="${TE_FL_PREFER:-flagos}"
+export CUDA_VISIBLE_DEVICES="${CUDA_VISIBLE_DEVICES:-0,1,2,3,4,5,6,7}"
+# OpManager.call uses 0 to propagate backend exceptions without runtime fallback.
 export TE_FL_STRICT=0
 export NVTE_FLASH_ATTN=0
 export NVTE_FUSED_ATTN=0

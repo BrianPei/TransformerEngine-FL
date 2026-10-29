@@ -3,7 +3,7 @@
 set -euo pipefail
 
 export PLATFORM=iluvatar
-export TE_FL_PREFER=vendor
+export TE_FL_PREFER="${TE_FL_PREFER:-flagos}"
 # Use the common pinned MCore checkout and four-step BF16 mock-data training.
 # Avoid CUDA-only environment defaults; keep the initial model within BI-V150 memory.
 export MCORE_USE_CUDA_ENV_DEFAULTS=0

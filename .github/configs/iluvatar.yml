@@ -3,13 +3,21 @@
 hardware_name: iluvatar
 display_name: 'Iluvatar BI-V150 (CoreX 4.5.0)'
 checkout_submodules: 'false'
-# Proposed CI image; not published yet. The base image alone has no Python.
+# Prepared QA image must be preloaded on the runner (pull policy: never).
 ci_image: harbor.baai.ac.cn/flagos-dev/transformerengine-fl:iluvatar-corex4.5.0-ci
 container_pull_policy: never
 runner_labels:
-  - iluvatar-cicd-te
+  - ts-8g-cicd-te
 container_volumes: []
 container_options: >-
+  --privileged
+  --ipc=host
+  --shm-size=100g
+  --ulimit memlock=-1
+  --ulimit stack=67108864
+  --user root
+  --group-add video
+  -e CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7
   --device=/dev/itrctl
   --device=/dev/iluvatar0
   --device=/dev/iluvatar1
@@ -19,8 +27,6 @@ container_options: >-
   --device=/dev/iluvatar5
   --device=/dev/iluvatar6
   --device=/dev/iluvatar7
-  --shm-size=16g
-  --user root
 setup_script: .github/scripts/setup_iluvatar.sh
 device_types:
   - bi-v150
