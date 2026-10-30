@@ -30,6 +30,19 @@ run_pytest() {
             return 0
         fi
     done
+    local rule scope details expression reason
+    for rule in "${ILUVATAR_KNOWN_FAILURE_FILTERS[@]}"; do
+        scope=${rule%%|*}
+        details=${rule#*|}
+        if [ "$suite" = "$scope" ] && [ "$target" = "${details%%|*}" ]; then
+            details=${details#*|}
+            expression=${details%%|*}
+            reason=${details#*|}
+            echo "[DESELECT][$suite] $target: $reason"
+            echo "[DESELECT][$suite] -k not ($expression)"
+            set -- "$@" -k "not ($expression)"
+        fi
+    done
     echo "[RUN][$suite] $target"
     local python_command=("$PYTHON_BIN")
     if [ "$target" = "tests/plugin/plugin" ]; then
@@ -75,6 +88,16 @@ run_suite() {
             done
             ;;
         distributed)
+            # The ordinary numerics target is omitted from the list; the debug
+            # invocation below is guarded by the same whole-file exclusion.
+            local exclusion
+            for exclusion in "${ILUVATAR_EXCLUDED_TEST_TARGETS[@]}"; do
+                case "${exclusion%%|*}" in
+                    tests/pytorch/distributed/*)
+                        echo "[EXCLUDED][$suite] ${exclusion%%|*}: ${exclusion#*|}"
+                        ;;
+                esac
+            done
             "$PYTHON_BIN" - <<'CHECK'
 import os
 import torch
