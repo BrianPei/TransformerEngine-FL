@@ -23,6 +23,13 @@ run_pytest() {
     local name=$1
     local target=$2
     shift 2
+    local exclusion
+    for exclusion in "${ILUVATAR_EXCLUDED_TEST_TARGETS[@]}"; do
+        if [ "$target" = "${exclusion%%|*}" ]; then
+            echo "[EXCLUDED][$suite] $target: ${exclusion#*|}"
+            return 0
+        fi
+    done
     echo "[RUN][$suite] $target"
     local python_command=("$PYTHON_BIN")
     if [ "$target" = "tests/plugin/plugin" ]; then
@@ -58,14 +65,13 @@ run_suite() {
                 run_pytest debug_numerics_regular "tests/pytorch/test_numerics.py"
             ;;
         unittest)
+            local exclusion
+            for exclusion in "${ILUVATAR_EXCLUDED_TEST_TARGETS[@]}"; do
+                echo "[EXCLUDED][$suite] ${exclusion%%|*}: ${exclusion#*|}"
+            done
             for target in "${ILUVATAR_UNIT_TEST_TARGETS[@]}"; do
                 index=$((index + 1))
-                case "$target" in
-                    tests/pytorch/test_cpu_offloading_v1.py)
-                        NVTE_CPU_OFFLOAD_V1=1 run_pytest "unit_$index" "$target"
-                        ;;
-                    *) run_pytest "unit_$index" "$target" ;;
-                esac
+                run_pytest "unit_$index" "$target"
             done
             ;;
         distributed)

@@ -73,5 +73,10 @@ paths_watch:
   - .github/scripts/setup_iluvatar.sh
   - tests/plugin/backend/iluvatar/
   - transformer_engine/plugin/core/backends/vendor/iluvatar/
-# No blanket exclusions: real capability skips and failures remain visible in JUnit.
+# RoPE uses the FlagOS backend tests, as on PPU; the common large-shape RoPE
+# matrix is not launched on this 32 GiB baseline (see the Iluvatar config.sh).
+# Whole-file exclusions and reproduction reasons are recorded in config.sh:
+# common numerics, CUDA Graphs, and both CPU offload files. Numerics is also
+# excluded when invoked by the debug launcher. These gaps are not passing tests.
+# No entire test group is excluded; capability skips and failures remain in JUnit.
 unsupported_test_groups: {}

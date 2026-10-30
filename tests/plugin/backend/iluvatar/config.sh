@@ -21,15 +21,26 @@ readonly PLATFORM_PYTEST_EXTRA_ARGS="--tb=short --verbose"
 readonly PLATFORM_PYTEST_DESELECT=""
 readonly PLATFORM_COVERAGE_ENABLED=true
 
-# Active common L0 QA targets, without CUDA/MetaX-specific exclusions.
+# Whole-file exclusions for this CI baseline, not passing or capability-skipped
+# tests. Keep the shared sources intact; restore these entries after isolated
+# reproduction confirms the attention/graph/offload issues are fixed.
+readonly ILUVATAR_EXCLUDED_TEST_TARGETS=(
+    "tests/pytorch/test_numerics.py|FP16 GPT CUDA Graph case hung with a driver thread remaining after termination."
+    "tests/pytorch/test_cuda_graphs.py|FP16 Transformer graph case hung again on a different GPU."
+    "tests/pytorch/test_cpu_offloading.py|UnfusedAttention MHA numerics produced no output for 20 minutes and left an unreaped process."
+    "tests/pytorch/test_cpu_offloading_v1.py|MHA/Transformer offload cases require an unavailable fused attention backend; excluded with the offload suite."
+)
+
+# Common L0 QA targets plus plugin tests. Match PPU's RoPE coverage through
+# tests/plugin/backend/flagos/test_fused_rope.py (included by the FlagOS directory
+# below), rather than the large tests/pytorch/test_fused_rope.py matrix. On the
+# 32 GiB BI-V150 that matrix OOMs in gradient comparisons and cascades across
+# cases; it remains available for separate capacity testing.
 readonly ILUVATAR_UNIT_TEST_TARGETS=(
     "tests/pytorch/test_sanity.py"
     "tests/pytorch/test_recipe.py"
     "tests/pytorch/test_deferred_init.py"
-    "tests/pytorch/test_numerics.py"
-    "tests/pytorch/test_cuda_graphs.py"
     "tests/pytorch/test_jit.py"
-    "tests/pytorch/test_fused_rope.py"
     "tests/pytorch/nvfp4"
     "tests/pytorch/test_quantized_tensor.py"
     "tests/pytorch/test_float8blockwisetensor.py"
@@ -41,8 +52,6 @@ readonly ILUVATAR_UNIT_TEST_TARGETS=(
     "tests/pytorch/test_fusible_ops.py"
     "tests/pytorch/test_permutation.py"
     "tests/pytorch/test_parallel_cross_entropy.py"
-    "tests/pytorch/test_cpu_offloading.py"
-    "tests/pytorch/test_cpu_offloading_v1.py"
     "tests/pytorch/attention/test_attention.py"
     "tests/pytorch/attention/test_kv_cache.py"
     "tests/pytorch/test_hf_integration.py"
