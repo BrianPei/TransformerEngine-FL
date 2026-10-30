@@ -8,7 +8,7 @@ command -v "${PYTHON_BIN:-python3}" >/dev/null || {
     exit 1
 }
 source "$WORKSPACE/tests/plugin/backend/iluvatar/set_env.sh"
-# CI measures the FlagOS baseline even when the image inherits vendor preferences.
+# CI prefers FlagOS, with the per-op reference selections from set_env.sh.
 export TE_FL_PREFER=flagos
 export TE_FL_ALLOW_VENDORS=
 command -v ixsmi >/dev/null
@@ -41,9 +41,14 @@ from transformer_engine.plugin.core import get_manager
 manager = get_manager()
 for op in ("generic_gemm", "layernorm_fwd", "layernorm_bwd", "rmsnorm_fwd", "rmsnorm_bwd"):
     selected = manager.get_selected_impl_id(op)
-    if selected != "default.flagos":
-        raise RuntimeError(f"{op}: expected default.flagos, selected {selected!r}")
+    expected = "reference.torch" if op == "generic_gemm" else "default.flagos"
+    if selected != expected:
+        raise RuntimeError(f"{op}: expected {expected}, selected {selected!r}")
     print(f"{op}: {selected}")
+selected = manager.get_selected_impl_id("multi_tensor_unscale_l2norm")
+if selected != "reference.torch":
+    raise RuntimeError(f"multi_tensor_unscale_l2norm: expected reference.torch, selected {selected!r}")
+print(f"multi_tensor_unscale_l2norm: {selected}")
 CHECK
 "$PYTHON_BIN" - <<'CHECK'
 import importlib
@@ -60,7 +65,7 @@ CHECK
 if [ -n "${GITHUB_ENV:-}" ]; then
     for key in PATH LD_LIBRARY_PATH PYTHONPATH TE_PATH PLATFORM IX_HOME CUDA_HOME \
         TE_FL_SKIP_CUDA NVTE_SKIP_SUBMODULE_CHECKS_DURING_BUILD NVTE_FRAMEWORK \
-        NVTE_WITH_NCCL_EP TE_FL_PREFER TE_FL_ALLOW_VENDORS CUDA_VISIBLE_DEVICES TE_FL_STRICT \
+        NVTE_WITH_NCCL_EP TE_FL_PREFER TE_FL_PER_OP TE_FL_ALLOW_VENDORS CUDA_VISIBLE_DEVICES TE_FL_STRICT \
         NVTE_FLASH_ATTN NVTE_FUSED_ATTN NVTE_UNFUSED_ATTN PYTHON_BIN TE_LIB_PATH XML_LOG_DIR \
         PYTHONDONTWRITEBYTECODE ILUVATAR_NPROC_PER_NODE NVTE_TEST_CHECKPOINT_ARTIFACT_PATH; do
         printf '%s=%s\n' "$key" "${!key}" >> "$GITHUB_ENV"

@@ -28,7 +28,7 @@ run_pytest() {
     if [ "$target" = "tests/plugin/plugin" ]; then
         # Policy/dispatch contract tests create mock vendors and need the default
         # policy, independent of the device QA's backend preference.
-        python_command=(env -u TE_FL_ALLOW_VENDORS -u TE_FL_PREFER -u TE_FL_STRICT "$PYTHON_BIN")
+        python_command=(env -u TE_FL_ALLOW_VENDORS -u TE_FL_PREFER -u TE_FL_PER_OP -u TE_FL_STRICT "$PYTHON_BIN")
     fi
     if ! "${python_command[@]}" -m pytest -v -s --tb=short "$TE_PATH/$target" "$@" \
         --junitxml="$XML_LOG_DIR/$name.xml"; then

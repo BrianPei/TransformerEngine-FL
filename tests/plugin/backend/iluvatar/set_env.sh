@@ -18,6 +18,9 @@ export NVTE_SKIP_SUBMODULE_CHECKS_DURING_BUILD=1
 export NVTE_FRAMEWORK=pytorch
 export NVTE_WITH_NCCL_EP=0
 export TE_FL_PREFER="${TE_FL_PREFER:-flagos}"
+# Keep the FlagOS baseline, with explicit reference implementations for the
+# GEMM compatibility cases and the unscale/L2 norm op missing from IXTE.
+export TE_FL_PER_OP="${TE_FL_PER_OP-generic_gemm=reference;multi_tensor_unscale_l2norm=reference}"
 export CUDA_VISIBLE_DEVICES="${CUDA_VISIBLE_DEVICES:-0,1,2,3,4,5,6,7}"
 # OpManager.call uses 0 to propagate backend exceptions without runtime fallback.
 export TE_FL_STRICT=0
