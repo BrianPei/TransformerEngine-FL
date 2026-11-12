@@ -1,0 +1,36 @@
+name: MUSA Reference and FlagOS GPU baseline
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  gpu-baseline:
+    runs-on: [self-hosted, mt-8g-cicd-te]
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      max-parallel: 1
+      matrix:
+        backend: [reference, flagos]
+    container:
+      image: harbor.baai.ac.cn/flagos-dev/transformer-engine-fl:v2.17.0-musa-ci@sha256:96f886e4cd1c6ab7950d258fd9cd5c8b768a17487d8e3033e9bee809fea33b98
+      options: --runtime=mthreads --privileged --ipc=host --shm-size=16g
+      env:
+        MTHREADS_VISIBLE_DEVICES: all
+        MTHREADS_DRIVER_CAPABILITIES: all
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check dependencies
+        run: python3 -m pip check
+      - name: Compare GPU outputs and gradients with CPU
+        shell: bash
+        run: bash tests/musa_portable/run.sh "${{ matrix.backend }}"
+      - name: Upload GPU baseline results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: musa-portable-${{ matrix.backend }}
+          path: logs/musa-portable/
