@@ -15,6 +15,9 @@ RUN mkdir -p /opt/te-image && printf '%s\n' \
 ENV PIP_CONSTRAINT=/opt/te-image/constraints.txt PIP_PROGRESS_BAR=off
 RUN python -c 'import pathlib, sys; target = pathlib.Path(sys.base_prefix) / "bin/python3-config"; assert target.is_file(), target; pathlib.Path("/flagos/bin/python3-config").symlink_to(target)' \
     && command -v python3-config
+RUN python -c 'from pathlib import Path; p=Path("/etc/profile.d/vendor.sh"); lines=p.read_text().splitlines(); indexes=[i for i,line in enumerate(lines) if line.startswith("export PYTHONPATH=")]; assert len(indexes)==1, indexes; lines[indexes[0]]="export PYTHONPATH=\"${ASCEND_HOME_PATH:-/usr/local/Ascend/cann-9.0.0}/python/site-packages:${ASCEND_HOME_PATH:-/usr/local/Ascend/cann-9.0.0}/opp/built-in/op_impl/ai_core/tbe${PYTHONPATH:+:$PYTHONPATH}\""; p.write_text("\n".join(lines)+"\n")' \
+    && bash -n /etc/profile.d/vendor.sh \
+    && grep -Fq '${PYTHONPATH:+:$PYTHONPATH}' /etc/profile.d/vendor.sh
 WORKDIR /workspace
 CMD ["bash"]
 
