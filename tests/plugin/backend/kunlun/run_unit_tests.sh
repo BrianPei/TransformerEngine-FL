@@ -22,6 +22,52 @@ run_test_step() {
     eval "$*" || FAIL=1
 }
 
+prepare_distributed_devices() {
+    if [[ "${GITHUB_ACTIONS:-}" != "true" || -v XPU_VISIBLE_DEVICES || -v CUDA_VISIBLE_DEVICES ]]; then
+        return 0
+    fi
+
+    # The numerics suite starts four ranks. Check candidate cards individually so
+    # a hung device cannot strand its peers in their first collective.
+    local required_devices=4
+    local -a healthy_devices=()
+    local device
+    for ((device = 0; device < PLATFORM_NPROC_PER_NODE; device++)); do
+        if timeout --kill-after=3s 23s python3 - "$device" <<'PY'
+import sys
+
+import torch
+
+device = torch.device("cuda", int(sys.argv[1]))
+torch.cuda.set_device(device)
+sample = torch.full((393216,), 7, dtype=torch.float32, device=device)
+torch.cuda.synchronize(device)
+if sample[-1].item() != 7:
+    raise RuntimeError(f"{device} returned an incorrect value")
+PY
+        then
+            healthy_devices+=("$device")
+            if (( ${#healthy_devices[@]} == required_devices )); then
+                break
+            fi
+        else
+            echo "::warning title=Kunlun XPU health check::XPU $device failed the single-device probe"
+        fi
+    done
+
+    if (( ${#healthy_devices[@]} < required_devices )); then
+        echo "Kunlun distributed CI requires $required_devices working XPUs, found ${#healthy_devices[@]}" >&2
+        return 1
+    fi
+    if (( device >= required_devices )); then
+        local IFS=,
+        # Keep CUDA compatibility-layer enumeration aligned with the XPU mask.
+        export XPU_VISIBLE_DEVICES="${healthy_devices[*]}"
+        export CUDA_VISIBLE_DEVICES="$XPU_VISIBLE_DEVICES"
+        echo "Kunlun distributed CI using XPUs $XPU_VISIBLE_DEVICES"
+    fi
+}
+
 run_suite() {
     case "$1" in
         debug | pytorch_debug)
@@ -80,6 +126,10 @@ run_suite() {
             $TE_PATH/tests/pytorch/test_deferred_init.py"
             ;;
         distributed | pytorch_distributed_unittest)
+        if ! prepare_distributed_devices; then
+            FAIL=1
+            return
+        fi
         run_test_step "pytest_test_numerics.xml" \
             "python3 -m pytest -v -s \
             --junitxml=$XML_LOG_DIR/pytest_test_numerics.xml \
