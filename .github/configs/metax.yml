@@ -88,6 +88,17 @@ integration_test_matrix:
   - name: pytorch_mcore_integration
     path: tests/plugin/backend/metax/run_integration_tests.sh
 
+# These tests will be skipped when running pytest (file or file::node).
+# Only defects owned outside this repository belong here; give the reason,
+# owner and restore condition in a comment above each group.
+ignored_tests:
+  # MetaX C550 fp32 dropout takes the unfused torch bernoulli_ path; this
+  # unseeded 99% mask-count check false-positived (observed 0.48931884765625,
+  # z=2.734 > 2.5758) while the dropout values themselves matched. Owned by
+  # the MetaX torch RNG stream; restore when the test is seeded or the check
+  # is hardened against per-case statistical flakiness.
+  - tests/pytorch/test_fusible_ops.py::TestBasicOps::test_dropout[dtype0-shape2-None-True-0.5]
+
 # Test matrix configuration
 test_matrix:
   unit:
