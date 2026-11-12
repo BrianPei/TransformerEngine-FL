@@ -54,18 +54,24 @@ def test_forward_and_gradients(kind, shape, dtype):
         check_backend("rmsnorm_fwd", "rmsnorm_bwd")
         model = te.RMSNorm(hidden, device="musa", dtype=dtype)
         reference = torch.nn.RMSNorm(hidden, eps=1e-5)
-    reference.load_state_dict({k: v.detach().cpu().float() for k, v in model.named_parameters()})
+    reference.load_state_dict(
+        {k: v.detach().cpu().float() for k, v in model.named_parameters()}
+    )
     x = torch.randn(shape).to(device="musa", dtype=dtype).requires_grad_()
     cpu_x = x.detach().cpu().float().requires_grad_()
     actual = model(x)
     expected = reference(cpu_x)
     assert actual.device.type == "musa"
     tolerance = {torch.float32: 2e-4, torch.float16: 5e-3, torch.bfloat16: 5e-2}[dtype]
-    torch.testing.assert_close(actual.cpu().float(), expected, atol=tolerance, rtol=tolerance)
+    torch.testing.assert_close(
+        actual.cpu().float(), expected, atol=tolerance, rtol=tolerance
+    )
     grad = torch.randn_like(actual)
     actual.backward(grad)
     expected.backward(grad.cpu().float())
-    torch.testing.assert_close(x.grad.cpu().float(), cpu_x.grad, atol=tolerance, rtol=tolerance)
+    torch.testing.assert_close(
+        x.grad.cpu().float(), cpu_x.grad, atol=tolerance, rtol=tolerance
+    )
     for name, parameter in model.named_parameters():
         assert parameter.grad is not None, name
         torch.testing.assert_close(
@@ -84,7 +90,8 @@ def test_composite_forward_and_gradients(kind, dtype):
     cls = te.LayerNormLinear if kind == "layernorm_linear" else te.LayerNormMLP
     model = cls(64, 128, device="musa", params_dtype=dtype)
     parameters = {
-        name: value.detach().cpu().requires_grad_() for name, value in model.named_parameters()
+        name: value.detach().cpu().requires_grad_()
+        for name, value in model.named_parameters()
     }
     x = torch.randn((4, 8, 64)).to(device="musa", dtype=dtype).requires_grad_()
     cpu_x = x.detach().cpu().requires_grad_()
