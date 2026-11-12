@@ -322,30 +322,21 @@ def _compare_tensors(name, test, ref, rtol, atol):
             )
             return 1, numerics_info
 
-    diff = torch.abs(test.flatten() - ref.flatten())
-    m = torch.argmax(diff)
-    abs_err = diff[m].item()
-    rel_err = abs_err / max(abs(ref.flatten()[m].item()), 1e-5)
-    numerics_failed = 0
-    if rel_err > rtol and abs_err > atol:
-        numerics_failed = 1
-        numerics_info = (
-            "NUMERICAL CHECK FAILED: "
-            + f"{name} not close enough at index {m.item()} "
-            + f"with {test.flatten()[m].item()} vs {ref.flatten()[m].item()} | "
-            + f"rel. error = {rel_err} (tol = {rtol}) | "
-            + f"abs. error = {abs_err} (tol = {atol})"
-        )
-    else:
-        numerics_info = f"NUMERICAL CHECK PASSED: {name} | "
-        if rel_err <= rtol:
-            numerics_info += f"rel. error = {rel_err} (tol = {rtol})" + (
-                " | " if abs_err <= atol else "."
-            )
-        if abs_err <= atol:
-            numerics_info += f" abs. error = {abs_err} (tol = {atol})"
-
-    return numerics_failed, numerics_info
+    test = test.flatten()
+    ref = ref.flatten()
+    diff = (test - ref).abs()
+    index = diff.argmax().item()
+    abs_error = diff[index].item()
+    reference = ref[index].item()
+    # Keep the peak-error metric and apply both tolerances to the same value.
+    allowed_error = atol + rtol * abs(reference)
+    if abs_error <= allowed_error:
+        return 0, f"NUMERICAL CHECK PASSED: {name} | abs. error = {abs_error} (tol = {allowed_error})"
+    return 1, (
+        f"NUMERICAL CHECK FAILED: {name} at index {index} "
+        f"with {test[index].item()} vs {reference} | "
+        f"abs. error = {abs_error} (tol = {allowed_error})"
+    )
 
 
 def _train(opts):
