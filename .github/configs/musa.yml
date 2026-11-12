@@ -5,6 +5,8 @@ display_name: 'MooreThreads MUSA Tests'
 checkout_submodules: recursive
 
 # CI image for MooreThreads MUSA dev env
+# Candidate pending native MUSA extension validation:
+# harbor.baai.ac.cn/flagos-dev/transformer-engine-fl:v2.17.0-musa-ci
 ci_image: harbor.baai.ac.cn/flagos-dev/transformerengine-fl:f826afe-musa-dev
 
 # Runner labels for self-hosted MooreThreads node
