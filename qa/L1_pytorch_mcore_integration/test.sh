@@ -129,6 +129,10 @@ else
     exit 1
 fi
 
+# The image may ship a megatron package without megatron.training and import it
+# during interpreter startup; select the pinned checkout for every child.
+export PYTHONPATH="${MCORE_PATH}${PYTHONPATH:+:${PYTHONPATH}}"
+
 if [ -n "${MCORE_PREPARE_SCRIPT:-}" ]; then
     if [ ! -f "${MCORE_PREPARE_SCRIPT}" ]; then
         echo "MCore preparation script does not exist: ${MCORE_PREPARE_SCRIPT}" >&2
