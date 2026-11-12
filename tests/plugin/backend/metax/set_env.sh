@@ -10,6 +10,9 @@ export TE_LIB_PATH="${TE_LIB_PATH:-$(python3 -c 'import site; print(site.getsite
 export PYTHONPATH="${TE_PATH}${PYTHONPATH:+:$PYTHONPATH}"
 export TE_FL_SKIP_CUDA="${TE_FL_SKIP_CUDA:-1}"
 export NVTE_WITH_MACA="${NVTE_WITH_MACA:-1}"
+# The CI image also ships flag_gems; keep fused normalization on the vendor
+# backend, whose fp16/bf16 reductions match TE's tolerances.
+export TE_FL_PER_OP="${TE_FL_PER_OP:-layernorm_fwd=vendor|flagos|reference;layernorm_bwd=vendor|flagos|reference;rmsnorm_fwd=vendor|flagos|reference;rmsnorm_bwd=vendor|flagos|reference;rmsnorm_bwd_add=vendor|flagos|reference}"
 export NVTE_WITH_NCCL_EP="${NVTE_WITH_NCCL_EP:-0}"
 export CUDA_HOME="${CUDA_HOME:-/opt/maca}"
 export MACA_HOME="${MACA_HOME:-/opt/maca}"
