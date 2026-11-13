@@ -105,6 +105,15 @@ compat_test_matrix:
     path: tests/plugin/backend/cuda/run_fa_versions_tests.sh
     blocked: requires sm90+ (Hopper or newer); online CUDA runners are A100 (sm80)
 
+# These tests will be skipped when running pytest (file or file::node).
+# Only defects owned outside this repository belong here; give the reason,
+# owner and restore condition in a comment above each group.
+ignored_tests:
+  # FlagTree/FlagTune: torch.compile's generated grid returns None because FlagTree
+  # launches zero_pad_kernel with BLOCK_N=32, a config TE never declares.
+  # Restore when compiled tracing passes.
+  - tests/plugin/plugin/triton_dispatch_numerics_cases.py::test_dispatch_entry_does_not_shrink_the_compiled_graph
+
 # Test matrix configuration
 test_matrix:
   l0_pytorch:
