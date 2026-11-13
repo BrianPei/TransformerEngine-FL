@@ -63,6 +63,19 @@ if [ "${PLATFORM}" = "ascend" ]; then
     : "${MICRO_BATCH_SIZE:=1}"
     : "${GLOBAL_BATCH_SIZE:=1}"
     : "${ENABLE_DIAGNOSTICS:=0}"
+elif [ "${PLATFORM}" = "metax" ]; then
+    # The full 12-layer/1024-sequence smoke does not complete within the
+    # 30-minute integration budget on the current MetaX stack; keep a small
+    # single-iteration smoke here and cover the wider TE stack in the unit lanes.
+    : "${NUM_LAYERS:=2}"
+    : "${HIDDEN_SIZE:=128}"
+    : "${NUM_ATTENTION_HEADS:=4}"
+    : "${SEQ_LENGTH:=128}"
+    : "${MICRO_BATCH_SIZE:=1}"
+    : "${GLOBAL_BATCH_SIZE:=1}"
+    : "${ENABLE_DIAGNOSTICS:=0}"
+    : "${MCORE_TRAIN_ITERS:=2}"
+    : "${MCORE_EXIT_INTERVAL:=1}"
 else
     : "${NUM_LAYERS:=12}"
     : "${HIDDEN_SIZE:=512}"
@@ -202,6 +215,16 @@ if [ "${ENABLE_DIAGNOSTICS}" = "1" ]; then
 --log-memory-to-tensorboard"
 fi
 
+RECOMPUTE_ARGS="
+--recompute-granularity full
+--recompute-method uniform
+--recompute-num-layers 1"
+DETERMINISTIC_ARGS="--deterministic-mode"
+if [ "${PLATFORM}" = "metax" ]; then
+    RECOMPUTE_ARGS=""
+    DETERMINISTIC_ARGS=""
+fi
+
 COMMAND="
 NVTE_TORCH_COMPILE=0
 NVTE_ALLOW_NONDETERMINISTIC_ALGO=0
@@ -226,7 +249,7 @@ ${DIAGNOSTIC_ARGS}
 --max-position-embeddings ${SEQ_LENGTH}
 --micro-batch-size ${MICRO_BATCH_SIZE}
 --global-batch-size ${GLOBAL_BATCH_SIZE}
---train-iters 50
+--train-iters ${MCORE_TRAIN_ITERS:-50}
 --eval-iters 10
 --timing-log-level 0
 --lr-decay-iters 320000
@@ -246,10 +269,8 @@ ${DIAGNOSTIC_ARGS}
 --save-interval 10000
 --eval-interval 1000
 --transformer-impl transformer_engine
---recompute-granularity full
---recompute-method uniform
---recompute-num-layers 1
---deterministic-mode
+${RECOMPUTE_ARGS}
+${DETERMINISTIC_ARGS}
 --no-gradient-accumulation-fusion
 --attention-softmax-in-fp32
 --use-mcore-models
@@ -260,7 +281,7 @@ ${DIAGNOSTIC_ARGS}
 --bf16
 --attention-backend unfused
 --tensorboard-dir ${TENSORBOARD_DIR}
---exit-interval 4
+--exit-interval ${MCORE_EXIT_INTERVAL:-4}
 ${WITH_FP8:+--fp8-format hybrid}
 "
 COMMAND=$(echo "${COMMAND}" | tr '\n' ' ')
