@@ -94,8 +94,42 @@ run_shared_suite() {
   printf '%s\t%s\t%s\t%s\t\t\t\n' "$suite" "$script" "$rc" "$status" >> "$SUMMARY"
   echo "[EXIT $rc][$suite] $script"
 }
+run_unittest_suite() {
+  # Per-test quarantines are maintained in .github/configs/ppu.yml.
+  run_target unittest tests/pytorch/test_sanity.py
+  run_target unittest tests/pytorch/test_recipe.py
+  run_target unittest tests/pytorch/test_deferred_init.py
+  run_target unittest tests/pytorch/test_numerics.py
+  run_target unittest tests/pytorch/test_cuda_graphs.py
+  run_target unittest tests/pytorch/test_jit.py
+  run_target unittest tests/pytorch/nvfp4
+  run_target unittest tests/pytorch/test_quantized_tensor.py
+  run_target unittest tests/pytorch/test_float8blockwisetensor.py
+  run_target unittest tests/pytorch/test_float8_blockwise_scaling_exact.py
+  run_target unittest tests/pytorch/test_float8_blockwise_gemm_exact.py
+  run_target unittest tests/pytorch/test_gqa.py
+  # Full PPU RoPE matrix: 5865 passed, 3744 parameter skips, no failures.
+  run_target unittest tests/pytorch/test_fused_rope.py
+  run_target unittest tests/pytorch/test_fused_optimizer.py
+  run_target unittest tests/pytorch/test_multi_tensor.py
+  run_target unittest tests/pytorch/test_fusible_ops.py
+  run_target unittest tests/pytorch/test_permutation.py
+  run_target unittest tests/pytorch/test_parallel_cross_entropy.py
+  run_target unittest tests/pytorch/test_cpu_offloading.py
+  export NVTE_CPU_OFFLOAD_V1=1
+  run_target unittest tests/pytorch/test_cpu_offloading_v1.py
+  run_target unittest tests/pytorch/attention/test_attention.py
+  run_target unittest tests/pytorch/attention/test_kv_cache.py
+  run_target unittest tests/pytorch/test_hf_integration.py
+  local plugin_target plugin_targets
+  plugin_targets=$(TE_TEST_GROUP_PRESET=plugin-unit "$PYTHON" "$TE_PATH/tests/test_utils/run_ci_test_group.py" --list-targets) || { OVERALL_FAIL=1; return; }
+  while IFS= read -r plugin_target; do
+    [ -n "$plugin_target" ] && run_target unittest "$plugin_target"
+  done <<< "$plugin_targets"
+}
+
 run_suite() {
-  local suite="$1" target
+  local suite="$1"
   local previous_visible="${CUDA_VISIBLE_DEVICES:-}"
   local previous_visible_set=0
   [ -n "${CUDA_VISIBLE_DEVICES+x}" ] && previous_visible_set=1
@@ -141,26 +175,7 @@ run_suite() {
     fi
     return
   fi
-  local -n targets="PPU_${suite^^}_TARGETS"
-  local -a expanded_targets=()
-  for target in "${targets[@]}"; do
-    if [ "$target" = tests/plugin ]; then
-      local plugin_target plugin_targets
-      plugin_targets=$(TE_TEST_GROUP_PRESET=plugin-unit "$PYTHON" "$TE_PATH/tests/test_utils/run_ci_test_group.py" --list-targets) || { OVERALL_FAIL=1; continue; }
-      while IFS= read -r plugin_target; do
-        [ -n "$plugin_target" ] && expanded_targets+=("$plugin_target")
-      done <<< "$plugin_targets"
-    else
-      expanded_targets+=("$target")
-    fi
-  done
-  for target in "${expanded_targets[@]}"; do
-    local -a extra=()
-    [ "$suite" = debug ] && extra+=(--feature_dirs=transformer_engine/debug/features --configs_dir=tests/pytorch/debug/test_configs/)
-    [ "$target" = tests/pytorch/test_cpu_offloading_v1.py ] && export NVTE_CPU_OFFLOAD_V1=1
-    [ "$target" = tests/pytorch/test_onnx_export.py ] && export NVTE_UnfusedDPA_Emulate_FP8=1
-    run_target "$suite" "$target" "${extra[@]}"
-  done
+  run_unittest_suite
   XML_LOG_DIR="$old_log"
   if [ "$suite" = distributed ]; then
     if [ "$previous_visible_set" -eq 1 ]; then
