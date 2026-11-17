@@ -108,7 +108,17 @@ run_unittest_suite() {
   run_target unittest tests/pytorch/test_float8_blockwise_scaling_exact.py
   run_target unittest tests/pytorch/test_float8_blockwise_gemm_exact.py
   run_target unittest tests/pytorch/test_gqa.py
-  # Full PPU RoPE matrix: 5865 passed, 3744 parameter skips, no failures.
+  # Enable the full upstream PyTorch RoPE file, including standard RoPE,
+  # THD, fused QKV and autocast checks, in addition to the plugin smoke tests.
+  # Validated on PPU with transformer-engine-fl:v2.17.0-thead-ci after
+  # `compiler triton`; the fused operators selected the default.flagos backend.
+  # Unfiltered run: 9609 collected, 5865 passed, 3744 skipped, 0 failures
+  # in 7244.54 seconds (2:00:44). The skips are test-internal parameter guards:
+  # - margin=0 with start_positions=True (no valid random offset range);
+  # - QKV cp_size>1 with start_positions=True (unsupported combination);
+  # - QKV seq_length<margin (would produce a negative input length).
+  # These guards apply across platforms; they are not PPU CI ignores.
+  # No RoPE failure quarantine is needed in .github/configs/ppu.yml for this run.
   run_target unittest tests/pytorch/test_fused_rope.py
   run_target unittest tests/pytorch/test_fused_optimizer.py
   run_target unittest tests/pytorch/test_multi_tensor.py
